@@ -85,17 +85,102 @@ def _title(body: str) -> str:
     return html_module.unescape(re.sub(r"\s+", " ", match.group(1))).strip()
 
 
-def _challenge(body: str, status: int | None) -> str:
-    lowered = body.lower()
+# Confirmed on tests/fixtures/cf_interstitial_200body_403.html (counts as of 2026-09-06).
+# Title "just a moment" is enough on its own. The other four needles need two
+# distinct body hits (title counts). noindex,nofollow is supporting only: it
+# also appears on ordinary pages.
+_BODY_RULES = (
+    ("body_cf_challenges_host", "challenges.cloudflare.com"),
+    ("body_cf_chl_opt", "cf_chl_opt"),
+    ("body_cf_chl", "__cf_chl"),
+    ("body_cf_challenge_platform", "/cdn-cgi/challenge-platform"),
+    ("body_just_a_moment", "just a moment"),
+)
+_SUPPORTING_BODY_RULES = (
+    ("body_noindex_nofollow", "noindex,nofollow"),
+)
+# No live captcha body has been measured. The attribute rule is kept, but the
+# captcha verdict requires an independent challenge signal; the word alone
+# is not enough.
+_CAPTCHA_ATTR = re.compile(
+    r'(?:src|class|id|name)\s*=\s*["\'][^"\']*captcha',
+    re.I,
+)
+
+
+def _header_value(raw: Any) -> str:
+    if isinstance(raw, (list, tuple)):
+        raw = raw[0] if raw else ""
+    return str(raw)
+
+
+def _normalize_headers(raw: Any) -> dict[str, str] | None:
+    if raw is None:
+        return None
+    items = raw.items() if hasattr(raw, "items") else dict(raw).items()
+    folded: dict[str, str] = {}
+    for key, value in items:
+        folded[str(key).lower()] = _header_value(value)
+    return folded
+
+
+def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
+    """Return (challenge type, names of rules that fired). Pure: no I/O."""
+    text = body if isinstance(body, str) else body.decode("utf-8", "replace")
+    lowered = text.lower()
+
+    header_names: list[str] = []
+    header_verdict: str | None = None
+    if headers is not None:
+        folded = {str(key).lower(): value for key, value in headers.items()}
+        if "cf-mitigated" in folded:
+            value = _header_value(folded["cf-mitigated"]).lower()
+            header_names.append("header_cf_mitigated")
+            if "interactive" in value:
+                header_verdict = "interactive"
+            else:
+                header_verdict = "suspected"
+
+    body_names: list[str] = []
+    for name, needle in _BODY_RULES:
+        haystack = _title(text).lower() if name == "body_just_a_moment" else lowered
+        if needle in haystack:
+            body_names.append(name)
+    if body_names:
+        for name, needle in _SUPPORTING_BODY_RULES:
+            if needle in lowered:
+                body_names.append(name)
+
+    decisive_body = [name for name, _ in _BODY_RULES if name in body_names]
+    body_enough = "body_just_a_moment" in body_names or len(decisive_body) >= 2
+
+    # Unverified widget. CF body markers still win the verdict: the live
+    # interstitial is suspected, not captcha, even if the word appears.
+    captcha_names: list[str] = []
+    if _CAPTCHA_ATTR.search(text):
+        captcha_names.append("body_captcha")
+    captcha_confirmed = bool(
+        header_names or decisive_body or status in (403, 429)
+    )
+
+    status_names: list[str] = []
+    status_verdict: str | None = None
     if status == 429:
-        return "rate_limited"
-    if "captcha" in lowered:
-        return "captcha"
-    if "cf-chl-" in lowered or "just a moment" in lowered:
-        return "suspected"
-    if status == 403 or "access denied" in lowered:
-        return "access_denied"
-    return "none"
+        status_names.append("status_429")
+        status_verdict = "rate_limited"
+    elif status == 403:
+        status_names.append("status_403")
+        status_verdict = "access_denied"
+
+    if header_verdict is not None:
+        return header_verdict, tuple(header_names + body_names + captcha_names)
+    if body_enough:
+        return "suspected", tuple(body_names + captcha_names)
+    if captcha_names and captcha_confirmed:
+        return "captcha", tuple(body_names + captcha_names)
+    if status_verdict is not None:
+        return status_verdict, tuple(body_names + captcha_names + status_names)
+    return "none", tuple(body_names + captcha_names)
 
 
 def _metrics() -> tuple[int, float]:
@@ -139,7 +224,7 @@ class CurlAdapter:
             [
                 "curl", "-L", "--cookie", "", "--silent", "--show-error", "--compressed",
                 "--output", "-", "--write-out",
-                marker + "%{http_code}\t%{url_effective}\t%{num_redirects}", url,
+                marker + "%{http_code}\t%{url_effective}\t%{num_redirects}\t%{header_json}", url,
             ],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
         )
@@ -147,8 +232,9 @@ class CurlAdapter:
         if completed.returncode or not separator:
             detail = completed.stderr.decode("utf-8", "replace").strip()
             raise RuntimeError(detail or f"curl exited {completed.returncode}")
-        status, final_url, redirects = raw_meta.decode("utf-8", "replace").split("\t")
-        return _result(int(status), final_url, raw_body, int(redirects))
+        status, final_url, redirects, header_json = raw_meta.decode("utf-8", "replace").split("\t", 3)
+        header_map = _normalize_headers(json.loads(header_json))
+        return _result(int(status), final_url, raw_body, int(redirects), headers=header_map)
 
     def close(self) -> None:
         pass
@@ -165,7 +251,8 @@ class CurlCffiAdapter:
 
         response = requests.get(url, impersonate="chrome", allow_redirects=True, timeout=120)
         return _result(
-            response.status_code, str(response.url), response.content, len(response.history)
+            response.status_code, str(response.url), response.content, len(response.history),
+            headers=_normalize_headers(response.headers),
         )
 
     def close(self) -> None:
@@ -189,7 +276,10 @@ class PrimpAdapter:
         body = response.content
         final_url = str(getattr(response, "url", url))
         history = getattr(response, "history", ())
-        return _result(response.status_code, final_url, body, len(history))
+        return _result(
+            response.status_code, final_url, body, len(history),
+            headers=_normalize_headers(getattr(response, "headers", None)),
+        )
 
     def close(self) -> None:
         pass
@@ -215,7 +305,8 @@ class PlaywrightAdapter:
         response = self.page.goto(url, wait_until="load", timeout=120_000)
         body = _playwright_body(self.page, getattr(self, "sentinel", ""))
         status = response.status if response is not None else None
-        return _result(status, self.page.url, body.encode(), 0, self.page.title())
+        headers = None if response is None else _normalize_headers(response.headers)
+        return _result(status, self.page.url, body.encode(), 0, self.page.title(), headers=headers)
 
     def close(self) -> None:
         if hasattr(self, "browser"):
@@ -243,7 +334,8 @@ class CamoufoxAdapter:
         response = self.page.goto(url, wait_until="load", timeout=120_000)
         body = _playwright_body(self.page, getattr(self, "sentinel", ""))
         status = response.status if response is not None else None
-        return _result(status, self.page.url, body.encode(), 0, self.page.title())
+        headers = None if response is None else _normalize_headers(response.headers)
+        return _result(status, self.page.url, body.encode(), 0, self.page.title(), headers=headers)
 
     def close(self) -> None:
         if hasattr(self, "manager"):
@@ -303,7 +395,9 @@ class PydollAdapter:
         envelope = self.loop.run_until_complete(snapshot())
         value = _cdp_value(envelope)
         body = value["html"].encode()
-        return _result(None, value["url"], body, 0, value["title"])
+        # pydoll navigates via CDP go_to(); there is no response object, so
+        # headers are unavailable. None is distinct from {} ("no headers arrived").
+        return _result(None, value["url"], body, 0, value["title"], headers=None)
 
     def close(self) -> None:
         if hasattr(self, "browser"):
@@ -318,6 +412,7 @@ def _result(
     body: bytes,
     redirects: int,
     title: str | None = None,
+    headers: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     text = body.decode("utf-8", "replace")
     return {
@@ -327,6 +422,7 @@ def _result(
         "bytes": len(body),
         "title": _title(text) if title is None else title,
         "redirects": redirects,
+        "headers": headers,
     }
 
 
@@ -398,7 +494,8 @@ def run_probe(
         body = response.get("body", "")
         found = sentinel in body
         status = response.get("status")
-        challenge = _challenge(body, status)
+        headers = response.get("headers")
+        challenge, markers = detect_challenge(status, headers, body)
         cpu_ms, peak_rss_mb = metrics()
         if rss_monitor is not None:
             peak_rss_mb = max(peak_rss_mb, rss_monitor.stop())
@@ -418,6 +515,8 @@ def run_probe(
             "err": "",
             "provider_version": getattr(adapter, "version", "unknown"),
             "redirects": response.get("redirects", 0),
+            "headers": headers,
+            "challenge_markers": list(markers),
         }
     except Exception as exc:
         finished = clock()
@@ -436,6 +535,8 @@ def run_probe(
             "err": f"{type(exc).__name__}: {exc}",
             "provider_version": getattr(adapter, "version", "unknown"),
             "redirects": 0,
+            "headers": None,
+            "challenge_markers": [],
         }
     finally:
         if rss_monitor is not None:
