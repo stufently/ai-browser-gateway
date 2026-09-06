@@ -1,0 +1,65 @@
+# Боевые цели фазы 1. Согласованы владельцем 06.09.2026.
+#
+# ПРАВИЛО НАГРУЗКИ: один запрос на пару (провайдер × цель) за прогон, между
+# запросами к одному хосту пауза не меньше 30 с. Параллельного долбления нет.
+# Цель проекта — доставать нужные страницы, а не создавать нагрузку.
+#
+# `expect` — подстрока, которая обязана быть в извлечённом контенте. HTTP 200
+# успехом не считается: страница-заглушка Cloudflare тоже приходит с 200.
+
+[[target]]
+id = "control-hqd"
+url = "https://hqdphuket.com/"
+class = "none"
+owner = "self"
+note = "Свой OpenCart за обычным nginx. Контроль: тут обязаны пройти ВСЕ провайдеры. Провайдер, который не берёт эту цель, сломан, а не 'заблокирован'."
+expect = "HQD"
+
+[[target]]
+id = "control-static"
+url = "https://example.com/"
+class = "none"
+owner = "third-party"
+note = "Минимальная статика. Нижняя граница накладных расходов провайдера."
+expect = "Example Domain"
+
+[[target]]
+id = "cf-lowendtalk"
+url = "https://lowendtalk.com/categories/offers"
+class = "cloudflare"
+owner = "third-party"
+note = "Старый бой владельца. Замерено 06.09.2026: голый curl → 403. Категория, а не тред: по web-monitoring.md треды закрыты жёстче."
+expect = "Offers"
+
+[[target]]
+id = "cf-bizprofile"
+url = "https://bizprofile.net/"
+class = "cloudflare"
+owner = "third-party"
+note = "Снят с мониторинга check-sites из-за CF-челленджа и 403; возврат намечен на 12.09.2026. Замерено 06.09.2026: голый curl → 403. Результат применим в тот же день."
+expect = "bizprofile"
+
+[[target]]
+id = "cf-spa-chatgpt-share"
+url = "https://chatgpt.com/share/6a9d9e26-4e08-83ed-b615-b57feb9d7043"
+class = "cloudflare+spa"
+owner = "third-party"
+note = "Публичная share-страница, которую владелец сам и прислал. Двойная сложность: CF плюс контент, которого в первичном HTML нет — он в turbo-stream payload. Отличает 'провайдер прошёл CF' от 'провайдер достал контент'."
+expect = "AI Browser Gateway"
+
+[[target]]
+id = "login-instagram"
+url = "https://www.instagram.com/p/DA1XeTLtxvR/"
+class = "login-wall"
+owner = "third-party"
+note = "Три задачи из бэклога владельца упираются в то, что рилсы без логина не читаются. ОЖИДАНИЕ: не возьмёт никто. Ценность строки — доказать, что это стена авторизации, а не отпечаток, и что эскалация по браузерам тут деньги на ветер."
+expect = "og:video"
+
+# --- Ждёт владельца (см. TASKS.md) ---
+# [[target]]
+# id = "own-cf-stand"
+# class = "cloudflare-managed-challenge"
+# Свой поддомен за Cloudflare с Managed Challenge и Turnstile на официальных
+# тестовых ключах. Даёт воспроизводимость, которой у чужих целей нет: CF решает
+# вердикт ПО НАВИГАЦИИ, а не по адресу (измерено в gpt-web-gateway 26.07.2026).
+# Блокирует: CF API-токен и поддомен в octodns.
