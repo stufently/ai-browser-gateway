@@ -139,6 +139,56 @@ class CoverageTests(unittest.TestCase):
         keep_low, _ = keep_decision(row, 0.01)
         self.assertTrue(keep_low)
 
+    def test_incremental_accepts_one_shot_iterable(self) -> None:
+        rows = incremental(iter(_fixture()), ["curl", "httpx", "playwright", "camoufox"])
+        self.assertEqual(rows[0].total_cells, 5)
+        self.assertEqual(sum(row.unique for row in rows), 2)
+
+    def test_all_failed_provider_absent_from_order_is_value_error(self) -> None:
+        records = [
+            _rec("curl", "scenario:static"),
+            _rec("ghost", "scenario:static", success=False),
+        ]
+        with self.assertRaises(ValueError) as ctx:
+            incremental(records, ["curl"])
+        self.assertIn("ghost", str(ctx.exception))
+
+    def test_total_cells_includes_unsolved(self) -> None:
+        records = [
+            _rec("curl", "scenario:static"),
+            _rec("curl", "scenario:js", success=False),
+        ]
+        rows = incremental(records, ["curl"])
+        self.assertEqual(rows[0].total_cells, 2)
+        self.assertEqual(rows[0].solved, 1)
+
+    def test_incremental_empty_records(self) -> None:
+        rows = incremental([], ["curl"])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].provider, "curl")
+        self.assertEqual(rows[0].total_cells, 0)
+        self.assertEqual(rows[0].solved, 0)
+        self.assertEqual(rows[0].incremental, 0)
+        self.assertEqual(rows[0].unique, 0)
+
+    def test_provider_without_successes_is_zero_not_missing(self) -> None:
+        rows = incremental(
+            [
+                _rec("curl", "scenario:static"),
+                _rec("httpx", "scenario:js", success=False),
+            ],
+            ["curl", "httpx"],
+        )
+        self.assertEqual(rows[1].solved, 0)
+        self.assertEqual(rows[1].unique, 0)
+        self.assertEqual(rows[1].total_cells, 2)
+
+    def test_keep_decision_zero_total_cells(self) -> None:
+        row = CoverageRow("x", solved=0, incremental=0, unique=0, total_cells=0)
+        keep, reason = keep_decision(row)
+        self.assertFalse(keep)
+        self.assertIn("unique = 0", reason)
+
 
 if __name__ == "__main__":
     unittest.main()

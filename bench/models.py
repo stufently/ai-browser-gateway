@@ -53,21 +53,23 @@ class FetchResult:
 
 
 def evaluate(result: FetchResult, sentinel: str) -> tuple[bool, FailureReason]:
-    """Success is a found sentinel. HTTP 200 is not success."""
+    """Success is a found sentinel on a response that is not a failure."""
     if sentinel == "":
         raise ValueError(
             "empty sentinel: a check without expectation is a call defect, not success"
         )
     if result.error_type is not FailureReason.none:
         return (False, result.error_type)
-    if sentinel in result.html or sentinel in result.text:
-        return (True, FailureReason.none)
-    if result.status == 200:
-        return (False, FailureReason.content_missing)
     if result.status == 403:
         return (False, FailureReason.http_403)
     if result.status == 429:
         return (False, FailureReason.http_429)
     if result.status is not None and 500 <= result.status <= 599:
         return (False, FailureReason.http_5xx)
+    if result.status is not None and 400 <= result.status <= 499:
+        return (False, FailureReason.content_mismatch)
+    if sentinel in result.html or sentinel in result.text:
+        return (True, FailureReason.none)
+    if result.status == 200:
+        return (False, FailureReason.content_missing)
     return (False, FailureReason.content_mismatch)

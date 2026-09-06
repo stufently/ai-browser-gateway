@@ -23,8 +23,9 @@ def solved_cells(records) -> dict[str, set[str]]:
 
 
 def incremental(records, order: list[str]) -> list[CoverageRow]:
+    records = list(records)
     by_provider = solved_cells(records)
-    unknown = set(by_provider) - set(order)
+    unknown = {record.provider for record in records} - set(order)
     if unknown:
         raise ValueError("providers missing from order: " + ", ".join(sorted(unknown)))
     all_cells: set[str] = set()

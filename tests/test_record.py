@@ -72,6 +72,71 @@ class RecordTests(unittest.TestCase):
             validate(record)
         self.assertIn("success=True", str(ctx.exception))
 
+    def test_two_jsonl_lines_are_two_records(self) -> None:
+        blob = to_jsonl_line(_record(run_id="a")) + to_jsonl_line(_record(run_id="b"))
+        lines = [line for line in blob.splitlines() if line]
+        self.assertEqual(len(lines), 2)
+        self.assertEqual(from_jsonl_line(lines[0]).run_id, "a")
+        self.assertEqual(from_jsonl_line(lines[1]).run_id, "b")
+
+    def test_to_jsonl_rejects_unknown_mode(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            to_jsonl_line(_record(mode="hot"))
+        self.assertIn("mode", str(ctx.exception))
+
+    def test_to_jsonl_rejects_negative_elapsed_ms(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            to_jsonl_line(_record(elapsed_ms=-1))
+        self.assertIn("elapsed_ms", str(ctx.exception))
+
+    def test_to_jsonl_rejects_success_with_error(self) -> None:
+        with self.assertRaises(ValueError) as ctx:
+            to_jsonl_line(_record(success=True, error_type=FailureReason.timeout))
+        self.assertIn("success=True", str(ctx.exception))
+
+    def test_from_jsonl_rejects_unknown_mode(self) -> None:
+        payload = json.loads(to_jsonl_line(_record()))
+        payload["mode"] = "hot"
+        with self.assertRaises(ValueError) as ctx:
+            from_jsonl_line(json.dumps(payload))
+        self.assertIn("mode", str(ctx.exception))
+
+    def test_from_jsonl_rejects_negative_elapsed_ms(self) -> None:
+        payload = json.loads(to_jsonl_line(_record()))
+        payload["elapsed_ms"] = -1
+        with self.assertRaises(ValueError) as ctx:
+            from_jsonl_line(json.dumps(payload))
+        self.assertIn("elapsed_ms", str(ctx.exception))
+
+    def test_from_jsonl_rejects_success_with_error(self) -> None:
+        payload = json.loads(to_jsonl_line(_record()))
+        payload["error_type"] = FailureReason.timeout.value
+        with self.assertRaises(ValueError) as ctx:
+            from_jsonl_line(json.dumps(payload))
+        self.assertIn("success=True", str(ctx.exception))
+
+    def test_roundtrip_filled_target(self) -> None:
+        record = _record(
+            target="bizprofile.net",
+            scenario=None,
+            cell="target:bizprofile.net",
+        )
+        got = from_jsonl_line(to_jsonl_line(record))
+        self.assertEqual(got.target, "bizprofile.net")
+        self.assertEqual(got, record)
+
+    def test_roundtrip_failure_with_reason(self) -> None:
+        record = _record(
+            success=False,
+            sentinel_found=False,
+            status=403,
+            error_type=FailureReason.http_403,
+        )
+        got = from_jsonl_line(to_jsonl_line(record))
+        self.assertEqual(got.error_type, FailureReason.http_403)
+        self.assertFalse(got.success)
+        self.assertEqual(got, record)
+
 
 if __name__ == "__main__":
     unittest.main()

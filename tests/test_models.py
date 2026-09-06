@@ -87,6 +87,36 @@ class EvaluateTests(unittest.TestCase):
             evaluate(_result(html="x"), "")
         self.assertIn("empty sentinel", str(ctx.exception))
 
+    def test_status_403_with_sentinel_is_http_403(self) -> None:
+        result = _result(status=403, html="<p>SENT</p>", text="SENT")
+        ok, reason = evaluate(result, "SENT")
+        self.assertFalse(ok)
+        self.assertEqual(reason, FailureReason.http_403)
+
+    def test_status_429_with_sentinel_is_http_429(self) -> None:
+        result = _result(status=429, html="<p>SENT</p>", text="SENT")
+        ok, reason = evaluate(result, "SENT")
+        self.assertFalse(ok)
+        self.assertEqual(reason, FailureReason.http_429)
+
+    def test_other_4xx_with_sentinel_is_content_mismatch(self) -> None:
+        result = _result(status=404, html="<p>SENT</p>", text="SENT")
+        ok, reason = evaluate(result, "SENT")
+        self.assertFalse(ok)
+        self.assertEqual(reason, FailureReason.content_mismatch)
+
+    def test_status_500_is_http_5xx(self) -> None:
+        result = _result(status=500, html="<p>SENT</p>", text="SENT")
+        ok, reason = evaluate(result, "SENT")
+        self.assertEqual(reason, FailureReason.http_5xx)
+        self.assertFalse(ok)
+
+    def test_status_599_is_http_5xx(self) -> None:
+        result = _result(status=599, html="<p>SENT</p>", text="SENT")
+        ok, reason = evaluate(result, "SENT")
+        self.assertEqual(reason, FailureReason.http_5xx)
+        self.assertFalse(ok)
+
 
 if __name__ == "__main__":
     unittest.main()

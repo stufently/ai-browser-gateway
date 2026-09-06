@@ -109,6 +109,17 @@ class ServerAppTests(unittest.TestCase):
         self.assertEqual(gzip.decompress(body), identity)
         self.assertIn(by_id("compression").sentinel, gzip.decompress(body).decode("utf-8"))
 
+    def test_gzip_q0_is_not_compressed(self) -> None:
+        _, _, identity = call(self.app, "/compression")
+        code, headers, body = call(
+            self.app,
+            "/compression",
+            extra_headers={"Accept-Encoding": "gzip;q=0, identity"},
+        )
+        self.assertNotEqual(headers.get("Content-Encoding"), "gzip")
+        self.assertEqual(code, 200)
+        self.assertEqual(body, identity)
+
     def test_br_is_not_served_without_brotli(self) -> None:
         try:
             import brotli  # noqa: F401

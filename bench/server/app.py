@@ -29,8 +29,22 @@ def _brotli_mod():
 def _header_codings(raw: str) -> set[str]:
     out: set[str] = set()
     for part in raw.split(","):
-        coding = part.split(";", 1)[0].strip().lower()
-        if coding:
+        part = part.strip()
+        if not part:
+            continue
+        tokens = part.split(";")
+        coding = tokens[0].strip().lower()
+        if not coding:
+            continue
+        q = 1.0
+        for token in tokens[1:]:
+            key, _, value = token.partition("=")
+            if key.strip().lower() == "q":
+                try:
+                    q = float(value.strip())
+                except ValueError:
+                    q = 1.0
+        if q > 0:
             out.add(coding)
     return out
 

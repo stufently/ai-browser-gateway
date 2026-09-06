@@ -73,6 +73,101 @@ MUTANTS = [
         "test": "tests.test_render.RenderTests.test_unmeasured_row_is_literal_not_a_number",
         "assert": 'self.assertIn("не измерено", rendered)',
     },
+    {
+        "name": "7",
+        "file": "bench/report/coverage.py",
+        "old": "    total = len(all_cells)",
+        "new": "    total = len(holders)",
+        "test": "tests.test_coverage.CoverageTests.test_total_cells_includes_unsolved",
+        "assert": "self.assertEqual(rows[0].total_cells, 2)",
+    },
+    {
+        "name": "8",
+        "file": "bench/report/coverage.py",
+        "old": "        solved = by_provider.get(provider, set())",
+        "new": "        solved = by_provider[provider]",
+        "test": "tests.test_coverage.CoverageTests.test_provider_without_successes_is_zero_not_missing",
+        "assert": "rows = incremental(",
+    },
+    {
+        "name": "9",
+        "file": "bench/report/coverage.py",
+        "old": "    all_cells: set[str] = set()",
+        "new": "    all_cells: set[str] = {records[0].cell}",
+        "test": "tests.test_coverage.CoverageTests.test_incremental_empty_records",
+        "assert": 'rows = incremental([], ["curl"])',
+    },
+    {
+        "name": "10",
+        "file": "bench/report/coverage.py",
+        "old": "    ratio = (row.incremental / row.total_cells) if row.total_cells else 0.0",
+        "new": "    ratio = row.incremental / row.total_cells",
+        "test": "tests.test_coverage.CoverageTests.test_keep_decision_zero_total_cells",
+        "assert": "keep, reason = keep_decision(row)",
+    },
+    {
+        "name": "11",
+        "file": "bench/runner/record.py",
+        "old": '    return json.dumps(asdict(record), ensure_ascii=False) + "\\n"',
+        "new": "    return json.dumps(asdict(record), ensure_ascii=False)",
+        "test": "tests.test_record.RecordTests.test_two_jsonl_lines_are_two_records",
+        "assert": "self.assertEqual(len(lines), 2)",
+    },
+    {
+        "name": "12",
+        "file": "bench/runner/record.py",
+        "old": (
+            "def to_jsonl_line(record: RunRecord) -> str:\n"
+            "    validate(record)\n"
+            '    return json.dumps(asdict(record), ensure_ascii=False) + "\\n"'
+        ),
+        "new": (
+            "def to_jsonl_line(record: RunRecord) -> str:\n"
+            '    return json.dumps(asdict(record), ensure_ascii=False) + "\\n"'
+        ),
+        "test": "tests.test_record.RecordTests.test_to_jsonl_rejects_unknown_mode",
+        "assert": "with self.assertRaises(ValueError) as ctx:",
+    },
+    {
+        "name": "13",
+        "file": "bench/runner/record.py",
+        "old": "    validate(record)\n    return record",
+        "new": "    return record",
+        "test": "tests.test_record.RecordTests.test_from_jsonl_rejects_unknown_mode",
+        "assert": "with self.assertRaises(ValueError) as ctx:",
+    },
+    {
+        "name": "14",
+        "file": "bench/runner/record.py",
+        "old": '        target=raw["target"],',
+        "new": "        target=None,",
+        "test": "tests.test_record.RecordTests.test_roundtrip_filled_target",
+        "assert": 'self.assertEqual(got.target, "bizprofile.net")',
+    },
+    {
+        "name": "15",
+        "file": "bench/runner/record.py",
+        "old": '        error_type=FailureReason(raw["error_type"]),',
+        "new": "        error_type=FailureReason.none,",
+        "test": "tests.test_record.RecordTests.test_roundtrip_failure_with_reason",
+        "assert": "self.assertEqual(got.error_type, FailureReason.http_403)",
+    },
+    {
+        "name": "16",
+        "file": "bench/models.py",
+        "old": "    if result.status is not None and 500 <= result.status <= 599:",
+        "new": "    if result.status is not None and 500 < result.status <= 599:",
+        "test": "tests.test_models.EvaluateTests.test_status_500_is_http_5xx",
+        "assert": "self.assertEqual(reason, FailureReason.http_5xx)",
+    },
+    {
+        "name": "17",
+        "file": "bench/models.py",
+        "old": "    if result.status is not None and 500 <= result.status <= 599:",
+        "new": "    if result.status is not None and 500 <= result.status < 599:",
+        "test": "tests.test_models.EvaluateTests.test_status_599_is_http_5xx",
+        "assert": "self.assertEqual(reason, FailureReason.http_5xx)",
+    },
 ]
 
 

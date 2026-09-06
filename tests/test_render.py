@@ -31,6 +31,15 @@ class RenderTests(unittest.TestCase):
                 self.assertIn("не измерено", line)
                 self.assertNotRegex(line, r"\d")
 
+    def test_render_markdown_forwards_threshold(self) -> None:
+        row = CoverageRow("x", solved=1, incremental=1, unique=0, total_cells=100)
+        kept = render_markdown([row], threshold=0.01)
+        self.assertIn("оставить", kept)
+        dropped = render_markdown([row], threshold=0.05)
+        self.assertIn("исключить", dropped)
+        defaulted = render_markdown([row])
+        self.assertIn("исключить", defaulted)
+
 
 if __name__ == "__main__":
     unittest.main()
