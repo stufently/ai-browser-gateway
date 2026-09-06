@@ -265,6 +265,62 @@ MUTANTS = [
      'test': 'tests.test_probe.AdapterContractTests.'
              'test_pydoll_uses_required_start_options_and_unwraps_nested_cdp_value',
      'assert': 'self.assertEqual(options.arguments,'},
+    {'name': '33',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '    if header_verdict is not None:\n'
+            '        return header_verdict, tuple(header_names + body_names + captcha_names)\n',
+     'new': '    if False:\n'
+            '        return header_verdict, tuple(header_names + body_names + captcha_names)\n',
+     'test': 'tests.test_detect.DetectChallengeTests.test_cf_mitigated_header_outranks_clean_body',
+     'assert': 'self.assertEqual(verdict, "suspected")'},
+    {'name': '34',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '        status_verdict = "access_denied"',
+     'new': '        status_verdict = "suspected"',
+     'test': 'tests.test_detect.DetectChallengeTests.test_bare_403_is_access_denied_not_suspected',
+     'assert': 'self.assertEqual(verdict, "access_denied")'},
+    {'name': '35',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '        return "suspected", tuple(body_names + captcha_names)',
+     'new': '        return "suspected", ()',
+     'test': 'tests.test_detect.DetectChallengeTests.test_interstitial_fixture_is_suspected_with_named_rules',
+     'assert': 'self.assertGreaterEqual(len(markers), 3)'},
+    {'name': '36',
+     'file': 'bench/escalate.py',
+     'old': '    elif reason is FailureReason.content_missing:\n'
+            '        if kind is ChallengeType.none:\n'
+            '            step = Step.browser\n'
+            '        else:\n'
+            '            step = Step.change_egress\n',
+     'new': '    elif reason is FailureReason.content_missing:\n'
+            '        step = Step.browser\n',
+     'test': 'tests.test_escalate.NextStepTests.test_content_missing_with_challenge_changes_egress',
+     'assert': 'self.assertIs('},
+    {'name': '37',
+     'file': 'bench/escalate.py',
+     'old': '    if egress_changed and step is Step.change_egress:\n'
+            '        return Step.human\n',
+     'new': '',
+     'test': 'tests.test_escalate.NextStepTests.test_changed_egress_becomes_human',
+     'assert': 'self.assertIs('},
+    {'name': '38',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '        header_map = _normalize_headers(json.loads(header_json))',
+     'new': '        header_map = {}',
+     'test': 'tests.test_probe.AdapterContractTests.test_curl_parses_header_json_as_last_write_out_field',
+     'assert': 'self.assertEqual(result["headers"]["cf-mitigated"], "challenge")'},
+    {'name': '39',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '    if header_verdict is not None:\n'
+            '        return header_verdict, tuple(header_names + body_names + captcha_names)\n'
+            '    if body_names:\n'
+            '        return "suspected", tuple(body_names + captcha_names)\n',
+     'new': '    if body_names:\n'
+            '        return "suspected", tuple(body_names + captcha_names)\n'
+            '    if header_verdict is not None:\n'
+            '        return header_verdict, tuple(header_names + body_names + captcha_names)\n',
+     'test': 'tests.test_detect.DetectChallengeTests.test_interactive_header_outranks_body_markers',
+     'assert': 'self.assertEqual(verdict, "interactive")'},
 ]
 
 

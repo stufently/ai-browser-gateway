@@ -273,7 +273,7 @@ class AdapterContractTests(unittest.TestCase):
     def test_curl_enables_cookie_engine_for_session_redirects(self):
         captured = []
         completed = subprocess.CompletedProcess(
-            [], 0, stdout=b"marker\nABG_CURL_META:200\thttps://final.invalid/\t1",
+            [], 0, stdout=b"marker\nABG_CURL_META:200\thttps://final.invalid/\t1\t{}",
             stderr=b"",
         )
         with patch.object(self.probe.subprocess, "run", return_value=completed) as run:
@@ -382,6 +382,123 @@ class AdapterContractTests(unittest.TestCase):
         self.assertEqual(result["title"], "CDP")
         self.assertIn("marker", result["body"])
         self.assertIs(calls[2][2], True)
+        # pydoll navigates through CDP go_to() and has no response object.
+        self.assertIsNone(result["headers"])
+
+    def test_empty_headers_and_missing_headers_are_distinct(self):
+        events = []
+
+        class EmptyHeaders(FakeAdapter):
+            def navigate(self, url):
+                payload = super().navigate(url)
+                payload["headers"] = {}
+                return payload
+
+        class MissingHeaders(FakeAdapter):
+            def navigate(self, url):
+                payload = super().navigate(url)
+                payload["headers"] = None
+                return payload
+
+        empty = self.probe.run_probe(
+            "curl", "https://target.invalid/", "expected marker",
+            mode="cold", adapter_factory=lambda _: EmptyHeaders(events),
+            clock=Clock(), metrics=lambda: (0, 0),
+        )
+        missing = self.probe.run_probe(
+            "curl", "https://target.invalid/", "expected marker",
+            mode="cold", adapter_factory=lambda _: MissingHeaders(events),
+            clock=Clock(), metrics=lambda: (0, 0),
+        )
+        self.assertEqual(empty["headers"], {})
+        self.assertIsNone(missing["headers"])
+        self.assertNotEqual(json.dumps(empty["headers"]), json.dumps(missing["headers"]))
+        self.assertIn("challenge_markers", empty)
+        self.assertIn("challenge_markers", missing)
+
+    def test_curl_parses_header_json_as_last_write_out_field(self):
+        header_json = '{\n  "cf-mitigated":\t"challenge"\n}'
+        completed = subprocess.CompletedProcess(
+            [], 0,
+            stdout=(
+                b"marker body"
+                + b"\nABG_CURL_META:200\thttps://final.invalid/\t1\t"
+                + header_json.encode()
+            ),
+            stderr=b"",
+        )
+        with patch.object(self.probe.subprocess, "run", return_value=completed) as run:
+            result = self.probe.CurlAdapter().navigate("https://target.invalid/")
+            write_out = run.call_args.args[0][run.call_args.args[0].index("--write-out") + 1]
+        self.assertEqual(result["headers"]["cf-mitigated"], "challenge")
+        self.assertEqual(result["body"], "marker body")
+        self.assertTrue(write_out.endswith("%{header_json}"))
+        self.assertEqual(write_out.count("%{header_json}"), 1)
+
+    def test_curl_cffi_and_primp_pass_response_headers(self):
+        class Response:
+            status_code = 200
+            url = "https://final.invalid/"
+            content = b"marker"
+            history = ()
+            headers = {"Cf-Mitigated": "challenge"}
+
+        curl_cffi = types.ModuleType("curl_cffi")
+        requests_mod = types.ModuleType("curl_cffi.requests")
+        requests_mod.get = lambda *args, **kwargs: Response()
+        curl_cffi.requests = requests_mod
+        with patch.dict(sys.modules, {
+            "curl_cffi": curl_cffi,
+            "curl_cffi.requests": requests_mod,
+        }):
+            cffi_result = self.probe.CurlCffiAdapter().navigate("https://target.invalid/")
+        self.assertEqual(cffi_result["headers"]["cf-mitigated"], "challenge")
+
+        class Client:
+            def get(self, url):
+                return Response()
+
+        primp = self.probe.PrimpAdapter()
+        primp.client = Client()
+        primp_result = primp.navigate("https://target.invalid/")
+        self.assertEqual(primp_result["headers"]["cf-mitigated"], "challenge")
+
+    def test_playwright_family_uses_goto_headers_or_none(self):
+        class Frame:
+            def content(self):
+                return "<html>marker</html>"
+
+        class Page:
+            url = "https://final.invalid/"
+            frames = [Frame()]
+
+            def __init__(self, response):
+                self._response = response
+
+            def goto(self, url, wait_until="load", timeout=0):
+                return self._response
+
+            def title(self):
+                return "Observed"
+
+        class Response:
+            status = 200
+            headers = {"cf-mitigated": "challenge"}
+
+        for adapter_cls in (
+            self.probe.PlaywrightAdapter,
+            self.probe.PatchrightAdapter,
+            self.probe.CamoufoxAdapter,
+        ):
+            with self.subTest(adapter=adapter_cls.__name__):
+                adapter = adapter_cls()
+                adapter.page = Page(Response())
+                adapter.sentinel = "marker"
+                present = adapter.navigate("https://target.invalid/")
+                self.assertEqual(present["headers"]["cf-mitigated"], "challenge")
+                adapter.page = Page(None)
+                missing = adapter.navigate("https://target.invalid/")
+                self.assertIsNone(missing["headers"])
 
 
 class DockerDescriptorTests(unittest.TestCase):
