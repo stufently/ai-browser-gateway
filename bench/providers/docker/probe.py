@@ -267,6 +267,12 @@ class PydollAdapter:
         options.binary_location = "/usr/bin/chromium"
         options.headless = True
         options.start_timeout = 60
+        # Debian's chromium ships the setuid sandbox helper, which a container
+        # without CAP_SYS_ADMIN cannot use: without these flags the browser never
+        # starts and every cell fails with FailedToStartBrowser after start_timeout.
+        for flag in ("--no-sandbox", "--disable-dev-shm-usage",
+                     "--disable-gpu", "--disable-dbus"):
+            options.add_argument(flag)
         self.browser = Chrome(options=options)
         self.tab = self.loop.run_until_complete(self.browser.start())
 
