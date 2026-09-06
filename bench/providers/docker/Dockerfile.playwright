@@ -1,0 +1,12 @@
+FROM python:3.14-slim-bookworm
+
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright HOME=/opt/home
+RUN mkdir -p /opt/home && chmod 0777 /opt/home
+RUN pip install --no-cache-dir "playwright==1.62.0" \
+ && playwright install --with-deps chromium \
+ && chmod -R a+rX /ms-playwright \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt/abg
+COPY probe.py /opt/abg/probe.py
+ENV ABG_PROVIDER=playwright
+ENTRYPOINT ["python3","/opt/abg/probe.py"]

@@ -1,0 +1,17 @@
+FROM python:3.14-slim-bookworm
+
+ENV HOME=/opt/home
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends libgtk-3-0 libx11-xcb1 libdbus-glib-1-2 libasound2 libxtst6 libxt6 xvfb xauth tini \
+ && mkdir -p /tmp/.X11-unix \
+ && chmod 1777 /tmp/.X11-unix \
+ && mkdir -p /opt/home \
+ && chmod 0777 /opt/home \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir "camoufox[geoip]==0.5.6" \
+ && python3 -m camoufox fetch \
+ && chmod -R a+rwX /opt/home
+WORKDIR /opt/abg
+COPY probe.py /opt/abg/probe.py
+ENV ABG_PROVIDER=camoufox
+ENTRYPOINT ["/usr/bin/tini","-g","--","xvfb-run","-a","--error-file=/dev/stderr","--server-args=-screen 0 1280x800x24 -ac -nolisten tcp","python3","/opt/abg/probe.py"]

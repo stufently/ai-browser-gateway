@@ -1,0 +1,14 @@
+FROM python:3.14-slim-bookworm
+
+ENV HOME=/opt/home
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends chromium ca-certificates \
+ && mkdir -p /opt/home \
+ && chmod 0777 /opt/home \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir "pydoll-python==2.26.0"
+WORKDIR /opt/abg
+COPY probe.py /opt/abg/probe.py
+ENV ABG_PROVIDER=pydoll
+ENTRYPOINT ["python3","/opt/abg/probe.py"]

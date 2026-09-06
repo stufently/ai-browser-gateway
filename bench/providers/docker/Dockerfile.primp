@@ -1,0 +1,7 @@
+FROM python:3.14-slim-bookworm
+
+RUN pip install --no-cache-dir "primp==2.0.0"
+WORKDIR /opt/abg
+COPY probe.py /opt/abg/probe.py
+ENV ABG_PROVIDER=primp
+ENTRYPOINT ["python3","/opt/abg/probe.py"]
