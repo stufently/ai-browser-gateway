@@ -115,6 +115,56 @@ class NextStepTests(unittest.TestCase):
             Step.browser,
         )
 
+    def test_challenge_suspected_changes_egress(self):
+        self.assertIs(
+            next_step(
+                FailureReason.challenge_suspected,
+                ChallengeType.suspected,
+                egress_changed=False,
+            ),
+            Step.change_egress,
+        )
+
+    def test_javascript_required_with_challenge_changes_egress(self):
+        self.assertIs(
+            next_step(
+                FailureReason.javascript_required,
+                ChallengeType.suspected,
+                egress_changed=False,
+            ),
+            Step.change_egress,
+        )
+
+    def test_changed_egress_http_403_becomes_human(self):
+        self.assertIs(
+            next_step(
+                FailureReason.http_403,
+                ChallengeType.none,
+                egress_changed=True,
+            ),
+            Step.human,
+        )
+
+    def test_changed_egress_http_429_with_challenge_becomes_human(self):
+        self.assertIs(
+            next_step(
+                FailureReason.http_429,
+                ChallengeType.suspected,
+                egress_changed=True,
+            ),
+            Step.human,
+        )
+
+    def test_changed_egress_timeout_stays_retry_later(self):
+        self.assertIs(
+            next_step(
+                FailureReason.timeout,
+                ChallengeType.none,
+                egress_changed=True,
+            ),
+            Step.retry_later,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

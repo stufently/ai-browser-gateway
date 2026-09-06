@@ -313,14 +313,130 @@ MUTANTS = [
      'file': 'bench/providers/docker/probe.py',
      'old': '    if header_verdict is not None:\n'
             '        return header_verdict, tuple(header_names + body_names + captcha_names)\n'
-            '    if body_names:\n'
+            '    if body_enough:\n'
             '        return "suspected", tuple(body_names + captcha_names)\n',
-     'new': '    if body_names:\n'
+     'new': '    if body_enough:\n'
             '        return "suspected", tuple(body_names + captcha_names)\n'
             '    if header_verdict is not None:\n'
             '        return header_verdict, tuple(header_names + body_names + captcha_names)\n',
      'test': 'tests.test_detect.DetectChallengeTests.test_interactive_header_outranks_body_markers',
      'assert': 'self.assertEqual(verdict, "interactive")'},
+    {
+        "name": "40",
+        "file": "bench/providers/docker/probe.py",
+        "old": '    ("body_cf_challenges_host", "challenges.cloudflare.com"),\n',
+        "new": "",
+        "test": "tests.test_detect.DetectChallengeTests.test_body_cf_challenges_host_is_named_with_title",
+        "assert": 'self.assertIn("body_cf_challenges_host", markers)',
+    },
+    {
+        "name": "41",
+        "file": "bench/providers/docker/probe.py",
+        "old": '    ("body_cf_chl_opt", "cf_chl_opt"),\n',
+        "new": "",
+        "test": "tests.test_detect.DetectChallengeTests.test_body_cf_chl_opt_is_named_with_title",
+        "assert": 'self.assertIn("body_cf_chl_opt", markers)',
+    },
+    {
+        "name": "42",
+        "file": "bench/providers/docker/probe.py",
+        "old": '    ("body_cf_chl", "__cf_chl"),\n',
+        "new": "",
+        "test": "tests.test_detect.DetectChallengeTests.test_body_cf_chl_is_named_with_title",
+        "assert": 'self.assertIn("body_cf_chl", markers)',
+    },
+    {
+        "name": "43",
+        "file": "bench/providers/docker/probe.py",
+        "old": '    ("body_cf_challenge_platform", "/cdn-cgi/challenge-platform"),\n',
+        "new": "",
+        "test": "tests.test_detect.DetectChallengeTests.test_body_cf_challenge_platform_is_named_with_title",
+        "assert": 'self.assertIn("body_cf_challenge_platform", markers)',
+    },
+    {
+        "name": "44",
+        "file": "bench/providers/docker/probe.py",
+        "old": '    body_enough = "body_just_a_moment" in body_names or len(decisive_body) >= 2',
+        "new": '    body_enough = "body_just_a_moment" in body_names or len(decisive_body) >= 1',
+        "test": "tests.test_detect.DetectChallengeTests.test_single_body_cf_challenges_host_is_not_suspected",
+        "assert": 'self.assertEqual(verdict, "none")',
+    },
+    {
+        "name": "45",
+        "file": "bench/providers/docker/probe.py",
+        "old": '        haystack = _title(text).lower() if name == "body_just_a_moment" else lowered\n',
+        "new": "        haystack = lowered\n",
+        "test": "tests.test_detect.DetectChallengeTests.test_just_a_moment_in_body_prose_is_not_a_challenge",
+        "assert": 'self.assertEqual(verdict, "none")',
+    },
+    {
+        "name": "46",
+        "file": "bench/providers/docker/probe.py",
+        "old": "    if captcha_names and captcha_confirmed:\n",
+        "new": "    if captcha_names:\n",
+        "test": "tests.test_detect.DetectChallengeTests.test_lone_captcha_attribute_is_none_but_named",
+        "assert": 'self.assertEqual(verdict, "none")',
+    },
+    {
+        "name": "47",
+        "file": "bench/escalate.py",
+        "old": "    elif reason is FailureReason.challenge_suspected:\n"
+             "        step = Step.change_egress\n",
+        "new": "    elif reason is FailureReason.challenge_suspected:\n"
+             "        step = Step.browser\n",
+        "test": "tests.test_escalate.NextStepTests.test_challenge_suspected_changes_egress",
+        "assert": "self.assertIs(",
+    },
+    {
+        "name": "48",
+        "file": "bench/escalate.py",
+        "old": "    if egress_changed and step is Step.change_egress:\n"
+             "        return Step.human\n",
+        "new": "    if egress_changed and step is Step.change_egress and reason is FailureReason.content_missing:\n"
+             "        return Step.human\n",
+        "test": "tests.test_escalate.NextStepTests.test_changed_egress_http_403_becomes_human",
+        "assert": "self.assertIs(",
+    },
+    {
+        "name": "49",
+        "file": "bench/providers/docker/probe.py",
+        "old": '    ("body_noindex_nofollow", "noindex,nofollow"),\n',
+        "new": '    ("body_noindex_nofollow", "noindex,nofollow-absent"),\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_supporting_noindex_is_named_on_interstitial",
+        "assert": 'self.assertIn("body_noindex_nofollow", markers)',
+    },
+    {
+        "name": "50",
+        "file": "bench/providers/docker/probe.py",
+        "old": '        return "captcha", tuple(body_names + captcha_names)',
+        "new": '        return "captcha", ()',
+        "test": "tests.test_detect.DetectChallengeTests.test_captcha_with_403_is_captcha_and_named",
+        "assert": 'self.assertIn("body_captcha", markers)',
+    },
+    {
+        "name": "51",
+        "file": "bench/escalate.py",
+        "old": "    elif reason is FailureReason.javascript_required:\n"
+             "        if kind is ChallengeType.none:\n"
+             "            step = Step.browser\n"
+             "        else:\n"
+             "            step = Step.change_egress\n",
+        "new": "    elif reason is FailureReason.javascript_required:\n"
+             "        if kind is ChallengeType.none:\n"
+             "            step = Step.browser\n"
+             "        else:\n"
+             "            step = Step.browser\n",
+        "test": "tests.test_escalate.NextStepTests.test_javascript_required_with_challenge_changes_egress",
+        "assert": "self.assertIs(",
+    },
+    {
+        "name": "52",
+        "file": "bench/providers/docker/probe.py",
+        "old": "        return status_verdict, tuple(body_names + captcha_names + status_names)",
+        "new": "        return status_verdict, tuple(status_names)",
+        "test": "tests.test_detect.DetectChallengeTests.test_single_body_marker_on_403_keeps_rule_name",
+        "assert": 'self.assertIn("body_cf_challenges_host", markers)',
+    },
 ]
 
 

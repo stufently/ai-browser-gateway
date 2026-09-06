@@ -86,8 +86,9 @@ def _title(body: str) -> str:
 
 
 # Confirmed on tests/fixtures/cf_interstitial_200body_403.html (counts as of 2026-09-06).
-# Each of these is enough for suspected. noindex,nofollow is listed as a
-# supporting hit only: it also appears on ordinary pages.
+# Title "just a moment" is enough on its own. The other four needles need two
+# distinct body hits (title counts). noindex,nofollow is supporting only: it
+# also appears on ordinary pages.
 _BODY_RULES = (
     ("body_cf_challenges_host", "challenges.cloudflare.com"),
     ("body_cf_chl_opt", "cf_chl_opt"),
@@ -98,8 +99,9 @@ _BODY_RULES = (
 _SUPPORTING_BODY_RULES = (
     ("body_noindex_nofollow", "noindex,nofollow"),
 )
-# Unverified on a live body: captcha/interactive widgets never appeared in the
-# 2026-09-06 measurements. A lone word in article prose is not enough.
+# No live captcha body has been measured. The attribute rule is kept, but the
+# captcha verdict requires an independent challenge signal; the word alone
+# is not enough.
 _CAPTCHA_ATTR = re.compile(
     r'(?:src|class|id|name)\s*=\s*["\'][^"\']*captcha',
     re.I,
@@ -141,18 +143,25 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
 
     body_names: list[str] = []
     for name, needle in _BODY_RULES:
-        if needle in lowered:
+        haystack = _title(text).lower() if name == "body_just_a_moment" else lowered
+        if needle in haystack:
             body_names.append(name)
     if body_names:
         for name, needle in _SUPPORTING_BODY_RULES:
             if needle in lowered:
                 body_names.append(name)
 
+    decisive_body = [name for name, _ in _BODY_RULES if name in body_names]
+    body_enough = "body_just_a_moment" in body_names or len(decisive_body) >= 2
+
     # Unverified widget. CF body markers still win the verdict: the live
     # interstitial is suspected, not captcha, even if the word appears.
     captcha_names: list[str] = []
-    if "captcha" in lowered and (body_names or _CAPTCHA_ATTR.search(text)):
+    if _CAPTCHA_ATTR.search(text):
         captcha_names.append("body_captcha")
+    captcha_confirmed = bool(
+        header_names or decisive_body or status in (403, 429)
+    )
 
     status_names: list[str] = []
     status_verdict: str | None = None
@@ -165,13 +174,13 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
 
     if header_verdict is not None:
         return header_verdict, tuple(header_names + body_names + captcha_names)
-    if body_names:
+    if body_enough:
         return "suspected", tuple(body_names + captcha_names)
-    if captcha_names:
-        return "captcha", tuple(captcha_names)
+    if captcha_names and captcha_confirmed:
+        return "captcha", tuple(body_names + captcha_names)
     if status_verdict is not None:
-        return status_verdict, tuple(status_names)
-    return "none", ()
+        return status_verdict, tuple(body_names + captcha_names + status_names)
+    return "none", tuple(body_names + captcha_names)
 
 
 def _metrics() -> tuple[int, float]:

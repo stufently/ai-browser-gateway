@@ -258,7 +258,10 @@ class AdapterContractTests(unittest.TestCase):
             def navigate(self, url):
                 return {
                     "status": 200, "final_url": url,
-                    "body": "<p>Just a moment expected marker</p>",
+                    "body": (
+                        "<html><head><title>Just a moment...</title></head>"
+                        "<body><p>expected marker</p></body></html>"
+                    ),
                     "title": "", "redirects": 0,
                 }
 
