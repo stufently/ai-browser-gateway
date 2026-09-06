@@ -256,6 +256,15 @@ MUTANTS = [
      'new': '',
      'test': 'tests.test_execute.ExecuteTests.test_duplicate_run_ids_in_manual_plan_fail_before_launch',
      'assert': "with self.assertRaisesRegex(ValueError, 'duplicate run IDs'):"},
+    {'name': '32',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '        for flag in ("--no-sandbox", "--disable-dev-shm-usage",\n'
+            '                     "--disable-gpu", "--disable-dbus"):\n'
+            '            options.add_argument(flag)\n',
+     'new': '',
+     'test': 'tests.test_probe.AdapterContractTests.'
+             'test_pydoll_uses_required_start_options_and_unwraps_nested_cdp_value',
+     'assert': 'self.assertEqual(options.arguments,'},
 ]
 
 

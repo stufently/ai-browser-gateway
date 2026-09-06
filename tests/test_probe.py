@@ -332,7 +332,11 @@ class AdapterContractTests(unittest.TestCase):
                 })
 
         class ChromiumOptions:
-            pass
+            def __init__(self):
+                self.arguments = []
+
+            def add_argument(self, argument):
+                self.arguments.append(argument)
 
         class Chrome:
             def __init__(self, options):
@@ -368,6 +372,11 @@ class AdapterContractTests(unittest.TestCase):
         self.assertEqual(options.binary_location, "/usr/bin/chromium")
         self.assertIs(options.headless, True)
         self.assertEqual(options.start_timeout, 60)
+        # Without these the Debian chromium sandbox refuses to start under
+        # --user 1002:1002, and every cell fails on the start timeout.
+        self.assertEqual(options.arguments,
+                         ["--no-sandbox", "--disable-dev-shm-usage",
+                          "--disable-gpu", "--disable-dbus"])
         self.assertEqual(calls[1], ("go_to", "https://target.invalid/", 120))
         self.assertEqual(result["final_url"], "https://final.invalid/")
         self.assertEqual(result["title"], "CDP")
