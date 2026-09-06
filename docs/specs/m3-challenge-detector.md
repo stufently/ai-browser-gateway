@@ -4,7 +4,7 @@
 |---|---|
 | Репозиторий | `git@gitlab.example.org:9qw/ai-browser-gateway.git` |
 | Дата | 06.09.2026 |
-| Базовый коммит | `a871c88` «Accept M2 runner and measure warm browsers» |
+| Базовый коммит | `53cf517` «Spec M3 challenge detector» |
 | Исполнитель | **Grok** |
 | Почему он | Вехи M1 (Grok) и M2 (Codex) чередуются; ревью и перекрёстные мутации по этой вехе пойдут к Codex. |
 
@@ -12,8 +12,8 @@
 
 - Клон: `/home/user/exec-clones/abg-m3-detector`, ветка `m3-detector` от `main`.
 - **Живое дерево `/home/user/gitlab/9qw/ai-browser-gateway` не трогать.**
-- Постановщик кладёт в клон до запуска только эту спеку
-  (`docs/specs/m3-challenge-detector.md`, untracked). Зависимостей нет:
+- Эта спека уже в дереве (`docs/specs/m3-challenge-detector.md`, коммит
+  `53cf517`) — читай оттуда, редактировать её не нужно. Зависимостей нет:
   стандартная библиотека, тесты `python3 -m unittest` (на хосте Python 3.14.4).
 - Ни сети, ни Docker у тебя нет и не понадобится: всё, что нужно для проверки,
   лежит файлами в `tests/fixtures/`.
@@ -229,8 +229,7 @@ def next_step(error_type, challenge, *, egress_changed: bool) -> Step: ...
 - Семь `Dockerfile` в `bench/providers/docker/` — в этой вехе не меняются:
   новый код живёт в уже копируемом `probe.py`.
 - `README.md`, `TASKS.md`, `CHANGELOG.md`, `docs/research/`, `bench/targets/`.
-- `docs/specs/m3-challenge-detector.md` — исключение: приезжает untracked и
-  **коммитится вместе с работой**.
+- `docs/specs/m3-challenge-detector.md` — уже закоммичена, правкам не подлежит.
 - Никаких `.github/workflows/`. Никаких сторонних зависимостей.
 - **Никаких выдуманных чисел и маркеров.** Ни одного признака челленджа, которого
   нет в файлах `tests/fixtures/` или в разделе «Что проверено вживую».
@@ -286,7 +285,7 @@ assert call(FailureReason.none, ChallengeType.none) is Step.stop
 "'`
 
 - **AC-306 — контракты M1 и M2 не тронуты.**
-  `bash -c 'cd /home/user/exec-clones/abg-m3-detector && git diff --quiet a871c88..HEAD -- bench/models.py bench/scenarios.py bench/server bench/report bench/runner/record.py bench/runner/matrix.py bench/runner/execute.py bench/providers/registry.py bench/providers/docker/Dockerfile.curl bench/providers/docker/Dockerfile.curl_cffi bench/providers/docker/Dockerfile.primp bench/providers/docker/Dockerfile.playwright bench/providers/docker/Dockerfile.patchright bench/providers/docker/Dockerfile.camoufox bench/providers/docker/Dockerfile.pydoll tests/fixtures'`
+  `bash -c 'cd /home/user/exec-clones/abg-m3-detector && git diff --quiet 53cf517..HEAD -- bench/models.py bench/scenarios.py bench/server bench/report bench/runner/record.py bench/runner/matrix.py bench/runner/execute.py bench/providers/registry.py bench/providers/docker/Dockerfile.curl bench/providers/docker/Dockerfile.curl_cffi bench/providers/docker/Dockerfile.primp bench/providers/docker/Dockerfile.playwright bench/providers/docker/Dockerfile.patchright bench/providers/docker/Dockerfile.camoufox bench/providers/docker/Dockerfile.pydoll tests/fixtures'`
 
 - **AC-307 — состав работы; длина тела ничего не решает.**
   Проверяется поведением, а не поиском по исходнику: `len(body)` в пробнике
