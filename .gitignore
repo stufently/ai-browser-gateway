@@ -6,3 +6,4 @@ build/
 .pytest_cache/
 report.json
 report-blocked.md
+docs/superpowers/

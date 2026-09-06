@@ -1,11 +1,13 @@
 import json
 import subprocess
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from bench.models import FailureReason
 from bench.providers.registry import by_name
-from bench.runner.execute import execute_plan
-from bench.runner.matrix import build_plan
+from bench.runner.execute import DockerLauncher, execute_plan
+from bench.runner.matrix import PlanItem, build_plan
 from bench.runner.record import from_jsonl_line, to_jsonl_line
 from tests.m2_helpers import FakeLauncher, output, payload
 
@@ -105,9 +107,67 @@ class ExecuteTests(unittest.TestCase):
                      sleep=lambda seconds: events.append(seconds))
         self.assertEqual(events, ['run', 'run', 20, 'run'])
 
+    def test_target_argv_has_no_network_option(self):
+        cells = {'scenario:static': {'url': 'http://127.0.0.1:8000/static', 'sentinel': 'S'},
+                 **CELLS}
+        plan = build_plan([by_name('curl')], cells, cold=1, warm=0)
+        launcher = FakeLauncher(output(), output())
+        execute_plan(plan, launcher=launcher, cells=cells, env={})
+        self.assertEqual(len(launcher.calls), 2)
+        target_argv = next(argv for argv, _ in launcher.calls if CELLS['target:x']['url'] in argv)
+        self.assertNotIn('--network', target_argv)
+
+    def test_invalid_mode_in_manual_plan_fails_before_launch(self):
+        plan = [PlanItem('curl', 'target:x', 'cold', 0),
+                PlanItem('curl', 'target:x', 'garbage', 1)]
+        launcher = FakeLauncher(output(), output())
+        with self.assertRaisesRegex(ValueError, 'invalid mode'):
+            execute_plan(plan, launcher=launcher, cells=CELLS, env={})
+        self.assertEqual(launcher.calls, [])
+
+    def test_nonpositive_timeout_fails_before_launch(self):
+        for timeout in (0, -1):
+            with self.subTest(timeout=timeout):
+                launcher = FakeLauncher(output())
+                with self.assertRaisesRegex(ValueError, 'timeout must be positive'):
+                    execute_plan(self.plan(), launcher=launcher, cells=CELLS, env={}, timeout=timeout)
+                self.assertEqual(launcher.calls, [])
+
+    def test_duplicate_run_ids_in_manual_plan_fail_before_launch(self):
+        plan = [PlanItem('curl', 'target:x', 'cold', 0),
+                PlanItem('curl', 'target:x', 'cold', 0)]
+        launcher = FakeLauncher(output(), output())
+        with self.assertRaisesRegex(ValueError, 'duplicate run IDs'):
+            execute_plan(plan, launcher=launcher, cells=CELLS, env={})
+        self.assertEqual(launcher.calls, [])
+
     def test_invalid_plan_inputs_fail_before_launch(self):
         launcher = FakeLauncher()
         for cells, pause in ((CELLS, -1), ({'target:x': {'url': 'u', 'sentinel': ''}}, 0)):
             with self.subTest(cells=cells), self.assertRaises(ValueError):
                 execute_plan(self.plan(), launcher=launcher, cells=cells, env={}, pause_s=pause)
         self.assertEqual(launcher.calls, [])
+
+
+class DockerLauncherTests(unittest.TestCase):
+    def test_timeout_removes_container_from_cidfile(self):
+        calls = []
+        cidfiles = []
+        expired = subprocess.TimeoutExpired('docker', 7)
+
+        def run(command, **kwargs):
+            calls.append(list(command))
+            if command[:2] == ['docker', 'run']:
+                self.assertEqual(kwargs['timeout'], 7)
+                cidfile = Path(command[command.index('--cidfile') + 1])
+                cidfiles.append(cidfile)
+                cidfile.write_text('test-container-id\n', encoding='utf-8')
+                raise expired
+            return subprocess.CompletedProcess(command, 0, '', '')
+
+        with patch('bench.runner.execute.subprocess.run', side_effect=run):
+            with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                DockerLauncher().run(['docker', 'run', '--rm', 'abg-curl:m2'], timeout=7)
+        self.assertIs(raised.exception, expired)
+        self.assertEqual(calls[1:], [['docker', 'rm', '--force', 'test-container-id']])
+        self.assertFalse(cidfiles[0].parent.exists())

@@ -44,6 +44,19 @@ class ReportBuildTests(unittest.TestCase):
             build_report(self.path, order=['curl', 'playwright'])
         self.assertTrue(observed['iterator'])
 
+    def test_threshold_changes_coverage_decision(self):
+        # Both providers solve x, neither solves y: curl adds 1/2, with no unique cell.
+        self.write(self.records + [replace(self.records[0], cell='target:y', target='y',
+                                          success=False, sentinel_found=False,
+                                          error_type=FailureReason.content_missing)])
+        for threshold, expected in (
+            (0.5, '| curl | 1 | 1 | 0 | оставить: incremental 1/2 = 0.5000 >= 0.5 |'),
+            (0.75, '| curl | 1 | 1 | 0 | исключить: incremental 0.5000 < 0.75 and unique = 0 |'),
+        ):
+            with self.subTest(threshold=threshold):
+                text = build_report(self.path, order=['curl', 'playwright'], threshold=threshold)
+                self.assertIn(expected, text)
+
     def test_unknown_even_failed_provider_rejected(self):
         self.write([replace(self.records[0], provider='ghost', success=False,
                             error_type=FailureReason.provider_error)])
