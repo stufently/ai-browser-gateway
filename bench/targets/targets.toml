@@ -4,8 +4,15 @@
 # запросами к одному хосту пауза не меньше 30 с. Параллельного долбления нет.
 # Цель проекта — доставать нужные страницы, а не создавать нагрузку.
 #
-# `expect` — подстрока, которая обязана быть в извлечённом контенте. HTTP 200
-# успехом не считается: страница-заглушка Cloudflare тоже приходит с 200.
+# `expect` — подстрока, которая обязана быть в извлечённом контенте, СРАВНЕНИЕ
+# РЕГИСТРОЗАВИСИМОЕ. HTTP 200 успехом не считается: страница-заглушка Cloudflare
+# тоже приходит с 200.
+#
+# 🚨 `expect` не должен встречаться на странице-заглушке. Грабля оплачена
+# 06.09.2026: для bizprofile.net стояло `expect` со словом "bizprofile", а заглушка CF
+# называет заблокированный хост — и провальный запрос засчитывался успехом.
+# Поэтому все `expect` ниже взяты из <title> или уникального текста РЕАЛЬНОЙ
+# страницы и проверены на теле заглушки.
 
 [[target]]
 id = "control-hqd"
@@ -29,7 +36,7 @@ url = "https://lowendtalk.com/categories/offers"
 class = "cloudflare"
 owner = "third-party"
 note = "Старый бой владельца. Замерено 06.09.2026: голый curl → 403. Категория, а не тред: по web-monitoring.md треды закрыты жёстче."
-expect = "Offers"
+expect = "Offers — LowEndTalk"
 
 [[target]]
 id = "cf-bizprofile"
@@ -37,7 +44,7 @@ url = "https://bizprofile.net/"
 class = "cloudflare"
 owner = "third-party"
 note = "Снят с мониторинга check-sites из-за CF-челленджа и 403; возврат намечен на 12.09.2026. Замерено 06.09.2026: голый curl → 403. Результат применим в тот же день."
-expect = "bizprofile"
+expect = "Comprehensive Directory of Registered Businesses"
 
 [[target]]
 id = "cf-spa-chatgpt-share"
@@ -45,7 +52,7 @@ url = "https://chatgpt.com/share/6a9d9e26-4e08-83ed-b615-b57feb9d7043"
 class = "cloudflare+spa"
 owner = "third-party"
 note = "Публичная share-страница, которую владелец сам и прислал. Двойная сложность: CF плюс контент, которого в первичном HTML нет — он в turbo-stream payload. Отличает 'провайдер прошёл CF' от 'провайдер достал контент'."
-expect = "AI Browser Gateway"
+expect = "Начать AI Browser Gateway"
 
 [[target]]
 id = "login-instagram"
