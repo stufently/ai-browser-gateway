@@ -125,6 +125,20 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(got.target, "bizprofile.net")
         self.assertEqual(got, record)
 
+    def test_egress_profile_roundtrip_and_default(self) -> None:
+        defaulted = from_jsonl_line(to_jsonl_line(_record()))
+        self.assertEqual(defaulted.egress_profile, "direct")
+        record = _record(egress_profile="gold")
+        got = from_jsonl_line(to_jsonl_line(record))
+        self.assertEqual(got.egress_profile, "gold")
+        self.assertEqual(got, record)
+
+    def test_gold_profile_jsonl_never_contains_proxy_url(self) -> None:
+        line = to_jsonl_line(_record(egress_profile="gold"))
+        self.assertIn("gold", line)
+        for forbidden in ("@", "proxy.invalid", "pass"):
+            self.assertNotIn(forbidden, line)
+
     def test_roundtrip_failure_with_reason(self) -> None:
         record = _record(
             success=False,

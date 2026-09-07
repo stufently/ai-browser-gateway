@@ -39,6 +39,7 @@ class RunRecord:
     asn: str
     cell: str
     entrance_age_hours: float | None = None
+    egress_profile: str = "direct"
 
 
 def validate(record: RunRecord) -> None:
@@ -99,6 +100,7 @@ def from_jsonl_line(line: str) -> RunRecord:
         asn=raw["asn"],
         cell=raw["cell"],
         entrance_age_hours=raw["entrance_age_hours"],
+        egress_profile=raw["egress_profile"],
     )
     validate(record)
     return record

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from bench.egress import load_profiles, profile_url
 from bench.providers.registry import PROVIDERS, by_name
 from bench.report.build import build_report
 from bench.runner.environment import collect
@@ -38,6 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
             cmd.add_argument('--pause-s', type=float, default=20, help='pause per repeated host; target files require at least 30s')
             cmd.add_argument('--egress-ip', help='observed egress, otherwise unknown; never inferred from local interfaces')
             cmd.add_argument('--asn', help='observed ASN, otherwise unknown')
+            cmd.add_argument('--egress', help='proxy profile name from ~/.config/abg/proxies.toml')
     report = commands.add_parser('report', help='JSONL to Markdown')
     report.add_argument('jsonl_path')
     report.add_argument('--order', nargs='+', default=[p.name for p in sorted(PROVIDERS, key=lambda p: p.tier)])
@@ -125,8 +127,13 @@ def main(argv=None, *, launcher=None, reader=None, sleep=None) -> int:
                 # Open exclusively before any metadata command or provider launch.
                 with args.output.open('x', encoding='utf-8') as destination:
                     env = collect(reader=reader if reader is not None else _environment_reader(args, launcher))
+                    egress = None
+                    if args.egress:
+                        profiles = load_profiles(Path.home() / '.config' / 'abg' / 'proxies.toml')
+                        egress = (args.egress, profile_url(profiles, args.egress))
                     records = execute_plan(plan, launcher=launcher, cells=cells, env=env,
-                                           timeout=args.timeout, pause_s=pause, sleep=sleep)
+                                           timeout=args.timeout, pause_s=pause, sleep=sleep,
+                                           egress=egress)
                     for record in records:
                         destination.write(to_jsonl_line(record))
         return 0

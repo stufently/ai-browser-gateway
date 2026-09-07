@@ -24,13 +24,25 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import ProxyHandler, Request, build_opener
+from urllib.request import urlopen as _stdlib_urlopen
 from xml.etree import ElementTree
 
 
 PROVIDERS = frozenset(
     {"curl", "curl_cffi", "primp", "playwright", "patchright", "camoufox", "pydoll", "wayback", "rss"}
 )
+
+
+def urlopen(url, timeout=120):
+    proxy = os.environ.get("ABG_PROXY") or ""
+    if proxy:
+        return build_opener(ProxyHandler({"http": proxy, "https": proxy})).open(url, timeout=timeout)
+    return _stdlib_urlopen(url, timeout=timeout)
+
+
+def _proxy_url() -> str:
+    return os.environ.get("ABG_PROXY") or ""
 
 
 def _live_rss_kb() -> int:
@@ -366,12 +378,17 @@ class CurlAdapter:
 
     def navigate(self, url: str) -> dict[str, Any]:
         marker = "\nABG_CURL_META:"
-        completed = subprocess.run(
-            [
+        command = [
                 "curl", "-L", "--cookie", "", "--silent", "--show-error", "--compressed",
                 "--output", "-", "--write-out",
-                marker + "%{http_code}\t%{url_effective}\t%{num_redirects}\t%{header_json}", url,
-            ],
+                marker + "%{http_code}\t%{url_effective}\t%{num_redirects}\t%{header_json}",
+        ]
+        proxy = _proxy_url()
+        if proxy:
+            command.extend(["--proxy", proxy])
+        command.append(url)
+        completed = subprocess.run(
+            command,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
         )
         raw_body, separator, raw_meta = completed.stdout.rpartition(marker.encode())
@@ -395,7 +412,11 @@ class CurlCffiAdapter:
     def navigate(self, url: str) -> dict[str, Any]:
         from curl_cffi import requests
 
-        response = requests.get(url, impersonate="chrome", allow_redirects=True, timeout=120)
+        kwargs = dict(impersonate="chrome", allow_redirects=True, timeout=120)
+        proxy = _proxy_url()
+        if proxy:
+            kwargs["proxy"] = proxy
+        response = requests.get(url, **kwargs)
         return _result(
             response.status_code, str(response.url), response.content, len(response.history),
             headers=_normalize_headers(response.headers),
@@ -415,7 +436,11 @@ class PrimpAdapter:
         import primp
 
         self.version = _version("primp")
-        self.client = primp.Client(impersonate=self.profile)
+        kwargs = dict(impersonate=self.profile)
+        proxy = _proxy_url()
+        if proxy:
+            kwargs["proxy"] = proxy
+        self.client = primp.Client(**kwargs)
 
     def navigate(self, url: str) -> dict[str, Any]:
         response = self.client.get(url)
@@ -444,6 +469,9 @@ class PlaywrightAdapter:
         launch_options = {"headless": self.package == "playwright"}
         if self.package == "patchright":
             launch_options["channel"] = "chrome"
+        proxy = _proxy_url()
+        if proxy:
+            launch_options["proxy"] = {"server": proxy}
         self.browser = self.runtime.chromium.launch(**launch_options)
         self.page = self.browser.new_page()
 
@@ -472,7 +500,11 @@ class CamoufoxAdapter:
         from camoufox.sync_api import Camoufox
 
         self.version = _version("camoufox")
-        self.manager = Camoufox(headless=False)
+        options = {"headless": False}
+        proxy = _proxy_url()
+        if proxy:
+            options["proxy"] = {"server": proxy}
+        self.manager = Camoufox(**options)
         self.browser = self.manager.__enter__()
         self.page = self.browser.new_page()
 
@@ -511,6 +543,9 @@ class PydollAdapter:
         for flag in ("--no-sandbox", "--disable-dev-shm-usage",
                      "--disable-gpu", "--disable-dbus"):
             options.add_argument(flag)
+        proxy = _proxy_url()
+        if proxy:
+            options.add_argument("--proxy-server=" + proxy)
         self.browser = Chrome(options=options)
         self.tab = self.loop.run_until_complete(self.browser.start())
 

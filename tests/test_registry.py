@@ -46,6 +46,26 @@ class RegistryTests(unittest.TestCase):
         got = parse_output(by_name('curl'), 'log\n{"ok": false}\n{"ok": true}\ntrailer\n')
         self.assertEqual(got, {'ok': True})
 
+    def test_proxy_env_is_name_only_never_the_value(self):
+        argv = build_argv(
+            by_name('curl'), url='https://example.invalid/', sentinel='S',
+            proxy_env='ABG_PROXY',
+        )
+        self.assertIn('--env', argv)
+        self.assertEqual(argv[argv.index('--env') + 1], 'ABG_PROXY')
+        self.assertNotIn('ABG_PROXY=', argv[argv.index('--env') + 1])
+        self.assertFalse(any(part.startswith('ABG_PROXY=') for part in argv))
+        self.assertNotIn('http://user:pass@proxy.invalid:8080', argv)
+        self.assertFalse(any('@' in part for part in argv))
+        env_index = argv.index('--env')
+        image_index = argv.index(by_name('curl').image)
+        self.assertLess(env_index, image_index)
+
+    def test_without_proxy_env_there_is_no_env_flag(self):
+        argv = build_argv(by_name('curl'), url='https://example.invalid/', sentinel='S')
+        self.assertNotIn('--env', argv)
+        self.assertNotIn('ABG_PROXY', argv)
+
     def test_invalid_output_has_excerpt(self):
         for output in ('', 'plain error', '{broken', '{"ok": true}\n{broken', '[]'):
             with self.subTest(output=output), self.assertRaises(ValueError) as ctx:

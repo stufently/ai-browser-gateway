@@ -141,6 +141,81 @@ class ExecuteTests(unittest.TestCase):
             execute_plan(plan, launcher=launcher, cells=CELLS, env={})
         self.assertEqual(launcher.calls, [])
 
+    def test_missing_egress_profile_is_not_measured_and_does_not_launch(self):
+        class Dead:
+            def __init__(self):
+                self.calls = []
+
+            def run(self, argv, timeout):
+                self.calls.append(argv)
+                return (0, '', '')
+
+        launcher = Dead()
+        records = execute_plan(
+            self.plan(), launcher=launcher, cells=CELLS, env={},
+            egress=('gold', None),
+        )
+        self.assertEqual(launcher.calls, [])
+        self.assertEqual(records[0].error_type, FailureReason.not_measured)
+        self.assertEqual(records[0].egress_profile, 'gold')
+        self.assertFalse(records[0].success)
+
+    def test_empty_egress_url_is_not_measured(self):
+        launcher = FakeLauncher(output())
+        records = execute_plan(
+            self.plan(), launcher=launcher, cells=CELLS, env={},
+            egress=('direct', ''),
+        )
+        self.assertEqual(launcher.calls, [])
+        self.assertEqual(records[0].error_type, FailureReason.not_measured)
+        self.assertEqual(records[0].egress_profile, 'direct')
+
+    def test_proxy_url_is_in_runner_env_not_argv(self):
+        import os
+        proxy = 'http://user:pass@proxy.invalid:8080'
+        seen = {}
+
+        class Capture(FakeLauncher):
+            def run(self, argv, timeout):
+                seen['proxy'] = os.environ.get('ABG_PROXY')
+                seen['argv'] = list(argv)
+                return super().run(argv, timeout)
+
+        launcher = Capture(output())
+        previous = os.environ.get('ABG_PROXY')
+        records = execute_plan(
+            self.plan(), launcher=launcher, cells=CELLS, env={},
+            egress=('gold', proxy),
+        )
+        self.assertEqual(seen['proxy'], proxy)
+        self.assertIn('--env', seen['argv'])
+        self.assertEqual(seen['argv'][seen['argv'].index('--env') + 1], 'ABG_PROXY')
+        self.assertFalse(any(proxy in part or part.startswith('ABG_PROXY=') for part in seen['argv']))
+        self.assertEqual(records[0].egress_profile, 'gold')
+        self.assertNotIn(proxy, records[0].egress_profile)
+        self.assertEqual(os.environ.get('ABG_PROXY'), previous)
+
+    def test_docker_environment_exit_codes_are_environment_error(self):
+        for rc, expected in (
+            (125, FailureReason.environment_error),
+            (126, FailureReason.environment_error),
+            (127, FailureReason.environment_error),
+            (1, FailureReason.provider_error),
+        ):
+            with self.subTest(rc=rc):
+                records = execute_plan(
+                    self.plan(), launcher=FakeLauncher((rc, '', 'boom')),
+                    cells=CELLS, env={},
+                )
+                self.assertEqual(records[0].error_type, expected)
+                self.assertFalse(records[0].success)
+
+    def test_default_egress_profile_is_direct(self):
+        records = execute_plan(
+            self.plan(), launcher=FakeLauncher(output()), cells=CELLS, env={},
+        )
+        self.assertEqual(records[0].egress_profile, 'direct')
+
     def test_invalid_plan_inputs_fail_before_launch(self):
         launcher = FakeLauncher()
         for cells, pause in ((CELLS, -1), ({'target:x': {'url': 'u', 'sentinel': ''}}, 0)):

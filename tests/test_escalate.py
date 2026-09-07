@@ -95,6 +95,26 @@ class NextStepTests(unittest.TestCase):
             Step.investigate,
         )
 
+    def test_environment_error_is_investigate(self):
+        self.assertIs(
+            next_step(
+                FailureReason.environment_error,
+                ChallengeType.none,
+                egress_changed=False,
+            ),
+            Step.investigate,
+        )
+
+    def test_environment_error_stays_investigate_after_changed_egress(self):
+        self.assertIs(
+            next_step(
+                FailureReason.environment_error,
+                ChallengeType.none,
+                egress_changed=True,
+            ),
+            Step.investigate,
+        )
+
     def test_changed_egress_becomes_human(self):
         self.assertIs(
             next_step(
