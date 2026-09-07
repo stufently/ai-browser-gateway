@@ -8,8 +8,8 @@ from bench.providers.registry import PROVIDERS, Provider, build_argv, by_name, p
 class RegistryTests(unittest.TestCase):
     def test_registry_contract(self):
         self.assertEqual({p.name for p in PROVIDERS}, {
-            'curl', 'curl_cffi', 'primp', 'playwright', 'patchright', 'camoufox', 'pydoll', 'wayback'})
-        self.assertEqual(len(PROVIDERS), 8)
+            'curl', 'curl_cffi', 'primp', 'playwright', 'patchright', 'camoufox', 'pydoll', 'wayback', 'rss'})
+        self.assertEqual(len(PROVIDERS), 9)
         for p in PROVIDERS:
             self.assertIsInstance(p.argv_extra, tuple)
             self.assertIsInstance(p.needs_network, bool)

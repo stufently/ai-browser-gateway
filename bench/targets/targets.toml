@@ -38,6 +38,9 @@ owner = "third-party"
 note = "Старый бой владельца. Замерено 06.09.2026: голый curl → 403. Категория, а не тред: по web-monitoring.md треды закрыты жёстче."
 expect = "Offers — LowEndTalk"
 
+[target.entrances]
+rss = "https://lowendtalk.com/categories/offers/feed.rss"
+
 [[target]]
 id = "cf-bizprofile"
 url = "https://bizprofile.net/"

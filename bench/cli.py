@@ -23,7 +23,7 @@ from bench.scenarios import SCENARIOS
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog='python3 -m bench', description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
-    commands.add_parser('providers', help='list registry (wayback implementation follows M2)')
+    commands.add_parser('providers', help='list provider registry')
     for name in ('plan', 'run'):
         cmd = commands.add_parser(name, help='print plan' if name == 'plan' else 'execute plan into a new JSONL file')
         cmd.add_argument('--providers', nargs='+', default=[p.name for p in PROVIDERS if p.kind != 'entrance'])
@@ -60,7 +60,8 @@ def _cells_and_plan(args):
             name = 'target:' + target['id']
             if name in cells:
                 raise ValueError(f'duplicate target: {name}')
-            cells[name] = {'url': target['url'], 'sentinel': target['expect']}
+            cells[name] = {'url': target['url'], 'sentinel': target['expect'],
+                           'entrances': target.get('entrances', {})}
             target_names.append(name)
     selected = args.cells if args.cells is not None else (target_names if args.targets is not None else list(cells))
     selected_cells = {}

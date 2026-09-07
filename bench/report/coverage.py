@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from bench.models import FailureReason
+
 
 @dataclass(frozen=True, slots=True)
 class CoverageRow:
@@ -31,7 +33,8 @@ def incremental(records, order: list[str]) -> list[CoverageRow]:
     all_cells: set[str] = set()
     holders: dict[str, set[str]] = {}
     for record in records:
-        all_cells.add(record.cell)
+        if record.error_type != FailureReason.not_measured:
+            all_cells.add(record.cell)
         if record.success:
             holders.setdefault(record.cell, set()).add(record.provider)
     unique_map: dict[str, set[str]] = {name: set() for name in order}

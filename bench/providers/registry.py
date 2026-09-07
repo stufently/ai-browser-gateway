@@ -24,8 +24,8 @@ PROVIDERS: tuple[Provider, ...] = (
     Provider('patchright', 'abg-patchright:m2', 2, 'browser', True),
     Provider('camoufox', 'abg-camoufox:m2', 3, 'browser', True),
     Provider('pydoll', 'abg-pydoll:m2', 3, 'browser', True),
-    # Entrance implementation and image belong to the following milestone.
-    Provider('wayback', 'abg-wayback:m2', 0, 'entrance', True),
+    Provider('wayback', 'abg-wayback:m4', 0, 'entrance', True),
+    Provider('rss', 'abg-rss:m4', 0, 'entrance', True),
 )
 _BY_NAME = {provider.name: provider for provider in PROVIDERS}
 

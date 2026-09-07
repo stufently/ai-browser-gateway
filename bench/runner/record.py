@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict, dataclass, fields
 
 from bench.models import ChallengeType, FailureReason
@@ -37,9 +38,15 @@ class RunRecord:
     egress_ip: str
     asn: str
     cell: str
+    entrance_age_hours: float | None = None
 
 
 def validate(record: RunRecord) -> None:
+    age = record.entrance_age_hours
+    if age is not None and (
+        type(age) not in (int, float) or not math.isfinite(age) or age < 0
+    ):
+        raise ValueError("entrance_age_hours must be null or a finite nonnegative number")
     for item in fields(record):
         if not hasattr(record, item.name):
             raise ValueError(f"missing field: {item.name}")
@@ -91,6 +98,7 @@ def from_jsonl_line(line: str) -> RunRecord:
         egress_ip=raw["egress_ip"],
         asn=raw["asn"],
         cell=raw["cell"],
+        entrance_age_hours=raw["entrance_age_hours"],
     )
     validate(record)
     return record
