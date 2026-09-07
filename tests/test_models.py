@@ -111,6 +111,10 @@ class EvaluateTests(unittest.TestCase):
         self.assertEqual(reason, FailureReason.http_5xx)
         self.assertFalse(ok)
 
+    def test_environment_error_is_a_failure_reason(self) -> None:
+        self.assertEqual(FailureReason.environment_error, "environment_error")
+        self.assertIn(FailureReason.environment_error, FailureReason)
+
     def test_status_599_is_http_5xx(self) -> None:
         result = _result(status=599, html="<p>SENT</p>", text="SENT")
         ok, reason = evaluate(result, "SENT")

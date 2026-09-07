@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+import os
 import subprocess
 import tempfile
 import time
@@ -115,10 +116,12 @@ def _record(item, provider, cell, env, payload, failure):
         peak_rss_mb=result.peak_rss_mb, bytes=result.bytes_received, redirects=result.redirects,
         error_type=error, image_version=provider.image, cell=item.cell, **metadata,
         entrance_age_hours=payload.get('entrance_age_hours'),
+        egress_profile=env.get('egress_profile') or 'direct',
     )
 
 
-def execute_plan(plan, *, launcher, cells, env, timeout=180, pause_s=0.0, sleep=None) -> list[RunRecord]:
+def execute_plan(plan, *, launcher, cells, env, timeout=180, pause_s=0.0, sleep=None,
+                 egress=None, skip_reason=None) -> list[RunRecord]:
     if not math.isfinite(pause_s) or pause_s < 0 or timeout <= 0:
         raise ValueError('pause_s must be nonnegative and timeout must be positive')
     plan = tuple(plan)
@@ -132,37 +135,66 @@ def execute_plan(plan, *, launcher, cells, env, timeout=180, pause_s=0.0, sleep=
         if item.mode not in ('cold', 'warm'):
             raise ValueError(f'invalid mode: {item.mode}')
     sleep = time.sleep if sleep is None else sleep
-    seen_hosts = set()
-    records = []
-    for item in plan:
-        provider, cell = by_name(item.provider), cells[item.cell]
-        url = cell['url']
-        if provider.kind == 'entrance':
-            entrance_url = cell.get('entrances', {}).get(provider.name)
-            if item.cell.startswith('scenario:') or (provider.name != 'wayback' and not entrance_url):
-                records.append(_record(item, provider, cell, env, None, FailureReason.not_measured))
-                continue
-            url = entrance_url or url
-        host = urlsplit(url).hostname or url
-        if host in seen_hosts and pause_s:
-            # A full pause after prior completion is conservative even when
-            # other hosts intervened, and does not depend on wall-clock changes.
-            sleep(pause_s)
-        network = 'host' if item.cell.startswith('scenario:') else None
-        argv = build_argv(provider, url=url, sentinel=cell['sentinel'], network=network)
-        argv.extend(['--mode', item.mode])
-        payload, failure = None, None
-        try:
-            rc, stdout, stderr = launcher.run(argv, timeout)
-            if rc != 0:
+    profile_name, proxy_url = ('direct', None) if egress is None else egress
+    env = {**env, 'egress_profile': profile_name}
+    if egress is not None and not proxy_url:
+        if skip_reason is FailureReason.environment_error:
+            return [
+                _record(item, by_name(item.provider), cells[item.cell], env, None,
+                        FailureReason.environment_error)
+                for item in plan
+            ]
+        return [
+            _record(item, by_name(item.provider), cells[item.cell], env, None,
+                    FailureReason.not_measured)
+            for item in plan
+        ]
+    proxy_env = 'ABG_PROXY' if proxy_url else None
+    previous_proxy = os.environ.get('ABG_PROXY')
+    had_proxy = 'ABG_PROXY' in os.environ
+    if proxy_url:
+        os.environ['ABG_PROXY'] = proxy_url
+    try:
+        seen_hosts = set()
+        records = []
+        for item in plan:
+            provider, cell = by_name(item.provider), cells[item.cell]
+            url = cell['url']
+            if provider.kind == 'entrance':
+                entrance_url = cell.get('entrances', {}).get(provider.name)
+                if item.cell.startswith('scenario:') or (provider.name != 'wayback' and not entrance_url):
+                    records.append(_record(item, provider, cell, env, None, FailureReason.not_measured))
+                    continue
+                url = entrance_url or url
+            host = urlsplit(url).hostname or url
+            if host in seen_hosts and pause_s:
+                # A full pause after prior completion is conservative even when
+                # other hosts intervened, and does not depend on wall-clock changes.
+                sleep(pause_s)
+            network = 'host' if item.cell.startswith('scenario:') else None
+            argv = build_argv(provider, url=url, sentinel=cell['sentinel'], network=network,
+                              proxy_env=proxy_env)
+            argv.extend(['--mode', item.mode])
+            payload, failure = None, None
+            try:
+                rc, stdout, stderr = launcher.run(argv, timeout)
+                if rc != 0:
+                    failure = FailureReason.provider_error
+                else:
+                    payload = _validated(parse_output(provider, stdout))
+                if rc in (125, 126, 127):
+                    failure = FailureReason.environment_error
+            except (subprocess.TimeoutExpired, TimeoutError):
+                failure = FailureReason.timeout
+            except (OSError, ValueError, KeyError, TypeError, OverflowError):
                 failure = FailureReason.provider_error
+                payload = None
+            seen_hosts.add(host)
+            records.append(_record(item, provider, cell, env, payload, failure))
+        return records
+    finally:
+        if proxy_url:
+            if had_proxy:
+                os.environ['ABG_PROXY'] = previous_proxy
             else:
-                payload = _validated(parse_output(provider, stdout))
-        except (subprocess.TimeoutExpired, TimeoutError):
-            failure = FailureReason.timeout
-        except (OSError, ValueError, KeyError, TypeError, OverflowError):
-            failure = FailureReason.provider_error
-            payload = None
-        seen_hosts.add(host)
-        records.append(_record(item, provider, cell, env, payload, failure))
-    return records
+                os.environ.pop('ABG_PROXY', None)

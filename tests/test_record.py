@@ -125,6 +125,33 @@ class RecordTests(unittest.TestCase):
         self.assertEqual(got.target, "bizprofile.net")
         self.assertEqual(got, record)
 
+    def test_egress_profile_roundtrip_and_default(self) -> None:
+        defaulted = from_jsonl_line(to_jsonl_line(_record()))
+        self.assertEqual(defaulted.egress_profile, "direct")
+        record = _record(egress_profile="gold")
+        got = from_jsonl_line(to_jsonl_line(record))
+        self.assertEqual(got.egress_profile, "gold")
+        self.assertEqual(got, record)
+
+    def test_missing_optional_fields_take_defaults(self) -> None:
+        payload = json.loads(to_jsonl_line(_record()))
+        del payload["egress_profile"]
+        del payload["entrance_age_hours"]
+        loaded = True
+        try:
+            got = from_jsonl_line(json.dumps(payload))
+        except ValueError:
+            loaded = False
+        self.assertTrue(loaded)
+        self.assertEqual(got.egress_profile, "direct")
+        self.assertIsNone(got.entrance_age_hours)
+
+    def test_gold_profile_jsonl_never_contains_proxy_url(self) -> None:
+        line = to_jsonl_line(_record(egress_profile="gold"))
+        self.assertIn("gold", line)
+        for forbidden in ("@", "proxy.invalid", "pass"):
+            self.assertNotIn(forbidden, line)
+
     def test_roundtrip_failure_with_reason(self) -> None:
         record = _record(
             success=False,

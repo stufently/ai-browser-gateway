@@ -22,6 +22,7 @@ class FailureReason(StrEnum):
     content_mismatch = "content_mismatch"
     provider_error = "provider_error"
     not_measured = "not_measured"
+    environment_error = "environment_error"
 
 
 class ChallengeType(StrEnum):

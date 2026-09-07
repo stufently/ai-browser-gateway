@@ -24,7 +24,7 @@ def build_report(jsonl_path, *, order, threshold=0.05, unmeasured=()) -> str:
         raise ValueError('duplicate providers in order')
     if not math.isfinite(threshold) or not 0 <= threshold <= 1:
         raise ValueError('threshold must be between 0 and 1')
-    metadata = {key: set() for key in (*FIELDS, 'provider_version', 'image_version')}
+    metadata = {key: set() for key in (*FIELDS, 'provider_version', 'image_version', 'egress_profile')}
     counts = defaultdict(lambda: [0, 0])
     skipped = defaultdict(int)
     measured_providers, observed_providers, measured_groups = set(), set(), set()
@@ -61,7 +61,10 @@ def build_report(jsonl_path, *, order, threshold=0.05, unmeasured=()) -> str:
                     value = f'{record.provider}: {value}'
                 metadata[key].add(value)
             unavailable = (
-                record.error_type in (FailureReason.provider_error, FailureReason.timeout)
+                record.error_type in (
+                    FailureReason.provider_error, FailureReason.timeout,
+                    FailureReason.environment_error,
+                )
                 and not any((record.elapsed_ms, record.startup_ms, record.cpu_ms, record.peak_rss_mb))
             )
             if not not_measured and not unavailable:

@@ -91,6 +91,33 @@ class ReportBuildTests(unittest.TestCase):
         self.write([self.records[0], replace(self.records[1], egress_ip='observed-other-egress')])
         self.assertIn('observed-other-egress', build_report(self.path, order=['curl', 'playwright']))
 
+    def test_egress_profile_is_in_metadata_and_url_is_not(self):
+        from tests.m4_helpers import record
+        gold = record('curl', 'target:a', egress_profile='gold')
+        self.write([gold])
+        text = build_report(self.path, order=['curl'])
+        self.assertIn('egress_profile', text)
+        self.assertIn('gold', text)
+        self.assertNotIn('proxy.invalid', text)
+        self.assertNotIn('pass', text)
+        self.assertNotIn('@', text.split('gold', 1)[-1] if 'gold' in text else text)
+
+    def test_environment_error_metrics_are_unavailable(self):
+        from bench.runner.execute import execute_plan
+        from bench.runner.matrix import PlanItem
+        from tests.m2_helpers import FakeLauncher
+        records = execute_plan(
+            [PlanItem('curl', 'target:failed', 'cold', 0)],
+            launcher=FakeLauncher((125, '', 'image missing')),
+            cells={'target:failed': {'url': 'https://example.invalid/', 'sentinel': 'S'}},
+            env={},
+        )
+        self.assertEqual(records[0].error_type, FailureReason.environment_error)
+        self.write(records)
+        text = build_report(self.path, order=['curl'])
+        self.assertIn('| curl | 0/1 |', text)
+        self.assertIn('| curl | cold | 0 | unknown | unknown | unknown |', text)
+
     def test_bad_json_line_context(self):
         self.path.write_text(to_jsonl_line(self.records[0]) + '{broken\n')
         with self.assertRaisesRegex(ValueError, 'line 2'):

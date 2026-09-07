@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import asdict, dataclass, fields
+from dataclasses import MISSING, asdict, dataclass, fields
 
 from bench.models import ChallengeType, FailureReason
 
@@ -39,6 +39,7 @@ class RunRecord:
     asn: str
     cell: str
     entrance_age_hours: float | None = None
+    egress_profile: str = "direct"
 
 
 def validate(record: RunRecord) -> None:
@@ -69,9 +70,15 @@ def from_jsonl_line(line: str) -> RunRecord:
     raw = json.loads(line)
     if not isinstance(raw, dict):
         raise ValueError("JSONL line must be an object")
-    missing = [item.name for item in fields(RunRecord) if item.name not in raw]
+    missing = [
+        item.name for item in fields(RunRecord)
+        if item.name not in raw and item.default is MISSING
+    ]
     if missing:
         raise ValueError("missing field: " + ", ".join(missing))
+    for item in fields(RunRecord):
+        if item.name not in raw:
+            raw[item.name] = item.default
     record = RunRecord(
         provider=raw["provider"],
         provider_version=raw["provider_version"],
@@ -99,6 +106,7 @@ def from_jsonl_line(line: str) -> RunRecord:
         asn=raw["asn"],
         cell=raw["cell"],
         entrance_age_hours=raw["entrance_age_hours"],
+        egress_profile=raw["egress_profile"],
     )
     validate(record)
     return record

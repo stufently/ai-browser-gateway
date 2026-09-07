@@ -9,9 +9,12 @@ from pathlib import Path
 import io
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
+
+from bench.egress import load_profiles
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -273,6 +276,226 @@ class AdapterContractTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(result["challenge"], "suspected")
 
+    def test_adapters_honor_abg_proxy_and_direct_when_unset(self):
+        proxy = "http://user:pass@proxy.invalid:8080"
+        completed = subprocess.CompletedProcess(
+            [], 0, stdout=b"marker\nABG_CURL_META:200\thttps://final.invalid/\t1\t{}",
+            stderr=b"",
+        )
+
+        class Response:
+            status_code = 200
+            url = "https://final.invalid/"
+            content = b"marker"
+            history = ()
+            headers = {}
+
+        with patch.dict(os.environ):
+            os.environ.pop("ABG_PROXY", None)
+            with patch.object(self.probe.subprocess, "run", return_value=completed) as run:
+                self.probe.CurlAdapter().navigate("https://target.invalid/")
+                self.assertNotIn("--proxy", run.call_args.args[0])
+
+        with patch.dict(os.environ, {"ABG_PROXY": proxy}):
+            with patch.object(self.probe.subprocess, "run", return_value=completed) as run:
+                self.probe.CurlAdapter().navigate("https://target.invalid/")
+                command = run.call_args.args[0]
+            self.assertNotIn("--proxy", command)
+            self.assertFalse(any("pass@" in part for part in command))
+            env = run.call_args.kwargs.get("env") or {}
+            self.assertEqual(env.get("ALL_PROXY"), proxy)
+
+            captured = {}
+
+            def get(*args, **kwargs):
+                captured.update(kwargs)
+                return Response()
+
+            curl_cffi = types.ModuleType("curl_cffi")
+            requests_mod = types.ModuleType("curl_cffi.requests")
+            requests_mod.get = get
+            curl_cffi.requests = requests_mod
+            with patch.dict(sys.modules, {
+                "curl_cffi": curl_cffi,
+                "curl_cffi.requests": requests_mod,
+            }):
+                self.probe.CurlCffiAdapter().navigate("https://target.invalid/")
+            self.assertEqual(captured.get("proxy"), proxy)
+
+            primp_kwargs = {}
+
+            class Client:
+                def __init__(self, **kwargs):
+                    primp_kwargs.update(kwargs)
+
+                def get(self, url):
+                    return Response()
+
+            primp_mod = types.ModuleType("primp")
+            primp_mod.Client = Client
+            adapter = self.probe.PrimpAdapter()
+            with patch.dict(sys.modules, {"primp": primp_mod}):
+                adapter.start()
+            self.assertEqual(primp_kwargs.get("proxy"), proxy)
+            self.assertEqual(primp_kwargs.get("impersonate"), "chrome")
+
+    def test_browser_adapters_pass_proxy_server_on_launch(self):
+        proxy = "http://user:pass@proxy.invalid:8080"
+        launched = {}
+
+        class Browser:
+            def new_page(self):
+                return object()
+
+            def close(self):
+                pass
+
+        class Chromium:
+            def launch(self, **kwargs):
+                launched["playwright"] = kwargs
+                return Browser()
+
+        class Runtime:
+            chromium = Chromium()
+
+            def start(self):
+                return self
+
+            def stop(self):
+                pass
+
+        class SyncApi:
+            def start(self):
+                return Runtime()
+
+        def sync_playwright():
+            return SyncApi()
+
+        playwright_mod = types.ModuleType("playwright")
+        sync_mod = types.ModuleType("playwright.sync_api")
+        sync_mod.sync_playwright = sync_playwright
+        playwright_mod.sync_api = sync_mod
+        patchright_mod = types.ModuleType("patchright")
+        patchright_sync = types.ModuleType("patchright.sync_api")
+        patchright_sync.sync_playwright = sync_playwright
+        patchright_mod.sync_api = patchright_sync
+
+        class Camoufox:
+            def __init__(self, **kwargs):
+                launched["camoufox"] = kwargs
+
+            def __enter__(self):
+                return Browser()
+
+            def __exit__(self, *args):
+                return None
+
+        camoufox_mod = types.ModuleType("camoufox")
+        camoufox_sync = types.ModuleType("camoufox.sync_api")
+        camoufox_sync.Camoufox = Camoufox
+        camoufox_mod.sync_api = camoufox_sync
+
+        with patch.dict(os.environ, {"ABG_PROXY": proxy}), patch.dict(sys.modules, {
+            "playwright": playwright_mod,
+            "playwright.sync_api": sync_mod,
+            "patchright": patchright_mod,
+            "patchright.sync_api": patchright_sync,
+            "camoufox": camoufox_mod,
+            "camoufox.sync_api": camoufox_sync,
+        }):
+            expected = self.probe.playwright_proxy(proxy)
+            self.probe.PlaywrightAdapter().start()
+            self.assertEqual(launched["playwright"].get("proxy"), expected)
+            self.probe.PatchrightAdapter().start()
+            self.probe.CamoufoxAdapter().start()
+            self.assertEqual(launched["camoufox"].get("proxy"), expected)
+
+    def test_pydoll_adds_proxy_server_argument_when_set(self):
+        proxy = "http://user:pass@proxy.invalid:8080"
+        captured = {}
+
+        class Awaitable:
+            def __init__(self, value):
+                self.value = value
+
+            def __await__(self):
+                if False:
+                    yield None
+                return self.value
+
+        class ChromiumOptions:
+            def __init__(self):
+                self.arguments = []
+
+            def add_argument(self, argument):
+                self.arguments.append(argument)
+
+        class Chrome:
+            def __init__(self, options):
+                captured["options"] = options
+
+            def start(self):
+                return Awaitable(object())
+
+            def stop(self):
+                return Awaitable(None)
+
+        chromium = types.ModuleType("pydoll.browser.chromium")
+        chromium.Chrome = Chrome
+        options_module = types.ModuleType("pydoll.browser.options")
+        options_module.ChromiumOptions = ChromiumOptions
+        browser = types.ModuleType("pydoll.browser")
+        browser.__path__ = []
+        pydoll = types.ModuleType("pydoll")
+        pydoll.__path__ = []
+        modules = {
+            "pydoll": pydoll,
+            "pydoll.browser": browser,
+            "pydoll.browser.chromium": chromium,
+            "pydoll.browser.options": options_module,
+        }
+        with patch.dict(os.environ, {"ABG_PROXY": proxy}), patch.dict(sys.modules, modules):
+            adapter = self.probe.PydollAdapter()
+            adapter.start()
+        self.assertIn("--proxy-server=" + proxy, captured["options"].arguments)
+
+    def test_entrance_fetch_uses_proxy_handler_when_set(self):
+        proxy = "http://user:pass@proxy.invalid:8080"
+        opened = {}
+
+        class FakeOpener:
+            def open(self, request, timeout=120):
+                opened["request"] = request
+                opened["timeout"] = timeout
+
+                class Resp:
+                    status = 200
+                    headers = {}
+
+                    def geturl(self):
+                        return "https://example.invalid/"
+
+                    def read(self):
+                        return b"<rss></rss>"
+
+                    def __enter__(self):
+                        return self
+
+                    def __exit__(self, *args):
+                        return None
+
+                return Resp()
+
+        fake = FakeOpener()
+        with patch.dict(os.environ, {"ABG_PROXY": proxy}):
+            with patch.object(self.probe, "build_opener", return_value=fake) as build:
+                self.probe._fetch_entrance("https://example.invalid/")
+        self.assertEqual(build.call_count, 1)
+        handler = build.call_args.args[0]
+        self.assertEqual(handler.proxies.get("http"), proxy)
+        self.assertEqual(handler.proxies.get("https"), proxy)
+        self.assertEqual(opened["timeout"], 120)
+
     def test_curl_enables_cookie_engine_for_session_redirects(self):
         captured = []
         completed = subprocess.CompletedProcess(
@@ -502,6 +725,117 @@ class AdapterContractTests(unittest.TestCase):
                 adapter.page = Page(None)
                 missing = adapter.navigate("https://target.invalid/")
                 self.assertIsNone(missing["headers"])
+
+
+class ProxyWiringTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def test_redact_covers_any_proxy_scheme(self):
+        """socks5 у провайдеров прокси — обычное дело; curl печатает его так же."""
+        leaked = "curl: (7) Unsupported proxy scheme for 'socks5://user:pass@h:1080/'"
+        cleaned = self.probe.redact(leaked)
+        self.assertNotIn("pass", cleaned)
+        self.assertIn("socks5://***@h:1080", cleaned)
+
+    def test_playwright_proxy_keeps_ipv6_brackets(self):
+        """Без скобок host стал бы fd00, то есть прокси молча оказался бы другим."""
+        settings = self.probe.playwright_proxy("http://user:pass@[fd00::1]:8080")
+        self.assertEqual(settings["server"], "http://[fd00::1]:8080")
+
+    def test_both_playwright_packages_get_proxy(self):
+        proxy = "http://user:pass@proxy.invalid:8080"
+        expected = self.probe.playwright_proxy(proxy)
+        self.assertEqual(expected["password"], "pass")
+        self.assertNotIn("pass@", expected["server"])
+
+        class Browser:
+            def new_page(self):
+                return object()
+
+        class Runtime:
+            def __init__(self, bucket):
+                self.bucket = bucket
+
+            @property
+            def chromium(self):
+                parent = self
+
+                class Chromium:
+                    def launch(self, **kwargs):
+                        parent.bucket["proxy"] = kwargs.get("proxy")
+                        return Browser()
+
+                return Chromium()
+
+            def start(self):
+                return self
+
+        launched = {"playwright": {}, "patchright": {}}
+
+        def sync_for(name):
+            def sync_playwright():
+                class Api:
+                    def start(self):
+                        return Runtime(launched[name])
+                return Api()
+            return sync_playwright
+
+        playwright_mod = types.ModuleType("playwright")
+        playwright_sync = types.ModuleType("playwright.sync_api")
+        playwright_sync.sync_playwright = sync_for("playwright")
+        playwright_mod.sync_api = playwright_sync
+        patchright_mod = types.ModuleType("patchright")
+        patchright_sync = types.ModuleType("patchright.sync_api")
+        patchright_sync.sync_playwright = sync_for("patchright")
+        patchright_mod.sync_api = patchright_sync
+        with patch.dict(os.environ, {"ABG_PROXY": proxy}), patch.dict(sys.modules, {
+            "playwright": playwright_mod,
+            "playwright.sync_api": playwright_sync,
+            "patchright": patchright_mod,
+            "patchright.sync_api": patchright_sync,
+        }):
+            self.probe.PlaywrightAdapter().start()
+            self.probe.PatchrightAdapter().start()
+        self.assertEqual(launched["playwright"]["proxy"], expected)
+        self.assertEqual(launched["patchright"]["proxy"], expected)
+
+    def test_result_without_url_key(self):
+        with tempfile.TemporaryDirectory() as box:
+            path = Path(box) / "proxies.toml"
+            path.write_text("[profile.gold]\nnote = \"no url\"\n", encoding="utf-8")
+            os.chmod(path, 0o600)
+            loaded = True
+            try:
+                profiles = load_profiles(path)
+            except KeyError:
+                loaded = False
+            self.assertTrue(loaded)
+            self.assertEqual(profiles.get("gold"), "")
+
+    def test_playwright_proxy_splits_userinfo(self):
+        got = self.probe.playwright_proxy("http://user:p%40ss@proxy.invalid:8080")
+        self.assertEqual(got, {
+            "server": "http://proxy.invalid:8080",
+            "username": "user",
+            "password": "p@ss",
+        })
+        self.assertEqual(
+            self.probe.playwright_proxy("http://proxy.invalid:8080"),
+            {"server": "http://proxy.invalid:8080"},
+        )
+
+    def test_redact_strips_userinfo_and_leaves_plain_text(self):
+        text = self.probe.redact(
+            "curl: (5) Unsupported proxy syntax in 'http://user:pass@proxy.invalid:8080/'"
+        )
+        self.assertNotIn("pass", text)
+        self.assertIn("proxy.invalid:8080", text)
+        self.assertEqual(
+            self.probe.redact("curl: (7) connection refused"),
+            "curl: (7) connection refused",
+        )
 
 
 class DockerDescriptorTests(unittest.TestCase):

@@ -48,6 +48,8 @@ def next_step(error_type, challenge, *, egress_changed: bool) -> Step:
         step = Step.human
     elif reason is FailureReason.provider_error:
         step = Step.investigate
+    elif reason is FailureReason.environment_error:
+        step = Step.investigate
     elif reason is FailureReason.challenge_suspected:
         step = Step.change_egress
     else:

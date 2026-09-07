@@ -70,7 +70,9 @@ class AgeRecordTests(unittest.TestCase):
     def test_missing_age_is_rejected_like_other_jsonl_fields(self):
         raw = json.loads(to_jsonl_line(record('rss', 'target:a')))
         del raw['entrance_age_hours']
-        with self.assertRaisesRegex(ValueError, 'entrance_age_hours'):
+        self.assertIsNone(from_jsonl_line(json.dumps(raw)).entrance_age_hours)
+        del raw['provider']
+        with self.assertRaisesRegex(ValueError, 'provider'):
             from_jsonl_line(json.dumps(raw))
 
 

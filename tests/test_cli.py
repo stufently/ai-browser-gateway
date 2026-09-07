@@ -1,11 +1,14 @@
 import contextlib
 import io
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from bench.cli import build_parser, main
+from bench.models import FailureReason
 from bench.providers.registry import PROVIDERS
 from bench.runner.record import from_jsonl_line
 from tests.m2_helpers import FakeLauncher, output
@@ -108,6 +111,85 @@ valid = false
                 main(['report', str(source), '--order', 'curl', '--output', str(target)])
             self.assertEqual(source.read_text(), original)
             self.assertEqual(destination.read_text(), 'preserve report')
+
+    def test_run_accepts_egress_flag(self):
+        parser = build_parser()
+        args = parser.parse_args(['run', '--output', 'out.jsonl', '--egress', 'gold'])
+        self.assertEqual(args.egress, 'gold')
+
+    def test_run_missing_egress_profile_writes_not_measured(self):
+        home = self.root / 'home'
+        home.mkdir()
+        path = self.root / 'out.jsonl'
+        launcher = FakeLauncher()
+        with patch.dict(os.environ, {'HOME': str(home)}):
+            self.invoke(
+                ['run', '--providers', 'curl', '--cells', 'scenario:static',
+                 '--output', str(path), '--egress', 'gold'],
+                launcher=launcher, reader=lambda key: None, sleep=lambda seconds: None,
+            )
+        records = [from_jsonl_line(line) for line in path.read_text().splitlines()]
+        self.assertEqual(records[0].error_type, FailureReason.not_measured)
+        self.assertEqual(records[0].egress_profile, 'gold')
+        self.assertEqual(launcher.calls, [])
+        self.assertNotIn('pass', path.read_text())
+
+    def test_run_with_proxy_profile_passes_env_name_not_url(self):
+        home = self.root / 'home'
+        config = home / '.config' / 'abg'
+        config.mkdir(parents=True)
+        proxies = config / 'proxies.toml'
+        proxies.write_text('[profile.gold]\nurl = "http://user:pass@proxy.invalid:8080"\n')
+        os.chmod(proxies, 0o600)
+        path = self.root / 'out.jsonl'
+        seen = {}
+
+        class Capture(FakeLauncher):
+            def run(self, argv, timeout):
+                seen['proxy'] = os.environ.get('ABG_PROXY')
+                seen['argv'] = list(argv)
+                return super().run(argv, timeout)
+
+        launcher = Capture(output())
+        with patch.dict(os.environ, {'HOME': str(home)}):
+            self.invoke(
+                ['run', '--providers', 'curl', '--cells', 'scenario:static',
+                 '--output', str(path), '--egress', 'gold'],
+                launcher=launcher, reader=lambda key: None, sleep=lambda seconds: None,
+            )
+        records = [from_jsonl_line(line) for line in path.read_text().splitlines()]
+        self.assertEqual(records[0].egress_profile, 'gold')
+        self.assertTrue(records[0].success)
+        self.assertEqual(seen['proxy'], 'http://user:pass@proxy.invalid:8080')
+        self.assertEqual(seen['argv'][seen['argv'].index('--env') + 1], 'ABG_PROXY')
+        self.assertFalse(any('pass' in part or part.startswith('ABG_PROXY=') for part in seen['argv']))
+        self.assertNotIn('pass', path.read_text())
+        self.assertNotIn('proxy.invalid', path.read_text())
+
+    def test_run_wide_creds_permissions_write_environment_error(self):
+        home = self.root / 'home'
+        config = home / '.config' / 'abg'
+        config.mkdir(parents=True)
+        proxies = config / 'proxies.toml'
+        proxies.write_text('[profile.gold]\nurl = "http://user:pass@proxy.invalid:8080"\n')
+        os.chmod(proxies, 0o644)
+        path = self.root / 'out.jsonl'
+        launcher = FakeLauncher()
+        stderr = io.StringIO()
+        with patch.dict(os.environ, {'HOME': str(home)}), contextlib.redirect_stderr(stderr):
+            rc = main(
+                ['run', '--providers', 'curl', '--cells', 'scenario:static',
+                 '--output', str(path), '--egress', 'gold'],
+                launcher=launcher, reader=lambda key: None, sleep=lambda seconds: None,
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn(str(proxies), stderr.getvalue())
+        records = [from_jsonl_line(line) for line in path.read_text().splitlines()]
+        self.assertTrue(records)
+        self.assertEqual(records[0].error_type, FailureReason.environment_error)
+        self.assertEqual(records[0].egress_profile, 'gold')
+        self.assertEqual(launcher.calls, [])
+        self.assertNotIn('pass@', path.read_text())
 
     def test_run_does_not_overwrite_existing_log(self):
         path = self.root / 'out.jsonl'
