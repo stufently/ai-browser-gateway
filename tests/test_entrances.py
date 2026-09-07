@@ -135,10 +135,24 @@ class EntranceProbeTests(unittest.TestCase):
         self.assertTrue(result['ok'])
         self.assertEqual(result['final_url'], SNAPSHOT)
         self.assertAlmostEqual(result['entrance_age_hours'], 8 + 44 / 60 + 18 / 3600)
-        self.assertEqual(fetch.call_args_list[0].args[0],
+        self.assertEqual(fetch.call_args_list[0].args[0].full_url,
                          'https://archive.org/wayback/available?url=https%3A%2F%2Fexample.invalid%2Fpath%3Fa%3D1%26b%3D2')
-        self.assertEqual(fetch.call_args_list[1].args[0], SNAPSHOT)
+        self.assertEqual(fetch.call_args_list[1].args[0].full_url, SNAPSHOT)
         self.assertEqual(fetch.call_count, 2)
+
+    def test_entrance_requests_carry_a_browser_user_agent(self):
+        # Measured 07.09.2026: lowendtalk.com refuses "Python-urllib/3.14" with
+        # 403 and serves the same feed to curl and to a browser string. The
+        # library default would lose the one cell this entrance was added for.
+        result, fetch = self.run_with('rss', [Response('<rss><channel><title>'
+                                                      + SENTINEL + '</title></channel></rss>')])
+        self.assertTrue(result['ok'])
+        sent = fetch.call_args_list[0].args[0]
+        # A bare URL string means no header was set at all: fail on the value,
+        # not on an attribute error, so the reason for the failure stays legible.
+        agent = getattr(sent, 'get_header', lambda name: None)('User-agent')
+        self.assertEqual(agent, self.probe.ENTRANCE_USER_AGENT)
+        self.assertNotIn('urllib', agent)
 
     def test_absent_snapshot_is_measured_content_missing(self):
         result, fetch = self.run_with('wayback', [Response('{"archived_snapshots": {}}')])

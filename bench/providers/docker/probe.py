@@ -24,7 +24,7 @@ from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import urlencode
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 from xml.etree import ElementTree
 
 
@@ -275,9 +275,20 @@ def _age_hours(published: datetime, now: datetime) -> float:
     return max(0.0, (now - published).total_seconds() / 3600)
 
 
+# Measured 07.09.2026 on lowendtalk.com/categories/offers/feed.rss: the library
+# default "Python-urllib/3.14" is refused with 403, while curl and a browser
+# string get 200. An entrance that introduces itself as a script is turned away
+# before anything else about it matters.
+ENTRANCE_USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/140.0.0.0 Safari/537.36"
+)
+
+
 def _fetch_entrance(url: str) -> dict[str, Any]:
+    request = Request(url, headers={"User-Agent": ENTRANCE_USER_AGENT})
     try:
-        response = urlopen(url, timeout=120)
+        response = urlopen(request, timeout=120)
     except HTTPError as exc:
         # HTTP refusals are measured responses, including their detector evidence.
         response = exc

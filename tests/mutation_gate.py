@@ -540,6 +540,15 @@ MUTANTS = [
      'test': 'tests.test_entrances.EntranceExecutionTests.test_configured_rss_uses_feed_url_and_preserves_age',
      'assert': 'self.assertEqual(launcher.calls[0][0][-4:], [FEED, SENTINEL, '
                "'--mode', 'cold'])"},
+    {'name': '68',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '    request = Request(url, headers={"User-Agent": ENTRANCE_USER_AGENT})\n'
+            '    try:\n'
+            '        response = urlopen(request, timeout=120)',
+     'new': '    try:\n'
+            '        response = urlopen(url, timeout=120)',
+     'test': 'tests.test_entrances.EntranceProbeTests.test_entrance_requests_carry_a_browser_user_agent',
+     'assert': 'self.assertEqual(agent, self.probe.ENTRANCE_USER_AGENT)'},
 ]
 
 
