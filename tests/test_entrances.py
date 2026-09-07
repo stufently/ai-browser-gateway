@@ -4,7 +4,7 @@ import io
 import json
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
@@ -129,6 +129,16 @@ class EntranceProbeTests(unittest.TestCase):
             with self.subTest(payload=payload), self.assertRaises(ValueError):
                 self.probe.parse_wayback(payload)
 
+    def test_empty_snapshot_fields_are_rejected(self):
+        for fields in ({'url': ''}, {'timestamp': ''}, {'url': '', 'timestamp': ''}):
+            with self.subTest(fields=fields):
+                with self.assertRaises(ValueError):
+                    self.probe.parse_wayback(archive_payload(**fields))
+
+    def test_future_snapshot_age_is_clamped(self):
+        self.assertEqual(self.probe._age_hours(NOW + timedelta(hours=5), NOW), 0.0)
+        self.assertEqual(self.probe._age_hours(NOW - timedelta(hours=5), NOW), 5.0)
+
     def test_wayback_fetches_snapshot_and_uses_timestamp_age(self):
         result, fetch = self.run_with('wayback', [Response(json.dumps(archive_payload())),
                                                  Response('<title>' + SENTINEL + '</title>', SNAPSHOT)])
@@ -187,6 +197,14 @@ class EntranceProbeTests(unittest.TestCase):
         self.assertTrue(result['ok'])
         self.assertIsNone(result['entrance_age_hours'])
 
+    def test_naive_pubdate_gives_no_age(self):
+        xml = ('<rss><channel><title>' + SENTINEL + '</title>'
+               '<item><pubDate>Mon, 07 Sep 2026 01:00:00</pubDate></item>'
+               '</channel></rss>')
+        result, _ = self.run_with('rss', [Response(xml, FEED)])
+        self.assertTrue(result['ok'])
+        self.assertIsNone(result['entrance_age_hours'])
+
     def test_invalid_pubdate_is_unknown_but_valid_date_still_used(self):
         for date, expected in (('broken', None), ('Mon, 07 Sep 2026 02:00:00 +0000', 0.0)):
             with self.subTest(date=date):
@@ -208,6 +226,19 @@ class EntranceProbeTests(unittest.TestCase):
                 self.assertFalse(result['ok'])
                 self.assertEqual(result['status'], 403)
                 self.assertEqual(result['challenge'], 'access_denied')
+
+    def test_status_400_is_a_measured_refusal(self):
+        discovery_url = 'https://archive.org/wayback/available?url=example.invalid'
+        body = b'<html><title>Bad Request</title></html>'
+        error = HTTPError(discovery_url, 400, 'Bad Request', {}, io.BytesIO(body))
+        result, fetch = self.run_with('wayback', [error])
+        self.assertEqual(result['status'], 400)
+        self.assertFalse(result['ok'])
+        self.assertEqual(result['final_url'], discovery_url)
+        self.assertEqual(result['bytes'], len(body))
+        self.assertEqual(result['err'], '')
+        self.assertIsNone(result['entrance_age_hours'])
+        self.assertEqual(fetch.call_count, 1)
 
 
 class EntranceExecutionTests(unittest.TestCase):
