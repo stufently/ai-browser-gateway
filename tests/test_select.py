@@ -69,6 +69,13 @@ class CanonicalOrderTests(unittest.TestCase):
         self.assertEqual(order[0], "rss")
         self.assertEqual(order[1], "curl")
 
+    def test_name_breaks_tier_and_cpu_tie(self):
+        later = record("wayback", "target:x", cpu_ms=500)
+        earlier = record("curl", "target:y", cpu_ms=500)
+        records = _nonempty([later, earlier])
+        self.assertEqual(canonical_order(records), ["curl", "wayback"])
+        self.assertEqual(canonical_order([earlier, later]), ["curl", "wayback"])
+
 
 class OrderIndependenceTests(unittest.TestCase):
     def test_fixture_keep_set_is_byte_identical_after_shuffle(self):
@@ -102,6 +109,17 @@ class OrderIndependenceTests(unittest.TestCase):
         self.assertEqual(forward, backward)
         self.assertTrue(forward["curl"][0], forward["curl"])
         self.assertFalse(forward["wayback"][0], forward["wayback"])
+
+    def test_two_useful_cells_keep_reason_byte_identical(self):
+        first = record("primp", "target:d", entrance_age_hours=0.5, cpu_ms=219)
+        second = record("primp", "target:c", entrance_age_hours=0.5, cpu_ms=219)
+        records = _nonempty([first, second])
+        cells = {item.cell for item in records}
+        self.assertEqual(len(cells), 2, cells)
+        forward = keep_set(records)
+        backward = keep_set([second, first])
+        self.assertEqual(forward, backward)
+        self.assertEqual(forward["primp"][1], "клетка `target:c`; клетка `target:d`")
 
 
 class RegressionTests(unittest.TestCase):
@@ -176,6 +194,39 @@ class AgeSemanticsTests(unittest.TestCase):
         decisions = keep_set(records)
         self.assertTrue(decisions["curl"][0], decisions["curl"])
         self.assertTrue(decisions["rss"][0], decisions["rss"])
+
+    def test_repeat_unknown_and_known_still_cover_unknown(self):
+        records = _nonempty(
+            [
+                record("wayback", LOWENDTALK, entrance_age_hours=None, cpu_ms=10),
+                record("wayback", LOWENDTALK, entrance_age_hours=5.0, cpu_ms=10),
+                record("rss", LOWENDTALK, entrance_age_hours=None, cpu_ms=20),
+            ]
+        )
+        ages = {item.entrance_age_hours for item in records}
+        self.assertEqual(len(ages), 2, ages)
+        decisions = keep_set(records)
+        self.assertTrue(decisions["wayback"][0], decisions["wayback"])
+        self.assertFalse(decisions["rss"][0], decisions["rss"])
+
+    def test_keep_set_returns_measurement_as_third_field(self):
+        stale_first = keep_set(
+            [
+                record("wayback", "target:a", entrance_age_hours=400.0, cpu_ms=10),
+                record("rss", "target:a", entrance_age_hours=0.5, cpu_ms=20),
+            ]
+        )
+        plain = keep_set(
+            [
+                record("curl", "target:a", entrance_age_hours=None, cpu_ms=10),
+                record("rss", "target:b", entrance_age_hours=None, cpu_ms=20),
+            ]
+        )
+        for decision in list(stale_first.values()) + list(plain.values()):
+            self.assertEqual(len(decision), 3, decision)
+        self.assertEqual(stale_first["rss"][2], "свежесть")
+        self.assertEqual(plain["rss"][2], "покрытие")
+        self.assertEqual(stale_first["wayback"][2], "покрытие")
 
 
 class NotMeasuredTests(unittest.TestCase):
@@ -296,6 +347,17 @@ class ReportSelectionTests(unittest.TestCase):
             any(word in text for word in ("покрытие", "свежесть")),
             text,
         )
+
+    def test_report_has_no_hidden_decision_comment(self):
+        path = write_real_run()
+        text = build_report(path, order=["curl", "wayback", "rss", "playwright"])
+        self.assertNotIn("<!--", text)
+        section = text.split("## Incremental coverage", 1)[1]
+        playwright_rows = [
+            line for line in section.splitlines() if line.startswith("| playwright |")
+        ]
+        self.assertTrue(playwright_rows, text)
+        self.assertTrue(all("incremental" not in line for line in playwright_rows), text)
 
 
 if __name__ == "__main__":

@@ -11,6 +11,17 @@ from collections import defaultdict
 from bench.providers.registry import PROVIDERS
 
 
+class Decision(tuple):
+    """(keep, reason, axis). Unpacks as (keep, reason) for two-field callers."""
+
+    def __new__(cls, keep, reason, axis):
+        return super().__new__(cls, (keep, reason, axis))
+
+    def __iter__(self):
+        yield self[0]
+        yield self[1]
+
+
 def canonical_order(records) -> list[str]:
     """Порядок разбора из ДАННЫХ, а не из порядка строк в реестре."""
     records = list(records)
@@ -31,11 +42,6 @@ def canonical_order(records) -> list[str]:
     return sorted(names, key=key)
 
 
-def _merge_age(current, incoming):
-    known = [age for age in (current, incoming) if age is not None]
-    return min(known) if known else None
-
-
 def _comparable(age_kept, age_candidate, tolerance: float) -> bool:
     if age_kept is None and age_candidate is None:
         return True
@@ -44,21 +50,18 @@ def _comparable(age_kept, age_candidate, tolerance: float) -> bool:
     return age_kept <= age_candidate + tolerance
 
 
-def _solved_ages(records) -> dict[str, dict[str, float | None]]:
-    solved: dict[str, dict[str, float | None]] = {}
+def _solved_ages(records) -> dict[str, dict[str, list]]:
+    solved: dict[str, dict[str, list]] = {}
     for record in records:
         if not record.success:
             continue
         cells = solved.setdefault(record.provider, {})
-        if record.cell in cells:
-            cells[record.cell] = _merge_age(cells[record.cell], record.entrance_age_hours)
-        else:
-            cells[record.cell] = record.entrance_age_hours
+        cells.setdefault(record.cell, []).append(record.entrance_age_hours)
     return solved
 
 
-def keep_set(records, *, age_tolerance_hours: float = 1.0) -> dict[str, tuple[bool, str]]:
-    """Провайдер -> (оставить, причина). От порядка записей не зависит.
+def keep_set(records, *, age_tolerance_hours: float = 1.0) -> dict[str, tuple]:
+    """Провайдер -> (оставить, причина, измерение). От порядка записей не зависит.
 
     age_tolerance_hours — политика, а не измерение. Умолчание 1.0 значит:
     в пределах часа содержимое считается одинаково свежим. Числа, полученного
@@ -69,32 +72,41 @@ def keep_set(records, *, age_tolerance_hours: float = 1.0) -> dict[str, tuple[bo
         return {}
     order = canonical_order(records)
     solved = _solved_ages(records)
-    kept_ages: dict[str, list[float | None]] = defaultdict(list)
-    decisions: dict[str, tuple[bool, str]] = {}
+    kept_ages: dict[str, list] = defaultdict(list)
+    decisions: dict[str, tuple] = {}
     for provider in order:
         cells = solved.get(provider) or {}
         if not cells:
-            decisions[provider] = (False, "нет успешных клеток")
+            decisions[provider] = Decision(False, "нет успешных клеток", "покрытие")
             continue
-        useful: list[tuple[str, float | None, list[float | None]]] = []
-        for cell, age in cells.items():
+        useful = []
+        for cell in sorted(cells):
+            ages = cells[cell]
             held = kept_ages.get(cell, [])
-            if held and any(_comparable(other, age, age_tolerance_hours) for other in held):
+            if held and any(_comparable(other, age, age_tolerance_hours) for other in held for age in ages):
                 continue
-            useful.append((cell, age, held))
+            useful.append((cell, ages, held))
         if not useful:
-            decisions[provider] = (False, "клетки уже покрыты в сопоставимом качестве")
+            decisions[provider] = Decision(
+                False, "клетки уже покрыты в сопоставимом качестве", "покрытие"
+            )
         else:
             parts = []
-            for cell, age, held in useful:
-                if held and age is not None:
-                    older = [item for item in held if item is not None]
-                    if older:
-                        delta = min(older) - age
-                        parts.append(f"клетка `{cell}` свежее на {delta:.1f} ч")
-                        continue
-                parts.append(f"клетка `{cell}`")
-            decisions[provider] = (True, "; ".join(parts))
-            for cell, age in cells.items():
-                kept_ages[cell].append(age)
+            has_new_cell = False
+            for cell, ages, held in useful:
+                if not held:
+                    has_new_cell = True
+                    parts.append(f"клетка `{cell}`")
+                    continue
+                known_held = sorted(item for item in held if item is not None)
+                known_new = sorted(item for item in ages if item is not None)
+                if known_held and known_new:
+                    delta = known_held[0] - known_new[0]
+                    parts.append(f"клетка `{cell}` свежее на {delta:.1f} ч")
+                else:
+                    parts.append(f"клетка `{cell}`")
+            axis = "покрытие" if has_new_cell else "свежесть"
+            decisions[provider] = Decision(True, "; ".join(parts), axis)
+            for cell, ages in cells.items():
+                kept_ages[cell].extend(ages)
     return decisions

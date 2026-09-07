@@ -127,10 +127,9 @@ def build_report(jsonl_path, *, order, threshold=0.05, unmeasured=()) -> str:
             age = (f'{statistics.median(values):.2f}' if values else
                    'unknown' if provider in measured_providers else 'не измерено')
             lines.append(f'| {_md(provider)} | {age} |')
-    wholly_unmeasured = observed_providers - measured_providers
-    unmeasured = list(dict.fromkeys([*unmeasured, *(name for name in order if name in wholly_unmeasured)]))
+    unmeasured = list(dict.fromkeys([*unmeasured, *(name for name in order if name not in measured_providers)]))
     selection = keep_set(collected)
     lines += ['', '## Incremental coverage', '',
-              render_markdown([row for row in rows if row.provider not in wholly_unmeasured],
+              render_markdown([row for row in rows if row.provider in measured_providers],
                               threshold=threshold, unmeasured=unmeasured, decisions=selection).rstrip()]
     return '\n'.join(lines) + '\n'
