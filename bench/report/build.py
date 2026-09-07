@@ -10,6 +10,7 @@ from bench.models import FailureReason
 from bench.providers.registry import PROVIDERS
 from bench.report.coverage import incremental
 from bench.report.render import render_markdown
+from bench.report.select import keep_set
 from bench.runner.environment import FIELDS
 from bench.runner.record import from_jsonl_line
 
@@ -31,6 +32,7 @@ def build_report(jsonl_path, *, order, threshold=0.05, unmeasured=()) -> str:
     ages = defaultdict(list)
     timings, memory = defaultdict(list), defaultdict(list)
     groups, cells = set(), set()
+    collected = []
 
     def read_records(source):
         for line_number, line in enumerate(source, 1):
@@ -40,6 +42,7 @@ def build_report(jsonl_path, *, order, threshold=0.05, unmeasured=()) -> str:
                 record = from_jsonl_line(line)
             except (ValueError, TypeError, KeyError) as exc:
                 raise ValueError(f'{jsonl_path}: line {line_number}: {exc}') from exc
+            collected.append(record)
             cells.add(record.cell)
             group = record.provider, record.mode
             groups.add(group)
@@ -126,7 +129,8 @@ def build_report(jsonl_path, *, order, threshold=0.05, unmeasured=()) -> str:
             lines.append(f'| {_md(provider)} | {age} |')
     wholly_unmeasured = observed_providers - measured_providers
     unmeasured = list(dict.fromkeys([*unmeasured, *(name for name in order if name in wholly_unmeasured)]))
+    selection = keep_set(collected)
     lines += ['', '## Incremental coverage', '',
               render_markdown([row for row in rows if row.provider not in wholly_unmeasured],
-                              threshold=threshold, unmeasured=unmeasured).rstrip()]
+                              threshold=threshold, unmeasured=unmeasured, decisions=selection).rstrip()]
     return '\n'.join(lines) + '\n'
