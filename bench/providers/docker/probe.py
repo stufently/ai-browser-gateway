@@ -49,6 +49,10 @@ def playwright_proxy(url: str) -> dict[str, str]:
     """ProxySettings для playwright/patchright/camoufox: креды отдельно от server."""
     parsed = urlparse(url)
     host = parsed.hostname or ""
+    # hostname отдаёт IPv6 без скобок; без них "http://fd00::1:8080" разберётся
+    # как хост fd00 с мусором, и прокси молча окажется другим.
+    if ":" in host:
+        host = f"[{host}]"
     netloc = f"{host}:{parsed.port}" if parsed.port is not None else host
     settings = {
         "server": urlunparse((parsed.scheme, netloc, parsed.path, parsed.params,
@@ -66,7 +70,9 @@ def pydoll_proxy_flag(url: str) -> str:
     return "--proxy-server=" + url
 
 
-_USERINFO_URL = re.compile(r"(https?://)([^/@\s'\"]+)@", re.I)
+# Схема — любая: измерено, что curl печатает URL прокси в stderr и для socks5,
+# а пароль от socks-прокси утекает ровно так же, как от http.
+_USERINFO_URL = re.compile(r"([a-z][a-z0-9+.\-]*://)([^/@\s'\"]+)@", re.I)
 
 
 def redact(text: str) -> str:

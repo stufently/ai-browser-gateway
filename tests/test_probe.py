@@ -732,6 +732,18 @@ class ProxyWiringTests(unittest.TestCase):
     def setUpClass(cls):
         cls.probe = load_probe()
 
+    def test_redact_covers_any_proxy_scheme(self):
+        """socks5 у провайдеров прокси — обычное дело; curl печатает его так же."""
+        leaked = "curl: (7) Unsupported proxy scheme for 'socks5://user:pass@h:1080/'"
+        cleaned = self.probe.redact(leaked)
+        self.assertNotIn("pass", cleaned)
+        self.assertIn("socks5://***@h:1080", cleaned)
+
+    def test_playwright_proxy_keeps_ipv6_brackets(self):
+        """Без скобок host стал бы fd00, то есть прокси молча оказался бы другим."""
+        settings = self.probe.playwright_proxy("http://user:pass@[fd00::1]:8080")
+        self.assertEqual(settings["server"], "http://[fd00::1]:8080")
+
     def test_both_playwright_packages_get_proxy(self):
         proxy = "http://user:pass@proxy.invalid:8080"
         expected = self.probe.playwright_proxy(proxy)

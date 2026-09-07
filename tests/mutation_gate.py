@@ -699,6 +699,18 @@ MUTANTS = [
      'new': '        url = body["url"]',
      'test': 'tests.test_probe.ProxyWiringTests.test_result_without_url_key',
      'assert': 'self.assertTrue(loaded)'},
+    {'name': '90',
+     'file': 'bench/providers/docker/probe.py',
+     'old': 'r"([a-z][a-z0-9+.\\-]*://)([^/@\\s\'\\"]+)@"',
+     'new': 'r"(https?://)([^/@\\s\'\\"]+)@"',
+     'test': 'tests.test_probe.ProxyWiringTests.test_redact_covers_any_proxy_scheme',
+     'assert': 'self.assertNotIn("pass", cleaned)'},
+    {'name': '91',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '    if ":" in host:\n        host = f"[{host}]"\n',
+     'new': '',
+     'test': 'tests.test_probe.ProxyWiringTests.test_playwright_proxy_keeps_ipv6_brackets',
+     'assert': 'self.assertEqual(settings["server"], "http://[fd00::1]:8080")'},
 ]
 
 

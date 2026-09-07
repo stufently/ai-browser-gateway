@@ -136,7 +136,7 @@ def main(argv=None, *, launcher=None, reader=None, sleep=None) -> int:
                             profiles = load_profiles(creds)
                             egress = (args.egress, profile_url(profiles, args.egress))
                         except PermissionError:
-                            print(str(creds), file=sys.stderr)
+                            print(f'credentials file is group- or world-accessible: {creds}', file=sys.stderr)
                             egress = (args.egress, None)
                             skip_reason = FailureReason.environment_error
                     records = execute_plan(plan, launcher=launcher, cells=cells, env=env,
