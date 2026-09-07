@@ -70,6 +70,8 @@ def _validated(payload):
         _number(payload[key], key)
     _number(payload['bytes'], 'bytes', integer=True)
     _number(payload.get('redirects', 0), 'redirects', integer=True)
+    if payload.get('entrance_age_hours') is not None:
+        _number(payload['entrance_age_hours'], 'entrance_age_hours')
     ChallengeType(payload['challenge'])
     return payload
 
@@ -112,6 +114,7 @@ def _record(item, provider, cell, env, payload, failure):
         elapsed_ms=result.elapsed_ms, startup_ms=result.startup_ms, cpu_ms=result.cpu_ms,
         peak_rss_mb=result.peak_rss_mb, bytes=result.bytes_received, redirects=result.redirects,
         error_type=error, image_version=provider.image, cell=item.cell, **metadata,
+        entrance_age_hours=payload.get('entrance_age_hours'),
     )
 
 
@@ -133,13 +136,20 @@ def execute_plan(plan, *, launcher, cells, env, timeout=180, pause_s=0.0, sleep=
     records = []
     for item in plan:
         provider, cell = by_name(item.provider), cells[item.cell]
-        host = urlsplit(cell['url']).hostname or cell['url']
+        url = cell['url']
+        if provider.kind == 'entrance':
+            entrance_url = cell.get('entrances', {}).get(provider.name)
+            if item.cell.startswith('scenario:') or (provider.name != 'wayback' and not entrance_url):
+                records.append(_record(item, provider, cell, env, None, FailureReason.not_measured))
+                continue
+            url = entrance_url or url
+        host = urlsplit(url).hostname or url
         if host in seen_hosts and pause_s:
             # A full pause after prior completion is conservative even when
             # other hosts intervened, and does not depend on wall-clock changes.
             sleep(pause_s)
         network = 'host' if item.cell.startswith('scenario:') else None
-        argv = build_argv(provider, url=cell['url'], sentinel=cell['sentinel'], network=network)
+        argv = build_argv(provider, url=url, sentinel=cell['sentinel'], network=network)
         argv.extend(['--mode', item.mode])
         payload, failure = None, None
         try:

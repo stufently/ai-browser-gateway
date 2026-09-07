@@ -1,0 +1,6 @@
+FROM python:3.14-slim
+
+WORKDIR /opt/abg
+COPY probe.py /opt/abg/probe.py
+ENV ABG_PROVIDER=wayback
+ENTRYPOINT ["python3","/opt/abg/probe.py"]

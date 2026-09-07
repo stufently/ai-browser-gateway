@@ -19,11 +19,17 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Any
+from urllib.error import HTTPError
+from urllib.parse import urlencode
+from urllib.request import urlopen
+from xml.etree import ElementTree
 
 
 PROVIDERS = frozenset(
-    {"curl", "curl_cffi", "primp", "playwright", "patchright", "camoufox", "pydoll"}
+    {"curl", "curl_cffi", "primp", "playwright", "patchright", "camoufox", "pydoll", "wayback", "rss"}
 )
 
 
@@ -240,6 +246,100 @@ def _metrics() -> tuple[int, float]:
     live_rss_kb = _live_rss_kb()
     peak_mb = max(live_rss_kb, own.ru_maxrss, children.ru_maxrss) / 1024
     return cpu_ms, round(peak_mb, 3)
+
+
+def parse_wayback(payload: dict) -> tuple[str, str] | None:
+    """Return (snapshot URL, UTC timestamp), or None when no closest exists."""
+    if not isinstance(payload, dict):
+        raise ValueError("Wayback payload must be an object")
+    snapshots = payload.get("archived_snapshots", {})
+    if not isinstance(snapshots, dict):
+        raise ValueError("archived_snapshots must be an object")
+    if not snapshots or "closest" not in snapshots:
+        return None
+    closest = snapshots["closest"]
+    if not isinstance(closest, dict) or any(
+        not isinstance(closest.get(key), str) or not closest[key]
+        for key in ("url", "timestamp")
+    ):
+        raise ValueError("closest requires a snapshot URL and timestamp")
+    return closest["url"], closest["timestamp"]
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _age_hours(published: datetime, now: datetime) -> float:
+    # A future source date can reflect clock skew; elapsed age cannot be negative.
+    return max(0.0, (now - published).total_seconds() / 3600)
+
+
+def _fetch_entrance(url: str) -> dict[str, Any]:
+    try:
+        response = urlopen(url, timeout=120)
+    except HTTPError as exc:
+        # HTTP refusals are measured responses, including their detector evidence.
+        response = exc
+    with response:
+        return _result(response.status, response.geturl(), response.read(), 0,
+                       headers=_normalize_headers(response.headers))
+
+
+class WaybackAdapter:
+    version = "stdlib-" + sys.version.split()[0]
+
+    def start(self) -> None:
+        self.now = _utcnow()
+
+    def navigate(self, url: str) -> dict[str, Any]:
+        discovery = _fetch_entrance("https://archive.org/wayback/available?" + urlencode({"url": url}))
+        if discovery["status"] >= 400:
+            return discovery
+        snapshot = parse_wayback(json.loads(discovery["body"]))
+        if snapshot is None:
+            missing = _result(discovery["status"], discovery["final_url"], b"", 0)
+            missing["err"] = "content_missing"
+            return missing
+        snapshot_url, timestamp = snapshot
+        if not re.fullmatch(r"[0-9]{14}", timestamp):
+            raise ValueError("invalid Wayback timestamp")
+        published = datetime.strptime(timestamp, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+        response = _fetch_entrance(snapshot_url)
+        response["entrance_age_hours"] = _age_hours(published, self.now)
+        return response
+
+    def close(self) -> None:
+        pass
+
+
+class RssAdapter:
+    version = "stdlib-" + sys.version.split()[0]
+
+    def start(self) -> None:
+        self.now = _utcnow()
+
+    def navigate(self, url: str) -> dict[str, Any]:
+        response = _fetch_entrance(url)
+        if response["status"] >= 400:
+            return response
+        root = ElementTree.fromstring(response["body"])
+        dates = []
+        for element in root.iter():
+            if element.tag.rsplit("}", 1)[-1] != "pubDate" or not element.text:
+                continue
+            try:
+                published = parsedate_to_datetime(element.text.strip())
+            except (TypeError, ValueError, OverflowError):
+                continue
+            # An absent timezone does not establish a UTC publication instant.
+            if published.tzinfo is not None:
+                dates.append(published)
+        response["entrance_age_hours"] = _age_hours(max(dates), self.now) if dates else None
+        return response
+
+    def close(self) -> None:
+        pass
 
 
 class CurlAdapter:
@@ -487,6 +587,8 @@ def make_adapter(provider: str):
         "patchright": PatchrightAdapter,
         "camoufox": CamoufoxAdapter,
         "pydoll": PydollAdapter,
+        "wayback": WaybackAdapter,
+        "rss": RssAdapter,
     }
     if provider not in adapters:
         raise ValueError(f"unknown provider: {provider}")
@@ -547,7 +649,8 @@ def run_probe(
             "elapsed_ms": elapsed_ms,
             "peak_rss_mb": peak_rss_mb,
             "cpu_ms": cpu_ms,
-            "err": "",
+            "err": response.get("err", ""),
+            "entrance_age_hours": response.get("entrance_age_hours"),
             "provider_version": getattr(adapter, "version", "unknown"),
             "redirects": response.get("redirects", 0),
             "headers": headers,
@@ -572,6 +675,7 @@ def run_probe(
             "redirects": 0,
             "headers": None,
             "challenge_markers": [],
+            "entrance_age_hours": None,
         }
     finally:
         if rss_monitor is not None:
