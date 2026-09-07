@@ -11,17 +11,6 @@ from collections import defaultdict
 from bench.providers.registry import PROVIDERS
 
 
-class Decision(tuple):
-    """(keep, reason, axis). Unpacks as (keep, reason) for two-field callers."""
-
-    def __new__(cls, keep, reason, axis):
-        return super().__new__(cls, (keep, reason, axis))
-
-    def __iter__(self):
-        yield self[0]
-        yield self[1]
-
-
 def canonical_order(records) -> list[str]:
     """Порядок разбора из ДАННЫХ, а не из порядка строк в реестре."""
     records = list(records)
@@ -77,17 +66,21 @@ def keep_set(records, *, age_tolerance_hours: float = 1.0) -> dict[str, tuple]:
     for provider in order:
         cells = solved.get(provider) or {}
         if not cells:
-            decisions[provider] = Decision(False, "нет успешных клеток", "покрытие")
+            decisions[provider] = (False, "нет успешных клеток", "покрытие")
             continue
         useful = []
         for cell in sorted(cells):
             ages = cells[cell]
             held = kept_ages.get(cell, [])
-            if held and any(_comparable(other, age, age_tolerance_hours) for other in held for age in ages):
+            # Каждый замер кандидата — отдельное предложение. Достаточно одного
+            # непокрытого (например, свежего рядом с протухшим), чтобы клетка
+            # осталась полезной: иначе один старый замер поглощает весь вклад.
+            if held and all(any(_comparable(other, age, age_tolerance_hours) for other in held)
+                            for age in ages):
                 continue
             useful.append((cell, ages, held))
         if not useful:
-            decisions[provider] = Decision(
+            decisions[provider] = (
                 False, "клетки уже покрыты в сопоставимом качестве", "покрытие"
             )
         else:
@@ -106,7 +99,7 @@ def keep_set(records, *, age_tolerance_hours: float = 1.0) -> dict[str, tuple]:
                 else:
                     parts.append(f"клетка `{cell}`")
             axis = "покрытие" if has_new_cell else "свежесть"
-            decisions[provider] = Decision(True, "; ".join(parts), axis)
+            decisions[provider] = (True, "; ".join(parts), axis)
             for cell, ages in cells.items():
                 kept_ages[cell].extend(ages)
     return decisions

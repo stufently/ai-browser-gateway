@@ -362,3 +362,40 @@ class ReportSelectionTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class CoordinatorFindingsTests(unittest.TestCase):
+    """Найдено на приёмке захода исправлений, закрыто постановщиком."""
+
+    def test_name_breaks_tie_across_many_providers(self):
+        """Ничья на ДВУХ именах разрывается порядком множества в половине прогонов.
+
+        canonical_order сортирует set, поэтому без имени в ключе результат
+        зависит от PYTHONHASHSEED: замерено 5 совпадений с алфавитом на 12
+        семян. Восемь имён делают такое совпадение практически невозможным.
+        """
+        names = [f"probe{index}" for index in range(8)]
+        records = _nonempty([
+            record(name, f"target:{name}", cpu_ms=500, entrance_age_hours=None)
+            for name in names
+        ])
+        self.assertEqual(len(set(names)), 8)
+        self.assertEqual(canonical_order(records), sorted(names))
+
+    def test_fresh_observation_is_not_absorbed_by_a_stale_one(self):
+        """Один протухший замер кандидата не отменяет его же свежий."""
+        records = _nonempty([
+            record("wayback", "target:a", cpu_ms=10, entrance_age_hours=400.0),
+            record("rss", "target:a", cpu_ms=20, entrance_age_hours=0.01),
+            record("rss", "target:a", cpu_ms=20, entrance_age_hours=500.0),
+        ])
+        keep, reason, axis = keep_set(records)["rss"]
+        self.assertTrue(keep, reason)
+        self.assertEqual(axis, "свежесть")
+
+    def test_decision_is_a_plain_three_field_tuple(self):
+        """len()==3 при итерации на два поля — ловушка: list() молча терял ось."""
+        decision = keep_set(fixture_records())["rss"]
+        self.assertEqual(len(list(decision)), 3, decision)
+        keep, reason, axis = decision
+        self.assertTrue(keep, reason)
+        self.assertIn(axis, ("покрытие", "свежесть"))
