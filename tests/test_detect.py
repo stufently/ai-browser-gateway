@@ -277,3 +277,83 @@ class DetectChallengeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RuleProvenanceTests(unittest.TestCase):
+    """Where a rule came from is data, not a comment: it must survive review."""
+
+    # One minimal body per unmeasured rule: firing that rule and nothing else.
+    ASSUMED_SAMPLES = {
+        "body_captcha": '<html><body><img id="captcha-history" src="/x.png"></body></html>',
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def test_provenance_covers_every_rule_and_nothing_else(self):
+        named = {name for name, _ in self.probe._BODY_RULES}
+        named |= {name for name, _ in self.probe._SUPPORTING_BODY_RULES}
+        named |= {"header_cf_mitigated", "body_captcha", "status_403", "status_429"}
+        self.assertEqual(set(self.probe.RULE_PROVENANCE), named)
+
+    def test_measured_rules_name_a_fixture_that_exists(self):
+        for name, origin in self.probe.RULE_PROVENANCE.items():
+            if not origin.startswith("fixture:"):
+                continue
+            with self.subTest(rule=name):
+                # A renamed fixture must break the claim, not outlive it.
+                self.assertTrue((FIXTURES / origin.split(":", 1)[1]).is_file(), origin)
+
+    def test_assumed_rule_never_decides_a_verdict_alone(self):
+        assumed = {n for n, o in self.probe.RULE_PROVENANCE.items()
+                   if o == self.probe.ASSUMED}
+        self.assertEqual(assumed, set(self.ASSUMED_SAMPLES), "sample missing for a rule")
+        for name, body in self.ASSUMED_SAMPLES.items():
+            with self.subTest(rule=name):
+                verdict, markers = self.probe.detect_challenge(200, {}, body)
+                self.assertEqual(verdict, "none")
+                self.assertIn(name, markers)
+
+    def test_exact_provenance_of_the_one_unmeasured_rule(self):
+        # Flipping this to "measured" has to be typed here as well: an assumption
+        # cannot quietly become a fact between milestones.
+        self.assertEqual(self.probe.RULE_PROVENANCE["body_captcha"], "assumed")
+        self.assertEqual(
+            self.probe.RULE_PROVENANCE["body_just_a_moment"],
+            "fixture:cf_interstitial_200body_403.html",
+        )
+
+
+class DecisiveTitleTests(unittest.TestCase):
+    """The single decisive rule must not hang on the first <title> in the file."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def test_inert_title_never_decides(self):
+        cases = {
+            "comment": '<html><head><!-- <title>Just a moment...</title> -->'
+                       "<title>Offers</title></head><body>post</body></html>",
+            "script": '<html><head><script>var t = "<title>Just a moment...</title>";'
+                      "</script><title>Forum</title></head><body>post</body></html>",
+            "template": "<html><head><template><title>Just a moment...</title></template>"
+                        "<title>Shop</title></head><body>post</body></html>",
+        }
+        for where, body in cases.items():
+            with self.subTest(where=where):
+                # A forum post quoting a block page is not a block page.
+                self.assertEqual(self.probe.detect_challenge(200, {}, body), ("none", ()))
+
+    def test_real_title_still_decides(self):
+        body = "<html><head><title>Just a moment...</title></head><body>x</body></html>"
+        verdict, markers = self.probe.detect_challenge(200, {}, body)
+        self.assertEqual(verdict, "suspected")
+        self.assertEqual(markers, ("body_just_a_moment",))
+
+    def test_output_title_field_is_left_alone(self):
+        # _title() feeds the probe's output contract and must keep its behaviour.
+        body = "<html><head><!-- <title>Ghost</title> --><title>Real</title></head></html>"
+        self.assertEqual(self.probe._title(body), "Ghost")
+        self.assertEqual(self.probe._decisive_title(body), "Real")

@@ -85,7 +85,42 @@ def _title(body: str) -> str:
     return html_module.unescape(re.sub(r"\s+", " ", match.group(1))).strip()
 
 
-# Confirmed on tests/fixtures/cf_interstitial_200body_403.html (counts as of 2026-09-06).
+# A decision must not hang on the FIRST <title> in the file: a commented-out or
+# scripted one wins over the real one, and a forum post quoting a block page
+# would be read as a block page. _title() itself stays untouched — it feeds the
+# output field, and changing it would change the probe's output contract.
+_INERT_MARKUP = re.compile(
+    r"<!--.*?-->|<script\b.*?</script\s*>|<template\b.*?</template\s*>",
+    re.I | re.S,
+)
+
+
+def _decisive_title(body: str) -> str:
+    """Title used for RULE decisions: comments, scripts and templates removed."""
+    return _title(_INERT_MARKUP.sub(" ", body))
+
+
+# Where every rule comes from, machine-readable on purpose: "fixture:<name>"
+# means the rule was seen in that real body under tests/fixtures/, "assumed"
+# means it was never measured. A comment would be deleted without anyone
+# noticing; flipping a value here has to be written by hand and shows up in the
+# diff. Tests enforce two things: the named fixture exists, and an "assumed"
+# rule never decides a verdict on its own.
+CF_INTERSTITIAL = "fixture:cf_interstitial_200body_403.html"
+ASSUMED = "assumed"
+RULE_PROVENANCE = {
+    "header_cf_mitigated": "measured:bizprofile.net 403, 2026-09-06",
+    "body_cf_challenges_host": CF_INTERSTITIAL,
+    "body_cf_chl_opt": CF_INTERSTITIAL,
+    "body_cf_chl": CF_INTERSTITIAL,
+    "body_cf_challenge_platform": CF_INTERSTITIAL,
+    "body_just_a_moment": CF_INTERSTITIAL,
+    "body_noindex_nofollow": CF_INTERSTITIAL,
+    "body_captcha": ASSUMED,
+    "status_403": "protocol:HTTP 403",
+    "status_429": "protocol:HTTP 429",
+}
+
 # Title "just a moment" is enough on its own. The other four needles need two
 # distinct body hits (title counts). noindex,nofollow is supporting only: it
 # also appears on ordinary pages.
@@ -143,7 +178,7 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
 
     body_names: list[str] = []
     for name, needle in _BODY_RULES:
-        haystack = _title(text).lower() if name == "body_just_a_moment" else lowered
+        haystack = _decisive_title(text).lower() if name == "body_just_a_moment" else lowered
         if needle in haystack:
             body_names.append(name)
     if body_names:
