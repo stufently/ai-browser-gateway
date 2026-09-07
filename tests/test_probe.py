@@ -9,9 +9,12 @@ from pathlib import Path
 import io
 import subprocess
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
+
+from bench.egress import load_profiles
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -297,8 +300,10 @@ class AdapterContractTests(unittest.TestCase):
             with patch.object(self.probe.subprocess, "run", return_value=completed) as run:
                 self.probe.CurlAdapter().navigate("https://target.invalid/")
                 command = run.call_args.args[0]
-            self.assertIn("--proxy", command)
-            self.assertEqual(command[command.index("--proxy") + 1], proxy)
+            self.assertNotIn("--proxy", command)
+            self.assertFalse(any("pass@" in part for part in command))
+            env = run.call_args.kwargs.get("env") or {}
+            self.assertEqual(env.get("ALL_PROXY"), proxy)
 
             captured = {}
 
@@ -398,11 +403,12 @@ class AdapterContractTests(unittest.TestCase):
             "camoufox": camoufox_mod,
             "camoufox.sync_api": camoufox_sync,
         }):
+            expected = self.probe.playwright_proxy(proxy)
             self.probe.PlaywrightAdapter().start()
-            self.assertEqual(launched["playwright"].get("proxy"), {"server": proxy})
+            self.assertEqual(launched["playwright"].get("proxy"), expected)
             self.probe.PatchrightAdapter().start()
             self.probe.CamoufoxAdapter().start()
-            self.assertEqual(launched["camoufox"].get("proxy"), {"server": proxy})
+            self.assertEqual(launched["camoufox"].get("proxy"), expected)
 
     def test_pydoll_adds_proxy_server_argument_when_set(self):
         proxy = "http://user:pass@proxy.invalid:8080"
@@ -719,6 +725,105 @@ class AdapterContractTests(unittest.TestCase):
                 adapter.page = Page(None)
                 missing = adapter.navigate("https://target.invalid/")
                 self.assertIsNone(missing["headers"])
+
+
+class ProxyWiringTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def test_both_playwright_packages_get_proxy(self):
+        proxy = "http://user:pass@proxy.invalid:8080"
+        expected = self.probe.playwright_proxy(proxy)
+        self.assertEqual(expected["password"], "pass")
+        self.assertNotIn("pass@", expected["server"])
+
+        class Browser:
+            def new_page(self):
+                return object()
+
+        class Runtime:
+            def __init__(self, bucket):
+                self.bucket = bucket
+
+            @property
+            def chromium(self):
+                parent = self
+
+                class Chromium:
+                    def launch(self, **kwargs):
+                        parent.bucket["proxy"] = kwargs.get("proxy")
+                        return Browser()
+
+                return Chromium()
+
+            def start(self):
+                return self
+
+        launched = {"playwright": {}, "patchright": {}}
+
+        def sync_for(name):
+            def sync_playwright():
+                class Api:
+                    def start(self):
+                        return Runtime(launched[name])
+                return Api()
+            return sync_playwright
+
+        playwright_mod = types.ModuleType("playwright")
+        playwright_sync = types.ModuleType("playwright.sync_api")
+        playwright_sync.sync_playwright = sync_for("playwright")
+        playwright_mod.sync_api = playwright_sync
+        patchright_mod = types.ModuleType("patchright")
+        patchright_sync = types.ModuleType("patchright.sync_api")
+        patchright_sync.sync_playwright = sync_for("patchright")
+        patchright_mod.sync_api = patchright_sync
+        with patch.dict(os.environ, {"ABG_PROXY": proxy}), patch.dict(sys.modules, {
+            "playwright": playwright_mod,
+            "playwright.sync_api": playwright_sync,
+            "patchright": patchright_mod,
+            "patchright.sync_api": patchright_sync,
+        }):
+            self.probe.PlaywrightAdapter().start()
+            self.probe.PatchrightAdapter().start()
+        self.assertEqual(launched["playwright"]["proxy"], expected)
+        self.assertEqual(launched["patchright"]["proxy"], expected)
+
+    def test_result_without_url_key(self):
+        with tempfile.TemporaryDirectory() as box:
+            path = Path(box) / "proxies.toml"
+            path.write_text("[profile.gold]\nnote = \"no url\"\n", encoding="utf-8")
+            os.chmod(path, 0o600)
+            loaded = True
+            try:
+                profiles = load_profiles(path)
+            except KeyError:
+                loaded = False
+            self.assertTrue(loaded)
+            self.assertEqual(profiles.get("gold"), "")
+
+    def test_playwright_proxy_splits_userinfo(self):
+        got = self.probe.playwright_proxy("http://user:p%40ss@proxy.invalid:8080")
+        self.assertEqual(got, {
+            "server": "http://proxy.invalid:8080",
+            "username": "user",
+            "password": "p@ss",
+        })
+        self.assertEqual(
+            self.probe.playwright_proxy("http://proxy.invalid:8080"),
+            {"server": "http://proxy.invalid:8080"},
+        )
+
+    def test_redact_strips_userinfo_and_leaves_plain_text(self):
+        text = self.probe.redact(
+            "curl: (5) Unsupported proxy syntax in 'http://user:pass@proxy.invalid:8080/'"
+        )
+        self.assertNotIn("pass", text)
+        self.assertIn("proxy.invalid:8080", text)
+        self.assertEqual(
+            self.probe.redact("curl: (7) connection refused"),
+            "curl: (7) connection refused",
+        )
 
 
 class DockerDescriptorTests(unittest.TestCase):

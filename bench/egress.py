@@ -12,8 +12,8 @@ def load_profiles(path) -> dict[str, str]:
         mode = path.stat().st_mode & 0o777
     except FileNotFoundError:
         return {}
-    if mode != 0o600:
-        raise PermissionError("credentials file permissions must be 0600")
+    if mode & 0o077:
+        raise PermissionError("credentials file is group- or world-accessible")
     try:
         with path.open("rb") as source:
             data = tomllib.load(source)

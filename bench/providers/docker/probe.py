@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import urlencode
+from urllib.parse import unquote, urlencode, urlparse, urlunparse
 from urllib.request import ProxyHandler, Request, build_opener
 from urllib.request import urlopen as _stdlib_urlopen
 from xml.etree import ElementTree
@@ -43,6 +43,35 @@ def urlopen(url, timeout=120):
 
 def _proxy_url() -> str:
     return os.environ.get("ABG_PROXY") or ""
+
+
+def playwright_proxy(url: str) -> dict[str, str]:
+    """ProxySettings для playwright/patchright/camoufox: креды отдельно от server."""
+    parsed = urlparse(url)
+    host = parsed.hostname or ""
+    netloc = f"{host}:{parsed.port}" if parsed.port is not None else host
+    settings = {
+        "server": urlunparse((parsed.scheme, netloc, parsed.path, parsed.params,
+                              parsed.query, parsed.fragment)),
+    }
+    if parsed.username is not None:
+        settings["username"] = unquote(parsed.username)
+    if parsed.password is not None:
+        settings["password"] = unquote(parsed.password)
+    return settings
+
+
+def pydoll_proxy_flag(url: str) -> str:
+    """--proxy-server= с кредами внутри: их вырезает и применяет сам pydoll."""
+    return "--proxy-server=" + url
+
+
+_USERINFO_URL = re.compile(r"(https?://)([^/@\s'\"]+)@", re.I)
+
+
+def redact(text: str) -> str:
+    """Убирает userinfo из любых URL в тексте: http://u:p@h → http://***@h."""
+    return _USERINFO_URL.sub(r"\1***@", text)
 
 
 def _live_rss_kb() -> int:
@@ -383,14 +412,14 @@ class CurlAdapter:
                 "--output", "-", "--write-out",
                 marker + "%{http_code}\t%{url_effective}\t%{num_redirects}\t%{header_json}",
         ]
+        command.append(url)
+        run_kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
         proxy = _proxy_url()
         if proxy:
-            command.extend(["--proxy", proxy])
-        command.append(url)
-        completed = subprocess.run(
-            command,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
-        )
+            env = os.environ.copy()
+            env["ALL_PROXY"] = proxy
+            run_kwargs["env"] = env
+        completed = subprocess.run(command, **run_kwargs)
         raw_body, separator, raw_meta = completed.stdout.rpartition(marker.encode())
         if completed.returncode or not separator:
             detail = completed.stderr.decode("utf-8", "replace").strip()
@@ -471,7 +500,7 @@ class PlaywrightAdapter:
             launch_options["channel"] = "chrome"
         proxy = _proxy_url()
         if proxy:
-            launch_options["proxy"] = {"server": proxy}
+            launch_options["proxy"] = playwright_proxy(proxy)
         self.browser = self.runtime.chromium.launch(**launch_options)
         self.page = self.browser.new_page()
 
@@ -503,7 +532,7 @@ class CamoufoxAdapter:
         options = {"headless": False}
         proxy = _proxy_url()
         if proxy:
-            options["proxy"] = {"server": proxy}
+            options["proxy"] = playwright_proxy(proxy)
         self.manager = Camoufox(**options)
         self.browser = self.manager.__enter__()
         self.page = self.browser.new_page()
@@ -545,7 +574,7 @@ class PydollAdapter:
             options.add_argument(flag)
         proxy = _proxy_url()
         if proxy:
-            options.add_argument("--proxy-server=" + proxy)
+            options.add_argument(pydoll_proxy_flag(proxy))
         self.browser = Chrome(options=options)
         self.tab = self.loop.run_until_complete(self.browser.start())
 
@@ -716,7 +745,7 @@ def run_probe(
             "startup_ms": startup_ms,
             "elapsed_ms": round((finished - navigation_start) * 1000),
             "peak_rss_mb": peak_rss_mb, "cpu_ms": cpu_ms,
-            "err": f"{type(exc).__name__}: {exc}",
+            "err": redact(f"{type(exc).__name__}: {exc}"),
             "provider_version": getattr(adapter, "version", "unknown"),
             "redirects": 0,
             "headers": None,

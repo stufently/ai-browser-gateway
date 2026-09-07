@@ -166,6 +166,31 @@ valid = false
         self.assertNotIn('pass', path.read_text())
         self.assertNotIn('proxy.invalid', path.read_text())
 
+    def test_run_wide_creds_permissions_write_environment_error(self):
+        home = self.root / 'home'
+        config = home / '.config' / 'abg'
+        config.mkdir(parents=True)
+        proxies = config / 'proxies.toml'
+        proxies.write_text('[profile.gold]\nurl = "http://user:pass@proxy.invalid:8080"\n')
+        os.chmod(proxies, 0o644)
+        path = self.root / 'out.jsonl'
+        launcher = FakeLauncher()
+        stderr = io.StringIO()
+        with patch.dict(os.environ, {'HOME': str(home)}), contextlib.redirect_stderr(stderr):
+            rc = main(
+                ['run', '--providers', 'curl', '--cells', 'scenario:static',
+                 '--output', str(path), '--egress', 'gold'],
+                launcher=launcher, reader=lambda key: None, sleep=lambda seconds: None,
+            )
+        self.assertEqual(rc, 0)
+        self.assertIn(str(proxies), stderr.getvalue())
+        records = [from_jsonl_line(line) for line in path.read_text().splitlines()]
+        self.assertTrue(records)
+        self.assertEqual(records[0].error_type, FailureReason.environment_error)
+        self.assertEqual(records[0].egress_profile, 'gold')
+        self.assertEqual(launcher.calls, [])
+        self.assertNotIn('pass@', path.read_text())
+
     def test_run_does_not_overwrite_existing_log(self):
         path = self.root / 'out.jsonl'
         path.write_text('preserve me')

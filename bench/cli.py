@@ -12,6 +12,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from bench.egress import load_profiles, profile_url
+from bench.models import FailureReason
 from bench.providers.registry import PROVIDERS, by_name
 from bench.report.build import build_report
 from bench.runner.environment import collect
@@ -128,12 +129,19 @@ def main(argv=None, *, launcher=None, reader=None, sleep=None) -> int:
                 with args.output.open('x', encoding='utf-8') as destination:
                     env = collect(reader=reader if reader is not None else _environment_reader(args, launcher))
                     egress = None
+                    skip_reason = None
                     if args.egress:
-                        profiles = load_profiles(Path.home() / '.config' / 'abg' / 'proxies.toml')
-                        egress = (args.egress, profile_url(profiles, args.egress))
+                        creds = Path.home() / '.config' / 'abg' / 'proxies.toml'
+                        try:
+                            profiles = load_profiles(creds)
+                            egress = (args.egress, profile_url(profiles, args.egress))
+                        except PermissionError:
+                            print(str(creds), file=sys.stderr)
+                            egress = (args.egress, None)
+                            skip_reason = FailureReason.environment_error
                     records = execute_plan(plan, launcher=launcher, cells=cells, env=env,
                                            timeout=args.timeout, pause_s=pause, sleep=sleep,
-                                           egress=egress)
+                                           egress=egress, skip_reason=skip_reason)
                     for record in records:
                         destination.write(to_jsonl_line(record))
         return 0

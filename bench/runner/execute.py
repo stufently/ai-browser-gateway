@@ -121,7 +121,7 @@ def _record(item, provider, cell, env, payload, failure):
 
 
 def execute_plan(plan, *, launcher, cells, env, timeout=180, pause_s=0.0, sleep=None,
-                 egress=None) -> list[RunRecord]:
+                 egress=None, skip_reason=None) -> list[RunRecord]:
     if not math.isfinite(pause_s) or pause_s < 0 or timeout <= 0:
         raise ValueError('pause_s must be nonnegative and timeout must be positive')
     plan = tuple(plan)
@@ -138,6 +138,12 @@ def execute_plan(plan, *, launcher, cells, env, timeout=180, pause_s=0.0, sleep=
     profile_name, proxy_url = ('direct', None) if egress is None else egress
     env = {**env, 'egress_profile': profile_name}
     if egress is not None and not proxy_url:
+        if skip_reason is FailureReason.environment_error:
+            return [
+                _record(item, by_name(item.provider), cells[item.cell], env, None,
+                        FailureReason.environment_error)
+                for item in plan
+            ]
         return [
             _record(item, by_name(item.provider), cells[item.cell], env, None,
                     FailureReason.not_measured)

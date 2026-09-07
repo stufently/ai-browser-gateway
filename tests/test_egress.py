@@ -65,6 +65,23 @@ class LoadProfilesTests(unittest.TestCase):
         self.assertNotIn(PROXY_URL, message)
         self.assertNotIn("user:pass", message)
 
+    def test_owner_read_only_0400_is_accepted(self):
+        path = _write_profiles(
+            self.root,
+            f'[profile.gold]\nurl = "{PROXY_URL}"\n',
+            mode=0o400,
+        )
+        self.assertEqual(load_profiles(path)["gold"], PROXY_URL)
+
+    def test_group_readable_0640_is_refused(self):
+        path = _write_profiles(
+            self.root,
+            f'[profile.gold]\nurl = "{PROXY_URL}"\n',
+            mode=0o640,
+        )
+        with self.assertRaises(PermissionError):
+            load_profiles(path)
+
     def test_permissions_0600_are_accepted(self):
         path = _write_profiles(
             self.root,

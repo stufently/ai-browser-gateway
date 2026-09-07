@@ -576,7 +576,7 @@ MUTANTS = [
      'assert': 'self.assertEqual(self.probe._age_hours(NOW + timedelta(hours=5), NOW), 0.0)'},
     {'name': '73',
      'file': 'bench/egress.py',
-     'old': '    if mode != 0o600:\n        raise PermissionError("credentials file permissions must be 0600")\n',
+     'old': '    if mode & 0o077:\n        raise PermissionError("credentials file is group- or world-accessible")\n',
      'new': '',
      'test': 'tests.test_egress.LoadProfilesTests.test_permissions_wider_than_0600_are_refused',
      'assert': 'with self.assertRaises((PermissionError, ValueError)) as ctx:'},
@@ -622,6 +622,83 @@ MUTANTS = [
             '        step = Step.give_up\n',
      'test': 'tests.test_escalate.NextStepTests.test_environment_error_is_investigate',
      'assert': 'self.assertIs('},
+    {'name': '80',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '    if parsed.password is not None:\n'
+            '        settings["password"] = unquote(parsed.password)\n'
+            '    return settings',
+     'new': '    if parsed.password is not None:\n'
+            '        settings["password"] = unquote(parsed.password)\n'
+            '    return {"server": url}',
+     'test': 'tests.test_probe.ProxyWiringTests.test_playwright_proxy_splits_userinfo',
+     'assert': 'self.assertEqual(got, {'},
+    {'name': '81',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '        if proxy:\n'
+            '            env = os.environ.copy()\n'
+            '            env["ALL_PROXY"] = proxy\n'
+            '            run_kwargs["env"] = env\n',
+     'new': '        if proxy:\n'
+            '            env = os.environ.copy()\n'
+            '            env["ALL_PROXY"] = proxy\n'
+            '            run_kwargs["env"] = env\n'
+            '            command.extend(["--proxy", proxy])\n',
+     'test': 'tests.test_probe.AdapterContractTests.test_adapters_honor_abg_proxy_and_direct_when_unset',
+     'assert': 'self.assertNotIn("--proxy", command)'},
+    {'name': '82',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '    return _USERINFO_URL.sub(r"\\1***@", text)',
+     'new': '    return text',
+     'test': 'tests.test_probe.ProxyWiringTests.test_redact_strips_userinfo_and_leaves_plain_text',
+     'assert': 'self.assertNotIn("pass", text)'},
+    {'name': '83',
+     'file': 'bench/runner/record.py',
+     'old': '        if item.name not in raw and item.default is MISSING',
+     'new': '        if item.name not in raw',
+     'test': 'tests.test_record.RecordTests.test_missing_optional_fields_take_defaults',
+     'assert': 'self.assertTrue(loaded)'},
+    {'name': '84',
+     'file': 'bench/runner/execute.py',
+     'old': '                _record(item, by_name(item.provider), cells[item.cell], env, None,\n'
+            '                        FailureReason.environment_error)',
+     'new': '                _record(item, by_name(item.provider), cells[item.cell], env, None,\n'
+            '                        FailureReason.not_measured)',
+     'test': 'tests.test_execute.EgressTests.test_wide_permission_skip_is_environment_error',
+     'assert': 'self.assertEqual(records[0].error_type, FailureReason.environment_error)'},
+    {'name': '85',
+     'file': 'bench/egress.py',
+     'old': '    if mode & 0o077:',
+     'new': '    if mode != 0o600:',
+     'test': 'tests.test_egress.LoadProfilesTests.test_owner_read_only_0400_is_accepted',
+     'assert': 'self.assertEqual(load_profiles(path)["gold"], PROXY_URL)'},
+    {'name': '86',
+     'file': 'bench/providers/docker/probe.py',
+     'old': '            launch_options["proxy"] = playwright_proxy(proxy)',
+     'new': '            if self.package == "playwright":\n'
+            '                launch_options["proxy"] = playwright_proxy(proxy)',
+     'test': 'tests.test_probe.ProxyWiringTests.test_both_playwright_packages_get_proxy',
+     'assert': 'self.assertEqual(launched["patchright"]["proxy"], expected)'},
+    {'name': '87',
+     'file': 'bench/runner/execute.py',
+     'old': "            if had_proxy:\n"
+            "                os.environ['ABG_PROXY'] = previous_proxy\n"
+            "            else:\n"
+            "                os.environ.pop('ABG_PROXY', None)",
+     'new': "            os.environ.pop('ABG_PROXY', None)",
+     'test': 'tests.test_execute.EgressTests.test_existing_proxy_env_is_restored',
+     'assert': "self.assertEqual(os.environ.get('ABG_PROXY'), 'keep-me')"},
+    {'name': '88',
+     'file': 'bench/runner/execute.py',
+     'old': '                if rc in (125, 126, 127):',
+     'new': '                if rc >= 125:',
+     'test': 'tests.test_execute.EgressTests.test_killed_container_is_not_environment_error',
+     'assert': 'self.assertEqual(records[0].error_type, FailureReason.provider_error)'},
+    {'name': '89',
+     'file': 'bench/egress.py',
+     'old': '        url = body.get("url", "")',
+     'new': '        url = body["url"]',
+     'test': 'tests.test_probe.ProxyWiringTests.test_result_without_url_key',
+     'assert': 'self.assertTrue(loaded)'},
 ]
 
 

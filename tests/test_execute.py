@@ -224,6 +224,40 @@ class ExecuteTests(unittest.TestCase):
         self.assertEqual(launcher.calls, [])
 
 
+class EgressTests(unittest.TestCase):
+    def plan(self):
+        return build_plan([by_name('curl')], CELLS, cold=1, warm=0)
+
+    def test_existing_proxy_env_is_restored(self):
+        import os
+        os.environ['ABG_PROXY'] = 'keep-me'
+        self.addCleanup(lambda: os.environ.pop('ABG_PROXY', None))
+        records = execute_plan(
+            self.plan(), launcher=FakeLauncher(output()), cells=CELLS, env={},
+            egress=('gold', 'http://user:pass@proxy.invalid:8080'),
+        )
+        self.assertEqual(os.environ.get('ABG_PROXY'), 'keep-me')
+        self.assertEqual(records[0].egress_profile, 'gold')
+
+    def test_killed_container_is_not_environment_error(self):
+        records = execute_plan(
+            self.plan(), launcher=FakeLauncher((137, '', 'killed')),
+            cells=CELLS, env={},
+        )
+        self.assertEqual(records[0].error_type, FailureReason.provider_error)
+        self.assertFalse(records[0].success)
+
+    def test_wide_permission_skip_is_environment_error(self):
+        launcher = FakeLauncher()
+        records = execute_plan(
+            self.plan(), launcher=launcher, cells=CELLS, env={},
+            egress=('gold', None), skip_reason=FailureReason.environment_error,
+        )
+        self.assertEqual(launcher.calls, [])
+        self.assertEqual(records[0].error_type, FailureReason.environment_error)
+        self.assertEqual(records[0].egress_profile, 'gold')
+
+
 class DockerLauncherTests(unittest.TestCase):
     def test_timeout_removes_container_from_cidfile(self):
         calls = []
