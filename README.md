@@ -29,8 +29,8 @@ patchright → смена egress → человек
 ```
 
 14.09.2026 замер M8: `scrapling` с `solve_cloudflare` взял `cf-bizprofile`,
-которую patchright на том же прогоне не взял (incremental 1). В лестницу ядра
-ещё не встроен — это следующий шаг, если владелец подтвердит. Числа:
+которую patchright на том же прогоне не взял (incremental 1). В продуктовый вход
+M10 встроен после patchright; ядро M7 сохраняет прежнюю лестницу. Числа:
 `docs/research/05-scrapling.md`.
 
 | Документ | Что в нём |
@@ -43,7 +43,55 @@ patchright → смена egress → человек
 | `docs/BENCHMARK_PLAN.md` | как меряем: два стенда, 12 сценариев, признак успеха |
 | `TASKS.md` | статус работ |
 
-## Ядро шлюза
+## Продуктовый вход M10
+
+Для одного URL доступен Python-вход без обязательного sentinel:
+
+```python
+from gateway.fetch import ProductFetcher
+from gateway.product import ProductRequest, run_product
+
+request = ProductRequest(url="https://example.invalid/page", budget_ms=30_000)
+outcome = run_product(request, ProductFetcher(request.url))
+print(outcome.ok, outcome.provider, outcome.error_type, outcome.step)
+for attempt in outcome.attempts:
+    print(attempt.provider, attempt.status, attempt.challenge, attempt.next_step)
+```
+
+При необходимости клиент задаёт `expected_text="Точная строка на странице"`
+в `ProductRequest`. Проверяется точная подстрока в реальном HTML или text;
+видимый text в любом случае должен быть непустым. URL-only проверяет доставку,
+но не смысл страницы: короткая JS-оболочка с текстом может пройти. Ожидание
+может подтвердить страницы с `suspected`/`captcha`, но не отменяет HTTP-ошибки
+и интерактивный challenge. Исходная метка сохраняется в trace.
+
+Лестница: при `max_age_hours > 0` — RSS и Wayback с известным допустимым
+возрастом; затем curl → patchright → Scrapling → curl через именованный egress.
+`allow_browser=False` исключает браузеры. HTTP 429 сразу направляет к egress;
+403 и отсутствие содержимого допускают браузеры. За запрос выполняется не
+более одной измеренной попытки смены egress. Имена `egress_profiles` сопоставляются
+с `ProductFetcher(..., profiles={...})`; отсутствующие настройки дают
+`not_measured` и пропускаются. RSS требует `entrances={"rss": "https://..."}`.
+
+Общий `budget_ms` (1–180000) включает все попытки; поздний ответ отклоняется.
+`outcome.attempts` содержит только реальные вызовы с причинами, HTTP-статусами,
+challenge, временем, возрастом и решением. При отказе `html`/`text` пусты;
+`step` указывает `retry_later`, `investigate`, `give_up` или `human`.
+
+Нужны существующие образы провайдеров и Docker. Продукт и проверки запускаются
+с UID/GID `1002:1002`. Для вызова из контейнера Docker socket доступен только
+контейнеру-оркестратору; провайдер получает только `probe.py` read-only.
+Перезапускаемая локальная проверка сама организует такие контейнеры:
+
+```bash
+python3 tests/live_m10_product.py
+```
+
+Она проверяет curl, JS-рендеринг patchright и Scrapling, 403, общий deadline
+и удаление ресурсов своего запуска. HTTP API/CLI относятся к M11, сервис и
+пул — к M12; здесь реализован Python-вход.
+
+## Ядро шлюза M7/M9
 
 Пакет `gateway/` исполняет лестницу для одного URL: `curl`, затем по решению
 `bench.escalate.next_step` — `patchright` для рендеринга или `curl` через другой
@@ -65,8 +113,8 @@ print(outcome.ok, outcome.provider, outcome.step)
 
 `BenchFetcher` запускает провайдер в Docker (`--user 1002:1002`, образы из
 реестра). Нужен работающий Docker; провайдерам не монтируется Docker socket.
-Ядро по-прежнему требует непустой sentinel: продуктовый вход без него и HTTP API
-ещё впереди.
+Ядро по-прежнему требует непустой sentinel; URL-only доступен через отдельный
+продуктовый вход выше.
 
 Имена `profiles` и `entrances` у `BenchFetcher` обязаны совпадать с именами в
 `GatewayRequest` (`egress_profiles` и входы плана). Несовпадение сейчас даёт
