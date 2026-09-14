@@ -770,8 +770,49 @@ class ScraplingAdapterTests(unittest.TestCase):
             adapter.close()
         self.assertIs(captured["fetch"][1]["solve_cloudflare"], True)
         self.assertIs(captured["init"]["solve_cloudflare"], True)
+        self.assertEqual(captured["init"]["retries"], 1)
         self.assertEqual(captured["fetch"][0], "https://target.invalid/")
         self.assertTrue(captured.get("closed"))
+
+    def test_scrapling_warm_blank_does_not_call_fetch(self):
+        captured = {}
+
+        class Page:
+            status = 200
+            url = "https://final.invalid/"
+            body = b"<html>marker</html>"
+            headers = {}
+            history = ()
+
+        class Session:
+            def __init__(self, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def fetch(self, url, **kwargs):
+                captured.setdefault("urls", []).append(url)
+                if url == "about:blank":
+                    raise RuntimeError(f"Failed to get response for {url}")
+                return Page()
+
+        with patch.dict(sys.modules, self._fake_modules(Session)):
+            result = self.probe.run_probe(
+                "scrapling",
+                "https://target.invalid/",
+                "marker",
+                mode="warm",
+                adapter_factory=lambda _: self.probe.ScraplingAdapter(),
+                clock=Clock(),
+                metrics=lambda: (0, 0),
+            )
+        self.assertNotIn("about:blank", captured.get("urls", []))
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["sentinel"])
 
     def test_scrapling_passes_response_headers(self):
         captured = {}

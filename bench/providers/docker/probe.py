@@ -543,6 +543,7 @@ class ScraplingAdapter:
             "solve_cloudflare": self.solve_cloudflare,
             "google_search": False,
             "timeout": 120_000,
+            "retries": 1,
         }
         proxy = _proxy_url()
         if proxy:
@@ -551,6 +552,8 @@ class ScraplingAdapter:
         self.session.__enter__()
 
     def navigate(self, url: str) -> dict[str, Any]:
+        if url == "about:blank":
+            return _result(None, url, b"", 0, headers=None)
         response = self.session.fetch(url, solve_cloudflare=self.solve_cloudflare)
         body = getattr(response, "body", b"")
         if callable(body):
