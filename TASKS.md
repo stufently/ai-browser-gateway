@@ -278,6 +278,27 @@ cf-fetch. Следующий шаг — независимый probe/этало�
   разбора cache/m10/coordinator-review-notes.md; подтверждённых дефектов нет,
   остаются независимые новые мутации. Последний фактический Grok weekly2%
   (23:24UTC),5h/reset неизвестны; quotaerror не получен. НикакихSpark/auto.
+  **23:44UTC: независимый пакет проверен, один тест возвращён cx.**
+  Grok final-package/final-result.md SHA256
+  fd3287733c1a2bace82b1e848109d242b1eb8c1a01878f3c4b9069075a026f92,
+  все413manifestentries проверены; полныйharness/run.sh/test_runner прочитаны,
+  все14patch/activation/assertion/restore сверены. На4810: baseline68green,
+  14killed/0survived/0invalid, source/head/statusunchanged, runrc0.
+  Harness SHA8557139c2feaf6c94d4f7ad2d3623ffc2bbbe676eb4419f9cdd294d0ebb63a9a.
+  Но первый прогон выявил ложноположительный сегмент нового авторского
+  test_legacy_still_requires_sentinel: self.fail внутри run_probe перехватывается,
+  его текст содержит ожидаемое 'empty sentinel', поэтому assertion проходит.
+  Общей дыры покрытия нет: этот же мутант ловит frozen probe. Тем не менее
+  конкретный авторский assertion не подтверждает свой запрет вызова адаптера.
+  Единственный дефект возвращён тому жеcx в той же попытке по
+  cache/m10-test-guard-fix.md SHA80ebf6fa521fc41bd48e1baed5f61396dfd1615d094bf594e5ef2b91b8cbad3d.
+  Меняется только авторский тест, не product/frozenprobe. Initialreviews не
+  повторять; verification полного4810..NEWdelta + projectCodex, затем полный
+  авторскийгейт, пакет cache/m10/test-guard-fix/. Grok отдельно повторитM03 на
+  исправленном авторскомтесте и14-набор наNEW_SHA, потом проверка координатора
+  толькоизменений/связанныхрисков и свойгейтNEW_SHA. Старые пакеты сохраняются.
+  Gk-панель завершила пакет, оставлена для этого follow-up; t-3d10b8113041-a01
+  пока не закрыта. M10 НЕ принята и не слита, следующий шаг разрешён и выполняется.
 
 - [ ] **M10 и далее:** M10 — продуктовая лестница со Scrapling и живой
   браузерный сценарий; M11 — HTTP API с токеном, форматом
