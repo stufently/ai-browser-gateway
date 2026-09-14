@@ -250,6 +250,28 @@ cf-fetch. Следующий шаг — независимый probe/этало�
   cache/service-monitoring-notes.md, не execution-спеки. Для сервиса предложен
   versioned release с одинаковым абсолютным RO-path на host и вAPIcontainer,
   как в принятом liveM9; тогда не требуется менять transport радиprobe-bind.
+  **23:23UTC: авторский пакет получен.** cache/m10/readme-followup/handoff.md,
+  report.json SHA7a0d9f27a0a0151fd05034643832e358c8317ffe9edde258b444aa2dab690fd0;
+  все66хешей проверены. BASEb303, REVIEW=FINAL4810e22, полныйdiff99861байт,
+  SHA cf242f393f4206f4ff1dc3c1e8301cc5099603ed922a25bcf2fa2764f4c55cac.
+  Codex и Gemini initial без находок, Grok-1rc1 из-за отсутствия точки в
+  «Находок нет.», разрешённый единственный повтор Grok-2rc0. Всеraw сохранены,
+  input/response SHA и полный контракт в контекстах сверены. Код послеREVIEW
+  не менялся, verification не нужна. Авторский полныйгейт6/6rc0: suite4s,
+  probes2s, live18s,105историческихмутаций119s, invariants/clean0s.
+  Первый исторический запуск на фоне ревью был недостоверным: временные
+  изменения продолжались после завершения авторского процесса, источник не
+  установлен. Последовательный повтор и финальныйгейт105/105green; дерево
+  восстановилось без ручных правок. Сигналов чужим процессам не посылали.
+  Координатор прочитал полный дифф (frozenprobe уже прочитан и SHA подтверждён),
+  запускает собственный полныйгейт: cache/m10/coordinator-gate.log.
+  Независимые Grok-мутации запущены по cache/m10-mutations-gk.md в новом клоне
+  /home/user/exec-clones/abg-m10-mutations-20260914, веткаm10-mutations,
+  HEAD4810e22, pushотключён. Attempt t-3d10b8113041-a01 running, pane
+  gk-abg-m10-mutations-20260914, watcher cache/m10-mutations-watch.log.
+  Результат ожидается cache/m10/mutations-gk/mutation-result.md, сводныйпакет
+  cache/m10/final-package/final-result.md. Авторскаяcx-панель пока оставлена
+  для возможного возврата дефектов, продукт ещё НЕ принят/не слит.
 
 - [ ] **M10 и далее:** M10 — продуктовая лестница со Scrapling и живой
   браузерный сценарий; M11 — HTTP API с токеном, форматом
