@@ -272,6 +272,12 @@ cf-fetch. Следующий шаг — независимый probe/этало�
   Результат ожидается cache/m10/mutations-gk/mutation-result.md, сводныйпакет
   cache/m10/final-package/final-result.md. Авторскаяcx-панель пока оставлена
   для возможного возврата дефектов, продукт ещё НЕ принят/не слит.
+  Собственный coordinator-gate завершёнrc0,6/6на4810e22: unittest4s,
+  probes2s, live18s,105историческихмутаций126s, invariants/clean0s.
+  Повторный отдельный suite/live не нужен. Итоговые заметки собственного
+  разбора cache/m10/coordinator-review-notes.md; подтверждённых дефектов нет,
+  остаются независимые новые мутации. Последний фактический Grok weekly2%
+  (23:24UTC),5h/reset неизвестны; quotaerror не получен. НикакихSpark/auto.
 
 - [ ] **M10 и далее:** M10 — продуктовая лестница со Scrapling и живой
   браузерный сценарий; M11 — HTTP API с токеном, форматом
