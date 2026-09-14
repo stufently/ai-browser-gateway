@@ -56,8 +56,14 @@ class ContentTests(unittest.TestCase):
         for sentinel in (None, ''):
             with self.assertRaises(ValueError):
                 fetch_page('curl', url='https://a.test', sentinel=sentinel, budget_ms=100)
+        adapter_calls = []
+        def adapter_factory(provider):
+            adapter_calls.append(provider)
+            return Adapter()
         result = probe.run_probe('curl', 'https://a.test', '', mode='cold',
-                                 adapter_factory=lambda _: self.fail('legacy empty sentinel reached adapter'))
+                                 adapter_factory=adapter_factory)
+        self.assertEqual(adapter_calls, [])
+        self.assertFalse(result['ok'])
         self.assertIn('empty sentinel', result['err'])
         with self.assertRaises(SystemExit):
             probe.main(['https://a.test'])
