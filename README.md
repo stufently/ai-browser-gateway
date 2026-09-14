@@ -28,8 +28,14 @@ pydoll, playwright+stealth) не добавил **ни одной** цели к 
 patchright → смена egress → человек
 ```
 
+14.09.2026 замер M8: `scrapling` с `solve_cloudflare` взял `cf-bizprofile`,
+которую patchright на том же прогоне не взял (incremental 1). В лестницу ядра
+ещё не встроен — это следующий шаг, если владелец подтвердит. Числа:
+`docs/research/05-scrapling.md`.
+
 | Документ | Что в нём |
 |---|---|
+| `docs/research/05-scrapling.md` | M8: scrapling vs patchright vs curl, в том числе живой Instagram |
 | `docs/research/04-phase1-verdict.md` | вердикт: кто остаётся, кто исключён и на каком основании |
 | `docs/research/03-stand-b-results.md` | измеренные таблицы: проходимость и способности |
 | `docs/research/01-candidates.md` | 25 кандидатов, сверенных с реестрами |

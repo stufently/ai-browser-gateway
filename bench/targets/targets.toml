@@ -59,12 +59,11 @@ expect = "Начать AI Browser Gateway"
 
 [[target]]
 id = "login-instagram"
-url = "https://www.instagram.com/p/DA1XeTLtxvR/"
+url = "https://www.instagram.com/reel/DdJ-MY6OITt/"
 class = "login-wall"
 owner = "third-party"
-valid = false
-note = "🚨 СТРОКА НЕДЕЙСТВИТЕЛЬНА до замены URL. Замер 06.09.2026 показал тайтл `Post isn't available` у всех провайдеров: этот пост не существует, id взят наугад мной, а не из бэклога владельца. Значит строка меряет мёртвую ссылку, а не стену авторизации, и в таблицу идти не может. Нужен живой публичный рилс из бэклога — пункт в TASKS.md."
-expect = "og:video"
+note = "Живой рилс, замерен 14.09.2026 с этого хоста: curl -sL → HTTP 200, 675468 байт, <title>Instagram</title>, подстрока «Кирилл Жильников» в теле 0 вхождений; headless Chromium со stealth → 200, 1138260 байт, og:title = «Кирилл Жильников on Instagram: …», подстрока «Кирилл Жильников» — 3 вхождения. Строка ожидания на странице-заглушке не встречается. Меряется доступ к подписи и мета-разметке, не к самому видео: видео остаётся за стеной логина."
+expect = "Кирилл Жильников on Instagram"
 
 # --- Ждёт владельца (см. TASKS.md) ---
 # [[target]]

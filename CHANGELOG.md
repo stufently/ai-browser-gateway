@@ -2,6 +2,17 @@
 
 ## 2026-09-14
 
+### Добавлено
+
+- **Веха M8 — провайдер `scrapling` и живая цель `login-instagram`.**
+  Образ `abg-scrapling:m8` (`scrapling[fetchers]==0.4.15`, настоящий Chrome,
+  `solve_cloudflare` на StealthySession). На шести действительных целях
+  scrapling взял все шесть, в том числе `cf-bizprofile`, которую patchright
+  в том же прогоне получил 403. Incremental 1, unique 1 — посчитал
+  `bench.report.coverage`, не руками. Числа: `docs/research/05-scrapling.md`.
+  Цель `login-instagram` возвращена в строй (живой рилс, sentinel — подпись,
+  не видео). В стек ядра не встраивается этой вехой: это замер кандидата.
+
 ### Изменено
 
 - **Репозиторий переехал из GitLab в GitHub** (решение владельца 14.09.2026):

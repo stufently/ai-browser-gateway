@@ -1,0 +1,19 @@
+FROM python:3.14-slim-bookworm
+
+ENV HOME=/opt/home
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends xvfb xauth tini \
+ && mkdir -p /tmp/.X11-unix \
+ && chmod 1777 /tmp/.X11-unix \
+ && mkdir -p /opt/home \
+ && chmod 0777 /opt/home \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir "scrapling[fetchers]==0.4.15" \
+ && patchright install --with-deps chrome \
+ && chmod -R a+rwX /opt/home
+WORKDIR /opt/abg
+COPY probe.py /opt/abg/probe.py
+RUN chmod a+rX /opt/abg/probe.py
+ENV ABG_PROVIDER=scrapling
+ENTRYPOINT ["/usr/bin/tini","-g","--","xvfb-run","-a","-s","-screen 0 1920x1080x24","python3","/opt/abg/probe.py"]

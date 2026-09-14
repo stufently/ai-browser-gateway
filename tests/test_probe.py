@@ -727,6 +727,145 @@ class AdapterContractTests(unittest.TestCase):
                 self.assertIsNone(missing["headers"])
 
 
+class ScraplingAdapterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def _fake_modules(self, session_cls):
+        fetchers = types.ModuleType("scrapling.fetchers")
+        fetchers.StealthySession = session_cls
+        scrapling = types.ModuleType("scrapling")
+        scrapling.fetchers = fetchers
+        return {"scrapling": scrapling, "scrapling.fetchers": fetchers}
+
+    def test_scrapling_requests_cloudflare_solver(self):
+        captured = {}
+
+        class Page:
+            status = 200
+            url = "https://final.invalid/"
+            body = b"<html>marker</html>"
+            headers = {"cf-mitigated": "challenge"}
+            history = ()
+
+        class Session:
+            def __init__(self, **kwargs):
+                captured["init"] = kwargs
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                captured["closed"] = True
+
+            def fetch(self, url, **kwargs):
+                captured["fetch"] = (url, kwargs)
+                return Page()
+
+        with patch.dict(sys.modules, self._fake_modules(Session)):
+            adapter = self.probe.ScraplingAdapter()
+            adapter.start()
+            result = adapter.navigate("https://target.invalid/")
+            adapter.close()
+        self.assertIs(captured["fetch"][1]["solve_cloudflare"], True)
+        self.assertIs(captured["init"]["solve_cloudflare"], True)
+        self.assertEqual(captured["fetch"][0], "https://target.invalid/")
+        self.assertTrue(captured.get("closed"))
+
+    def test_scrapling_passes_response_headers(self):
+        captured = {}
+
+        class Page:
+            status = 200
+            url = "https://final.invalid/"
+            body = b"<html>marker</html>"
+            headers = {"cf-mitigated": "challenge"}
+            history = ()
+
+        class Session:
+            def __init__(self, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def fetch(self, url, **kwargs):
+                captured["url"] = url
+                return Page()
+
+        with patch.dict(sys.modules, self._fake_modules(Session)):
+            adapter = self.probe.ScraplingAdapter()
+            adapter.start()
+            result = adapter.navigate("https://target.invalid/")
+            adapter.close()
+        self.assertEqual(result["headers"]["cf-mitigated"], "challenge")
+
+    def test_scrapling_engine_failure_is_normalized_not_raised(self):
+        class Boom:
+            def __init__(self, **kwargs):
+                raise RuntimeError("browser unavailable")
+
+        with patch.dict(sys.modules, self._fake_modules(Boom)):
+            result = self.probe.run_probe(
+                "scrapling",
+                "https://target.invalid/",
+                "marker",
+                mode="cold",
+                adapter_factory=lambda _: self.probe.ScraplingAdapter(),
+                clock=Clock(),
+                metrics=lambda: (0, 0),
+            )
+        self.assertFalse(result["ok"])
+        self.assertIn("browser unavailable", result["err"])
+
+    def test_scrapling_reports_package_version(self):
+        class Page:
+            status = 200
+            url = "https://final.invalid/"
+            body = b"marker"
+            headers = {}
+            history = ()
+
+        class Session:
+            def __init__(self, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def fetch(self, url, **kwargs):
+                return Page()
+
+        with patch.dict(sys.modules, self._fake_modules(Session)), patch.object(
+            self.probe, "_version", return_value="0.4.15"
+        ):
+            result = self.probe.run_probe(
+                "scrapling",
+                "https://target.invalid/",
+                "marker",
+                mode="cold",
+                adapter_factory=lambda _: self.probe.ScraplingAdapter(),
+                clock=Clock(),
+                metrics=lambda: (0, 0),
+            )
+        self.assertEqual(result["provider_version"], "0.4.15")
+
+    def test_make_adapter_selects_scrapling(self):
+        adapter = None
+        try:
+            adapter = self.probe.make_adapter("scrapling")
+        except ValueError:
+            pass
+        self.assertIsInstance(adapter, self.probe.ScraplingAdapter)
+
+
 class ProxyWiringTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -845,7 +984,7 @@ class DockerDescriptorTests(unittest.TestCase):
     def test_all_seven_images_select_their_adapter_and_copy_common_probe(self):
         providers = (
             "curl", "curl_cffi", "primp", "playwright", "patchright",
-            "camoufox", "pydoll",
+            "camoufox", "pydoll", "scrapling",
         )
         for provider in providers:
             with self.subTest(provider=provider):
@@ -854,7 +993,7 @@ class DockerDescriptorTests(unittest.TestCase):
                 self.assertIn("COPY probe.py /opt/abg/probe.py", text)
 
     def test_xvfb_images_have_tini_xauth_socket_and_exact_entrypoint_prefix(self):
-        for provider in ("patchright", "camoufox"):
+        for provider in ("patchright", "camoufox", "scrapling"):
             with self.subTest(provider=provider):
                 text = self.dockerfile(provider)
                 self.assertIn("xvfb xauth tini", text)
@@ -875,7 +1014,7 @@ class DockerDescriptorTests(unittest.TestCase):
         self.assertNotIn("google-chrome", text)
 
     def test_browser_images_provide_writable_runtime_home(self):
-        for provider in ("playwright", "patchright", "camoufox", "pydoll"):
+        for provider in ("playwright", "patchright", "camoufox", "pydoll", "scrapling"):
             with self.subTest(provider=provider):
                 text = self.dockerfile(provider)
                 self.assertIn("HOME=/opt/home", text)
@@ -887,6 +1026,13 @@ class DockerDescriptorTests(unittest.TestCase):
         self.assertNotIn("CAMOUFOX_CACHE_DIR", text)
         self.assertIn("camoufox[geoip]==0.5.6", text)
         self.assertIn("chmod -R a+rwX /opt/home", text)
+
+    def test_scrapling_pins_fetchers_extra_and_installs_chrome(self):
+        text = self.dockerfile("scrapling")
+        self.assertIn("scrapling[fetchers]==0.4.15", text)
+        self.assertIn("patchright install --with-deps chrome", text)
+        self.assertIn("ENV ABG_PROVIDER=scrapling", text)
+        self.assertIn("chmod a+rX /opt/abg/probe.py", text)
 
 
 if __name__ == "__main__":

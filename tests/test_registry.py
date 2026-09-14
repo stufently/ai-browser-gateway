@@ -8,8 +8,14 @@ from bench.providers.registry import PROVIDERS, Provider, build_argv, by_name, p
 class RegistryTests(unittest.TestCase):
     def test_registry_contract(self):
         self.assertEqual({p.name for p in PROVIDERS}, {
-            'curl', 'curl_cffi', 'primp', 'playwright', 'patchright', 'camoufox', 'pydoll', 'wayback', 'rss'})
-        self.assertEqual(len(PROVIDERS), 9)
+            'curl', 'curl_cffi', 'primp', 'playwright', 'patchright', 'camoufox',
+            'pydoll', 'scrapling', 'wayback', 'rss'})
+        self.assertEqual(len(PROVIDERS), 10)
+        scrapling = by_name('scrapling')
+        self.assertEqual(scrapling.image, 'abg-scrapling:m8')
+        self.assertEqual(scrapling.tier, 2)
+        self.assertEqual(scrapling.kind, 'browser')
+        self.assertTrue(scrapling.needs_network)
         for p in PROVIDERS:
             self.assertIsInstance(p.argv_extra, tuple)
             self.assertIsInstance(p.needs_network, bool)
@@ -36,6 +42,7 @@ class RegistryTests(unittest.TestCase):
         self.assertIn('--shm-size=1g', argv)
         self.assertEqual(argv[argv.index('--network') + 1], 'host')
         self.assertNotIn('--shm-size=1g', build_argv(by_name('curl'), url='u', sentinel='s'))
+        self.assertIn('--shm-size=1g', build_argv(by_name('scrapling'), url='u', sentinel='s'))
 
     def test_docker_extra_options_precede_image(self):
         p = Provider('x', 'image', 0, 'http', True, ('--env', 'A=B'))
