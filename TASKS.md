@@ -299,6 +299,25 @@ cf-fetch. Следующий шаг — независимый probe/этало�
   толькоизменений/связанныхрисков и свойгейтNEW_SHA. Старые пакеты сохраняются.
   Gk-панель завершила пакет, оставлена для этого follow-up; t-3d10b8113041-a01
   пока не закрыта. M10 НЕ принята и не слита, следующий шаг разрешён и выполняется.
+  **23:56UTC: исправление cx получено.** NEW_FINAL
+  ebb852410c3c218b41acae068b11bda653ee0dc4, только test_content_transport.py:
+  factory записывает вызов и нормально возвращаетAdapter, внешний assertion
+  проверяет отсутствие вызова; legacy/protocol/CLI assertions сохранены.
+  Пакет cache/m10/test-guard-fix/,60хешей проверены; reportSHA
+  164382506b1db3df9458edd02a96fda933d82fc08c15fa86e5fa6d9b13277030.
+  Delta1115байт SHAcb76cff81e266a7822ee8ab99bccf2f450ebd8cdf3daa012ee47f22c6e4e1b1d;
+  полныйBASE..NEW100043байта SHA
+  ff739df240cc4184c82074a1ef9ce24d9aa14591db1b59de6fd96911f3a548d3.
+  Все изменения покрыты прежним полнымinitial99861 и полнымdelta1115, обрезкинет.
+  VerifyGrok+Gemini и projectCodexrc0/no findings; квитанции/input/rawSHA
+  сверены, initialнеповторён. Полныйавторскийгейт6/6rc0.
+  Координатор прочитал толькоdelta/связанныйриск, запускает новыйownfullgate:
+  cache/m10/coordinator-test-guard-gate.log. Старыйgate4810непереписан.
+  Grok в той же панели/попытке получил cache/m10-mutations-after-test-fix.md:
+  ffсвоегоклонакebb, архивстарогоharness/пакетов, M03наисправленномавторскомтесте,
+ 14-наборнаebb, новыйпакетcache/m10/test-guard-final-package/final-result.md.
+  M11 контракт покаDRAFT: cache/m11-contract-draft.md, зависит от принятойM10;
+  реализацияAPI/CLI ещё не запущена, сервис/пул остаются следующим шагом.
 
 - [ ] **M10 и далее:** M10 — продуктовая лестница со Scrapling и живой
   браузерный сценарий; M11 — HTTP API с токеном, форматом
