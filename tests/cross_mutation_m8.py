@@ -25,6 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROBE = "bench/providers/docker/probe.py"
 REGISTRY = "bench/providers/registry.py"
 SCRAPLING = "tests.test_probe.ScraplingAdapterTests."
+REGRESSIONS = "tests.test_scrapling_regressions.ScraplingRegressionTests."
 SOLVER = SCRAPLING + "test_scrapling_requests_cloudflare_solver"
 WARM = SCRAPLING + "test_scrapling_warm_blank_does_not_call_fetch"
 REGISTRY_TEST = "tests.test_registry.RegistryTests.test_registry_contract"
@@ -41,9 +42,9 @@ class Mutation:
     gap: str = ""
 
 
-# Derived from the adapter's decisions and the unchanged tests, independently
-# of tests/mutation_gate_scrapling.py. None means no dedicated assertion exists;
-# an incidental failure must never be promoted to a kill for that decision.
+# Mutation edits are unchanged from the independent audit in b131913.
+# The twelve former survivors now target their dedicated regression assertions.
+# Keep the original gap descriptions as the rationale for those tests.
 MUTATIONS = [
     Mutation("M01: убрать ранний about:blank", PROBE,
              '        if url == "about:blank":\n            return _result(None, url, b"", 0, headers=None)\n',
@@ -51,14 +52,16 @@ MUTATIONS = [
              'self.assertNotIn("about:blank", captured.get("urls", []))'),
     Mutation("M02: не вызывать callable body", PROBE,
              '        if callable(body):\n            body = body()\n',
-             '        if callable(body):\n            body = body\n', SOLVER, None,
+             '        if callable(body):\n            body = body\n',
+             REGRESSIONS + "test_scrapling_calls_body", 'self.assertEqual(response.calls, 1)',
              'Во всех успешных Page body уже bytes, ветка callable не выполняется. '
              'Нужен test_scrapling_calls_body: body — метод со счётчиком, возвращающий '
              'UTF-8 bytes; проверить один вызов, result["body"] и result["bytes"]. '
              'Без вызова адаптер кодирует строковое представление метода вместо HTML.'),
     Mutation("M03: пропустить коэрцию не-bytes", PROBE,
              '        if not isinstance(body, bytes):\n',
-             '        if False:  # mutation: preserve non-bytes verbatim\n', SOLVER, None,
+             '        if False:  # mutation: preserve non-bytes verbatim\n',
+             REGRESSIONS + "test_scrapling_encodes_text_body", 'self.assertIsNone(error)',
              'Нет Page с текстовым body. Нужен test_scrapling_encodes_text_body: '
              'body="Привет", перехватить исключение в error и проверить assertIsNone(error), '
              'затем result["body"] == "Привет" и bytes == 12. '
@@ -66,32 +69,38 @@ MUTATIONS = [
              'падение должно быть на собственном ассерте об отсутствии ошибки.'),
     Mutation("M04: кодировать None как строку", PROBE,
              '            body = b"" if body is None else str(body).encode("utf-8")\n',
-             '            body = str(body).encode("utf-8")\n', SOLVER, None,
+             '            body = str(body).encode("utf-8")\n',
+             REGRESSIONS + "test_scrapling_none_body_is_empty", 'self.assertEqual(result["body"], "")',
              'Нет body=None. Нужен test_scrapling_none_body_is_empty: проверить '
              'result["body"] == "" и result["bytes"] == 0. Мутант даёт "None" и 4 байта.'),
     Mutation("M05: обнулить число редиректов", PROBE,
              '        return _result(status, final_url, body, len(history), headers=headers)\n',
-             '        return _result(status, final_url, body, 0, headers=headers)\n', SOLVER, None,
+             '        return _result(status, final_url, body, 0, headers=headers)\n',
+             REGRESSIONS + "test_scrapling_counts_redirects", 'self.assertEqual(result["redirects"], 2)',
              'В каждой Page history=(), assertions на redirects отсутствуют. '
              'Нужен test_scrapling_counts_redirects с двумя элементами history '
              'и assertEqual(result["redirects"], 2); мутант возвращает 0.'),
     Mutation("M06: убрать fallback history=None", PROBE,
              '        history = getattr(response, "history", None) or ()\n',
-             '        history = getattr(response, "history", None)\n', SOLVER, None,
+             '        history = getattr(response, "history", None)\n',
+             REGRESSIONS + "test_scrapling_missing_history_is_empty", 'self.assertIsNone(error)',
              'Нужен test_scrapling_missing_history_is_empty с history=None и '
              'отсутствующим атрибутом history: перехватить исключение и проверить '
              'assertIsNone(error), затем в обоих случаях redirects == 0. '
              'Нынешние фикстуры всегда содержат (); мутант на новых входах вызывает len(None).'),
     Mutation("M07: терять status ответа", PROBE,
              '        status = getattr(response, "status", None)\n',
-             '        status = None\n', WARM, None,
+             '        status = None\n', REGRESSIONS + "test_scrapling_preserves_status",
+             'self.assertEqual(result["status"], status)',
              'Тест warm проверяет ok и sentinel, но run_probe считает status=None допустимым. '
              'Нужен test_scrapling_preserves_status: ответы 201 и 403, точное сравнение '
              'result["status"]; отдельно run_probe с marker и 403 должен дать ok=False. '
              'Мутант теряет HTTP-статус и может превратить HTTP-ошибку в успех.'),
     Mutation("M08: убрать fallback пустого final URL", PROBE,
              '        final_url = str(getattr(response, "url", url) or url)\n',
-             '        final_url = str(getattr(response, "url", url))\n', SOLVER, None,
+             '        final_url = str(getattr(response, "url", url))\n',
+             REGRESSIONS + "test_scrapling_empty_url_uses_request_url",
+             'self.assertEqual(result["final_url"], REQUEST_URL)',
              'У всех Page url непустой. Нужен test_scrapling_empty_url_uses_request_url '
              'с url=None и url="": final_url должен совпадать с URL запроса. '
              'Мутант возвращает соответственно "None" и "".'),
@@ -101,7 +110,9 @@ MUTATIONS = [
              SOLVER, 'self.assertIs(captured["fetch"][1]["solve_cloudflare"], True)'),
     Mutation("M10: убрать scrapling из probe.PROVIDERS", PROBE,
              '     "pydoll", "scrapling", "wayback", "rss"}\n',
-             '     "pydoll", "wayback", "rss"}\n', REGISTRY_TEST, None,
+             '     "pydoll", "wayback", "rss"}\n',
+             REGRESSIONS + "test_probe_provider_names_match_registry",
+             'self.assertIn("scrapling", self.probe.PROVIDERS)',
              'test_registry_contract проверяет bench.providers.registry.PROVIDERS, '
              'а не множество в probe.py. Нужен test_probe_provider_names_match_registry '
              'с assertIn("scrapling", probe.PROVIDERS) и сверкой имён обоих реестров. '
@@ -118,19 +129,22 @@ MUTATIONS = [
              REGISTRY_TEST, 'self.assertEqual({p.name for p in PROVIDERS}, {'),
     Mutation("M13: отключить real_chrome", PROBE,
              '            "real_chrome": True,\n',
-             '            "real_chrome": False,\n', SOLVER, None,
+             '            "real_chrome": False,\n', REGRESSIONS + "test_scrapling_session_browser_options",
+             'self.assertIs(init["real_chrome"], True)',
              'Session сохраняет init kwargs, но real_chrome не проверяется. '
              'Нужен test_scrapling_session_browser_options с assertIs(init["real_chrome"], True). '
              'Мутант меняет переданную браузерную опцию на False; это наблюдаемая разница аргументов.'),
     Mutation("M14: включить google_search", PROBE,
              '            "google_search": False,\n',
-             '            "google_search": True,\n', SOLVER, None,
+             '            "google_search": True,\n', REGRESSIONS + "test_scrapling_disables_google_search",
+             'self.assertIs(init["google_search"], False)',
              'Нет проверки init["google_search"]. Нужен test_scrapling_disables_google_search '
              'с assertIs(init["google_search"], False); мутант передаёт True. '
              'Фикстура принимает любые kwargs, поэтому существующий тест остаётся зелёным.'),
     Mutation("M15: сократить timeout до 1", PROBE,
              '            "timeout": 120_000,\n',
-             '            "timeout": 1,\n', SOLVER, None,
+             '            "timeout": 1,\n', REGRESSIONS + "test_scrapling_session_timeout",
+             'self.assertEqual(init["timeout"], 120_000)',
              'Нужен test_scrapling_session_timeout с assertEqual(init["timeout"], 120_000). '
              'Мутант передаёт 1 вместо 120000; ни одна текущая проверка kwargs этого не замечает.'),
     Mutation("M16: увеличить retries до 2", PROBE,
@@ -142,7 +156,9 @@ MUTATIONS = [
              SOLVER, 'self.assertTrue(captured.get("closed"))'),
     Mutation("M18: не входить в контекст сессии", PROBE,
              '        self.session.__enter__()\n',
-             '        pass  # mutation: omit session enter\n', SOLVER, None,
+             '        pass  # mutation: omit session enter\n',
+             REGRESSIONS + "test_scrapling_enters_session_before_fetch",
+             'self.assertEqual(events.count("enter"), 1)',
              'Фиктивный __enter__ только возвращает self, fetch не требует инициализации. '
              'Нужен test_scrapling_enters_session_before_fetch со счётчиком __enter__ '
              'и проверкой порядка enter → fetch → exit. Мутант пропускает наблюдаемый вызов '
@@ -311,7 +327,7 @@ def audit_one(mutation: Mutation) -> dict:
 def write_report(rows: list[dict], protected: dict[str, str], revision: str) -> None:
     killed = sum(row["killed"] for row in rows)
     lines = ["# Независимый перекрёстный мутационный прогон M8", "",
-             f"Исполнитель: Codex. Последний коммит проверяемых исходников и тестов: `{revision}`.",
+             f"Исполнитель: Codex. Последний коммит боевого кода и исходных тестов: `{revision}`.",
              "BASE_SHA из задания: `1337140b51482eb9b6d65cc60a406e533b627e4d`; "
              "мутации наложены на текущую M8, включая исправления warm blank/retries, без checkout BASE_SHA.",
              "", f"Мутаций: {len(rows)}; доказанно убиты: {killed}; не убиты: {len(rows) - killed}.",
@@ -320,19 +336,23 @@ def write_report(rows: list[dict], protected: dict[str, str], revision: str) -> 
              "", "## Методика", "",
              "Авторский список мутаций не изучался; авторская обвязка не импортировалась и не запускалась. "
              "Набор составлен по решениям start/navigate/close и регистрации провайдера. "
-             "Существующие тесты не дополнены и не изменены.",
+             "Follow-up поверх b131913 добавляет ровно 12 тестов в tests/test_scrapling_regressions.py "
+             "по разделу о выживших из первичного отчёта. Боевой код и исходные 48 тестов "
+             "не изменены. Все 18 замен мутаций сохранены; изменены только целевые тесты и "
+             "привязки ассертов для прежних выживших. SHA-256 нового файла тестов приведён ниже.",
              "Для каждой строки: сохранены байты и SHA-256, целевой тест выполнен на исходнике, "
              "проверено ровно одно вхождение, замена проверена чтением с диска, выполнен ровно "
              "тот же тест в отдельном процессе, исходник восстановлен в finally и хеш сверен. "
              "Каждый процесс использует новый pycache_prefix и -B, поэтому старый pyc не скрывает мутацию.",
              "Убийство засчитывается только при зелёном baseline, rc=1 после мутации и unittest failure "
              "в заранее заданных методе/файле/строке ассерта. Ошибки загрузки, сборки, setup, "
-             "пропуски и падения на другом ассерте не засчитываются. Если собственного ассерта "
-             "на решение нет, выбран ближайший существующий тест, а место убийства задано как null.",
+             "пропуски и падения на другом ассерте не засчитываются. Для каждой мутации "
+             "теперь заранее назначен собственный ассерт. M03 и M06 перехватывают исключение "
+             "и падают на assertIsNone(error); это проверка успешной обработки заданного входа.",
              "В колонке «набор упал» набор означает ровно один указанный целевой тест, "
              "не весь репозиторий. Полные модули проверяются отдельно на восстановленном исходнике. "
-             "Вывод о пробелах опирается также на чтение всех ScraplingAdapterTests и RegistryTests; "
-             "прогон ближайшего теста не объявляется прогоном всей матрицы тестов под мутантом.",
+             "Прогон целевого теста не объявляется прогоном всей матрицы тестов под мутантом. "
+             "Результат полного unittest discover зафиксирован отдельно в report.json, AC-005.",
              "", "## Результаты", "",
              "| Мутация | Легла | Набор упал | Кто поймал |",
              "| --- | --- | --- | --- |"]
@@ -348,6 +368,8 @@ def write_report(rows: list[dict], protected: dict[str, str], revision: str) -> 
         lines.append(f'| {row["name"]} | {"да, 1 вхождение" if row["applied"] else "нет"} '
                      f'| {failed} | {catcher} |')
     lines.extend(["", "## Разбор каждого неубитого мутанта", ""])
+    if killed == len(rows):
+        lines.extend(["Неубитых мутантов нет; все 18 пойманы на заранее заданных строках ассертов.", ""])
     for mutation, row in zip(MUTATIONS, rows):
         if row["killed"]:
             continue
@@ -355,9 +377,19 @@ def write_report(rows: list[dict], protected: dict[str, str], revision: str) -> 
                       mutation.gap or "Ожидалось падение собственного ассерта; доказательство не получено.", ""])
         if "audit_error" in row:
             lines.extend([f'Ошибка аудита: {row["audit_error"]}', ""])
+    lines.extend(["## Повторная проверка 12 прежних выживших", ""])
+    for mutation, row in zip(MUTATIONS, rows):
+        if not mutation.gap:
+            continue
+        lines.extend([f"### {mutation.name}", "",
+                      f"Первичный вывод из b131913: {mutation.gap}", "",
+                      f"Добавлен `{mutation.target}`. "
+                      f"Результат: {'убит на собственном ассерте' if row['killed'] else 'не убит'}. "
+                      "Точная строка и traceback приведены в таблице и машинных доказательствах.", ""])
     lines.extend(["## Целостность", "",
                   "Все существующие файлы bench/providers/**, tests/test_probe.py, "
-                  "tests/test_registry.py и tests/mutation_gate_scrapling.py сравниваются "
+                  "tests/test_registry.py, tests/mutation_gate_scrapling.py и новый "
+                  "tests/test_scrapling_regressions.py сравниваются "
                   "побайтово до и после полного прогона. SHA-256 приведены ниже. "
                   "Проверка чистоты Git выполняется после локального коммита; report.json игнорируется Git.", "",
                   "```json", json.dumps(protected, indent=2, ensure_ascii=False), "```", "",
@@ -378,7 +410,8 @@ def main() -> int:
     paths = sorted(path for path in (ROOT / "bench/providers").rglob("*")
                    if path.is_file() and "__pycache__" not in path.parts)
     paths.extend(ROOT / name for name in (
-        "tests/test_probe.py", "tests/test_registry.py", "tests/mutation_gate_scrapling.py"))
+        "tests/test_probe.py", "tests/test_registry.py", "tests/mutation_gate_scrapling.py",
+        "tests/test_scrapling_regressions.py"))
     protected = {path: path.read_bytes() for path in paths}
     # Audit-only commits must not change the generated evidence on a rerun.
     revision = subprocess.check_output(
