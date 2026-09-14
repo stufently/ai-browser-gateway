@@ -171,6 +171,17 @@
   Spark/auto не запускать; обычный cx разрешён постановщиком, окна неизвестны.
   Прочитан целиком skill healthchecks-monitoring из tg-claude-userbot;
   требования к будущему сервису в cache `service-monitoring-notes.md`.
+  Подготовка probe запущена: Grok `gk-abg-m10-probes-20260914`, попытка
+  `t-96ef542a62d6-a01`, BASE632b2df314230c68da579811679a18409938f7e9.
+  Задание cache/m10-probe-preparation.md, watcher cache/m10-probe-watch.log;
+  пакет ожидается cache/m10/probe/preparation-result.md.
+  Неизменный контракт `docs/specs/m10-product-contract.md` SHA256
+  `01b9df3ffb99559883d3438b7fe8727c4ba0ccefd8e9591363a6bfb3d068ea84`.
+  Execution-спека `docs/specs/m10-product.md` пока DRAFT с [PROBE_SHA]:
+  статический preflight и shell syntax6команд прошли, но запуск cx запрещён
+  до приёмки независимых эталонов/probe и подстановки SHA/размера.
+  AC теперь101…106: предполёт не принимает четырёхзначные номера1001…1006.
+  Оба draft-файла скопированы в авторский клон untracked, автор не запущен.
 
 ### Продолжение по распоряжению постановщика
 
