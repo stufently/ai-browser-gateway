@@ -125,6 +125,34 @@
   повтор `bash m9/mutations-cx/run.sh <клон> <FINAL_SHA>`.
   Попытка accepted только как подготовка; idle-панель и watcher закрыты.
   После фиксов обязателен повтор на FINAL_SHA. Автор продукта мутации не пишет.
+  Исправления Grok закоммичены `4775917` (ещё на ревью). На этом SHA тот же
+  cx расширяет независимые мутации на новые Unicode/text/cleanup регрессии:
+  `m9/mutation-corrections-cx.md`, попытка `t-247c53d07c81-a01`, та же панель
+  `cx-abg-m9-mutations-20260914`; watcher `m9/mutation-corrections-watch.log`.
+  При последующих изменениях обязателен повтор на фактическом FINAL_SHA.
+  Расширение cx принято как подготовка:17/17 killed, 0survived/invalid,
+  baseline53; добавлены Unicode/границы текста/учёт provider label/ps rc/IDs.
+  SHA отчёта на момент передачи
+  `9f99af39e3ef3a89f6c0e9cdecd74a5e5413f2099822d2c56ffdd5aded143267`,
+  harness `fcbf76cc95412dc72196f1a2fa061e8f5a9bedd7891df9ba1466c6227027bf9a`.
+  Архивы первого и второго прогонов в `m9/mutations-cx/runs/`; top-level
+  mutation-result.md — текущий индекс, обновляется после каждого прогона.
+  Рецепты новых мутаций и SHA256SUMS прочитаны/проверены координатором.
+  Попытка `t-247c53d07c81-a01` accepted как подготовка, панель и сторож закрыты.
+  Пакет Grok после замечания Codex о ps rc: FINAL_SHA `724d758`, оба
+  verification приняты, машинный гейт6/6 pass (suite385, probe21, live13s,
+  105 исторических мутаций129s). Координатор прочитал полный diff исправлений,
+  но нашёл оставшийся пробел исходной спеки: исчезли проверки уникального
+  маркера в HTML браузерных ответов и gateway outcome (в text остались).
+  Код продукта исправлен, приёмка M9 всё ещё НЕ завершена.
+  `t-ccc17d852776-a01` завершён failed по этому пробелу; old review journal
+  сохранён. Тому же Grok передана узкая `docs/specs/m9-live-html-assertions.md`,
+  BASE_SHA `724d75894fe3efe25a0ef9196d4c5f694d1c261b`, SHA256
+  `7dd243f1b9203951b846ab4f968e9cacfdbc73803219bdd3113f415dff6c517e`.
+  Preflight6AC, ошибок нет; менять разрешено только две проверки в live и
+  эту спеку. Запуск `t-598f793acd1c-a01`, та же gk-панель; watcher
+  `m9/live-html-watch.log`. После пакета — собственный гейт и повтор17мутаций
+  на FINAL_SHA, затем merge/push и следующая веха.
 
 - [x] **Read-only подготовка egress:** параллельно M9 выполнена Grok
   `gk-abg-egress-recon-20260914` в собственном клоне
