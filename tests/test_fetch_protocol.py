@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import types
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -32,6 +33,12 @@ class ContentProtocolTests(unittest.TestCase):
         self.assertNotIn('color:red', text)
         self.assertNotIn('template-only', text)
         self.assertNotIn('<', text)
+
+    def test_html_to_text_does_not_glue_adjacent_blocks_into_a_sentinel(self):
+        text = self.probe.html_to_text('<p>PAGE</p><p>_OK</p>')
+        self.assertNotIn('PAGE_OK', text)
+        self.assertIn('PAGE', text)
+        self.assertIn('_OK', text)
 
     def test_include_content_false_omits_fields_even_on_failure(self):
         class Broken:
@@ -76,6 +83,26 @@ class ContentProtocolTests(unittest.TestCase):
         self.assertEqual(result['html'], '')
         self.assertEqual(result['text'], '')
         self.assertFalse(result['ok'])
+
+    def test_foreign_timeout_class_is_still_timeout(self):
+        class ForeignTimeout(Exception):
+            pass
+
+        ForeignTimeout.__name__ = 'TimeoutError'
+
+        class Slow:
+            def start(self):
+                raise ForeignTimeout('playwright budget')
+
+            def close(self):
+                pass
+
+        result = self.probe.run_probe(
+            'patchright', 'https://target.invalid/', 'marker', mode='cold',
+            adapter_factory=lambda _: Slow(), metrics=lambda: (0, 0),
+            include_content=True, budget_ms=80,
+        )
+        self.assertEqual(result['err'], 'timeout')
 
     def test_curl_passes_remaining_budget_as_max_time(self):
         completed = subprocess.CompletedProcess(
@@ -129,6 +156,50 @@ class ContentProtocolTests(unittest.TestCase):
         self.assertEqual(fake_run_probe.seen['budget_ms'], 40)
         with patch.object(sys, 'stderr'), self.assertRaises(SystemExit):
             probe.main(['https://t.invalid/', 'S', '--budget-ms', '0'])
+
+    def test_scrapling_fetch_timeout_uses_remaining_after_start(self):
+        captured = {}
+
+        class Page:
+            status = 200
+            url = 'https://final.invalid/'
+            body = b'<html>marker</html>'
+            headers = {}
+            history = ()
+
+        class Session:
+            def __init__(self, **kwargs):
+                captured['init'] = kwargs
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return None
+
+            def fetch(self, url, **kwargs):
+                captured['fetch'] = kwargs
+                return Page()
+
+        fetchers = types.ModuleType('scrapling.fetchers')
+        fetchers.StealthySession = Session
+        scrapling = types.ModuleType('scrapling')
+        scrapling.fetchers = fetchers
+        times = iter([100.0, 100.2, 100.3, 115.0, 115.1])
+
+        def clock():
+            return next(times)
+
+        with patch.dict(sys.modules, {'scrapling': scrapling, 'scrapling.fetchers': fetchers}):
+            result = self.probe.run_probe(
+                'scrapling', 'https://target.invalid/', 'marker', mode='cold',
+                adapter_factory=lambda _: self.probe.ScraplingAdapter(),
+                clock=clock, metrics=lambda: (0, 0),
+                include_content=True, budget_ms=30_000,
+            )
+        self.assertTrue(result['ok'])
+        self.assertEqual(captured['fetch']['timeout'], 15_000)
+        self.assertIs(captured['fetch']['solve_cloudflare'], True)
 
     def test_clock_call_count_unchanged_without_budget(self):
         events = []

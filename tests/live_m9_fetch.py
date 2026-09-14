@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Host-side orchestrator for one isolated M9 live fetch against a local stand."""
+"""Host orchestrator for one isolated M9 live fetch; product checks run in Docker."""
 from __future__ import annotations
 
+import grp
 import os
 import secrets
 import socket
@@ -58,6 +59,10 @@ def _docker(*args, check=True):
     return completed
 
 
+def _labeled_ids(run_id: str) -> list[str]:
+    return _docker('ps', '-aq', '--filter', f'label=abg-m9-run={run_id}', check=False).stdout.split()
+
+
 def _free_port():
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(('127.0.0.1', 0))
@@ -80,30 +85,76 @@ def _assert(condition, message):
         raise AssertionError(message)
 
 
-def _snapshot():
-    listing = _docker('ps', '-q', check=True).stdout.split()
-    return set(listing)
-
-
-def main() -> int:
-    os.chdir(ROOT)
+def inner_main() -> int:
     sys.path.insert(0, str(ROOT))
     from bench.models import FailureReason
     from gateway.engine import run as gateway_run
     from gateway.fetch import BenchFetcher
     from gateway.models import GatewayRequest, PlanStep
 
+    base = os.environ['ABG_M9_BASE']
+    sentinel = os.environ['ABG_M9_SENTINEL']
+    marker = os.environ['ABG_M9_MARKER']
+
+    def fetch(provider, path, budget_ms):
+        fetcher = BenchFetcher(f'{base}{path}', sentinel, network='host')
+        return fetcher(PlanStep(provider, 'direct', 'http'), budget_ms)
+
+    for provider, budget in (('curl', 15_000), ('patchright', 60_000), ('scrapling', 60_000)):
+        reply = fetch(provider, '/ok', budget)
+        result = reply.result
+        _assert(result.error_type is FailureReason.none, f'{provider} error={result.error_type}')
+        _assert(sentinel in result.html, f'{provider} html missing sentinel')
+        _assert(marker in result.html, f'{provider} html missing unique marker')
+        _assert(marker in result.text, f'{provider} text missing unique marker')
+        _assert(sentinel in result.text, f'{provider} text missing sentinel')
+        _assert('script-only' not in result.text, f'{provider} leaked script text')
+        _assert('<' not in result.text, f'{provider} text still has tags')
+        print(f'{provider}: status={result.status} bytes={result.bytes_received} '
+              f'elapsed_ms={result.elapsed_ms}', flush=True)
+
+    forbidden = fetch('curl', '/forbidden', 15_000)
+    _assert(forbidden.result.status == 403, f'403 status={forbidden.result.status}')
+    _assert(marker in forbidden.result.html, '403 html missing marker')
+    _assert(forbidden.result.error_type is FailureReason.none, '403 transport should succeed')
+    outcome = gateway_run(
+        GatewayRequest(url=f'{base}/forbidden', sentinel=sentinel, budget_ms=20_000),
+        BenchFetcher(f'{base}/forbidden', sentinel, network='host'),
+    )
+    _assert(not outcome.ok, '403 with sentinel must not be success')
+    _assert(outcome.error_type is FailureReason.http_403, f'expected http_403 got {outcome.error_type}')
+
+    ok_outcome = gateway_run(
+        GatewayRequest(url=f'{base}/ok', sentinel=sentinel, budget_ms=20_000),
+        BenchFetcher(f'{base}/ok', sentinel, network='host'),
+    )
+    _assert(ok_outcome.ok, f'gateway HTTP path failed: {ok_outcome.error_type}')
+    _assert(marker in ok_outcome.html, 'gateway html missing unique marker')
+    _assert(marker in ok_outcome.text, 'gateway text missing unique marker')
+
+    timed = fetch('curl', '/slow', 800)
+    _assert(timed.result.error_type is FailureReason.timeout, f'slow got {timed.result.error_type}')
+    _assert(timed.result.html == '' and timed.result.text == '', 'timeout must not keep a page')
+    print(f'timeout: error_type={timed.result.error_type}', flush=True)
+    print('live_m9_fetch: ok', flush=True)
+    return 0
+
+
+def main() -> int:
+    if os.environ.get('ABG_M9_INNER') == '1':
+        return inner_main()
+
+    os.chdir(ROOT)
     run_id = 'abg-m9-' + secrets.token_hex(6)
     sentinel = 'M9LIVE_' + secrets.token_hex(4)
     marker = 'uniq_' + secrets.token_hex(8)
     port = _free_port()
     stand = run_id + '-stand'
-    before = _snapshot()
+    docker_gid = grp.getgrnam('docker').gr_gid
     workdir = tempfile.mkdtemp(prefix=run_id + '-')
     server_path = Path(workdir) / 'server.py'
     server_path.write_text(SERVER, encoding='utf-8')
     os.chmod(server_path, 0o644)
-    cid = None
     try:
         started = _docker(
             'run', '-d', '--rm', '--user', '1002:1002', '--network', 'host',
@@ -111,70 +162,37 @@ def main() -> int:
             '-v', f'{server_path}:/server.py:ro',
             PYTHON_IMAGE, 'python3', '/server.py', '127.0.0.1', str(port), sentinel, marker,
         )
-        cid = started.stdout.strip()
+        _ = started.stdout.strip()
         try:
             _wait_port(port)
         except TimeoutError:
             logs = _docker('logs', stand, check=False)
             raise TimeoutError((logs.stdout or '') + (logs.stderr or '')) from None
         base = f'http://127.0.0.1:{port}'
-
-        def fetch(provider, path, budget_ms):
-            fetcher = BenchFetcher(
-                f'{base}{path}', sentinel, launcher=None, network='host',
-            )
-            return fetcher(PlanStep(provider, 'direct', 'http'), budget_ms)
-
-        for provider, budget in (('curl', 15_000), ('patchright', 60_000), ('scrapling', 60_000)):
-            reply = fetch(provider, '/ok', budget)
-            result = reply.result
-            _assert(result.error_type is FailureReason.none, f'{provider} error={result.error_type}')
-            _assert(sentinel in result.html, f'{provider} html missing sentinel')
-            _assert(marker in result.html, f'{provider} html missing unique marker')
-            _assert(marker in result.text, f'{provider} text missing unique marker')
-            _assert(sentinel in result.text, f'{provider} text missing sentinel')
-            _assert('script-only' not in result.text, f'{provider} leaked script text')
-            _assert('<' not in result.text, f'{provider} text still has tags')
-            print(f'{provider}: status={result.status} bytes={result.bytes_received} '
-                  f'elapsed_ms={result.elapsed_ms}', flush=True)
-
-        forbidden = fetch('curl', '/forbidden', 15_000)
-        _assert(forbidden.result.status == 403, f'403 status={forbidden.result.status}')
-        _assert(marker in forbidden.result.html, '403 html missing marker')
-        _assert(forbidden.result.error_type is FailureReason.none, '403 transport should succeed')
-        outcome = gateway_run(
-            GatewayRequest(url=f'{base}/forbidden', sentinel=sentinel, budget_ms=20_000),
-            BenchFetcher(f'{base}/forbidden', sentinel, network='host'),
+        inner = _docker(
+            'run', '--rm', '--user', '1002:1002', '--group-add', str(docker_gid),
+            '--network', 'host', '--label', f'abg-m9-run={run_id}',
+            '-e', 'HOME=/tmp', '-e', 'PYTHONDONTWRITEBYTECODE=1',
+            '-e', 'ABG_M9_INNER=1', '-e', f'ABG_M9_BASE={base}',
+            '-e', f'ABG_M9_SENTINEL={sentinel}', '-e', f'ABG_M9_MARKER={marker}',
+            '-v', f'{ROOT}:{ROOT}:ro', '-w', str(ROOT),
+            '-v', '/var/run/docker.sock:/var/run/docker.sock',
+            '-v', '/usr/bin/docker:/usr/bin/docker:ro',
+            PYTHON_IMAGE, 'python3', 'tests/live_m9_fetch.py',
         )
-        _assert(not outcome.ok, '403 with sentinel must not be success')
-        _assert(outcome.error_type is FailureReason.http_403, f'expected http_403 got {outcome.error_type}')
-
-        ok_outcome = gateway_run(
-            GatewayRequest(url=f'{base}/ok', sentinel=sentinel, budget_ms=20_000),
-            BenchFetcher(f'{base}/ok', sentinel, network='host'),
-        )
-        _assert(ok_outcome.ok, f'gateway HTTP path failed: {ok_outcome.error_type}')
-        _assert(marker in ok_outcome.html, 'gateway html missing unique marker')
-        _assert(marker in ok_outcome.text, 'gateway text missing unique marker')
-
-        timed = fetch('curl', '/slow', 800)
-        _assert(timed.result.error_type is FailureReason.timeout, f'slow got {timed.result.error_type}')
-        _assert(timed.result.html == '' and timed.result.text == '', 'timeout must not keep a page')
-        print(f'timeout: error_type={timed.result.error_type}', flush=True)
-        print('live_m9_fetch: ok', flush=True)
+        sys.stdout.write(inner.stdout)
+        sys.stdout.flush()
+        if inner.returncode:
+            sys.stderr.write(inner.stderr)
+            raise RuntimeError(inner.stderr.strip() or f'inner checks failed rc={inner.returncode}')
         return 0
     finally:
         _docker('rm', '--force', stand, check=False)
-        leftover = _docker('ps', '-aq', '--filter', f'label=abg-m9-run={run_id}', check=False)
-        ids = leftover.stdout.split()
-        for ident in ids:
+        for ident in _labeled_ids(run_id):
             _docker('rm', '--force', ident, check=False)
-        after = _snapshot()
-        extra = after - before
-        if extra:
-            still = _docker('ps', '--filter', f'label=abg-m9-run={run_id}', check=False).stdout
-            if still.strip():
-                raise AssertionError(f'run containers remain: {still}')
+        leftover = _labeled_ids(run_id)
+        if leftover:
+            raise AssertionError('run containers remain')
         try:
             server_path.unlink()
             Path(workdir).rmdir()

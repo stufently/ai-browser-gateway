@@ -82,6 +82,12 @@ class _VisibleText(HTMLParser):
     def handle_endtag(self, tag):
         if self._skip and tag in {"script", "style", "template"}:
             self._skip -= 1
+        elif self._skip == 0:
+            self._parts.append(" ")
+
+    def handle_startendtag(self, tag, attrs):
+        if self._skip == 0:
+            self._parts.append(" ")
 
     def handle_data(self, data):
         if self._skip == 0:
@@ -622,7 +628,10 @@ class ScraplingAdapter:
     def navigate(self, url: str) -> dict[str, Any]:
         if url == "about:blank":
             return _result(None, url, b"", 0, headers=None)
-        response = self.session.fetch(url, solve_cloudflare=self.solve_cloudflare)
+        fetch_kwargs: dict[str, Any] = {"solve_cloudflare": self.solve_cloudflare}
+        if _DEADLINE is not None and _DEADLINE.end is not None:
+            fetch_kwargs["timeout"] = _bound_timeout_ms(120_000)
+        response = self.session.fetch(url, **fetch_kwargs)
         body = getattr(response, "body", b"")
         if callable(body):
             body = body()
@@ -870,10 +879,16 @@ def run_probe(
             rss_monitor = None
         if startup_ms == 0:
             startup_ms = round((finished - start) * 1000)
-        if isinstance(exc, (TimeoutError, subprocess.TimeoutExpired)):
+        name = type(exc).__name__
+        if (
+            isinstance(exc, (TimeoutError, subprocess.TimeoutExpired))
+            or name in ("TimeoutError", "TimeoutExpired")
+        ):
             err = "timeout"
         else:
-            err = redact(f"{type(exc).__name__}: {exc}")
+            err = redact(f"{name}: {exc}")
+            if err.startswith(("TimeoutError:", "TimeoutExpired:")):
+                err = "timeout"
         payload = {
             "ok": False, "status": None, "final_url": url, "bytes": 0,
             "sentinel": False, "challenge": "none", "title": "",
