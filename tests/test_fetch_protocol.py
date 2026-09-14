@@ -1,6 +1,7 @@
 """Probe content protocol and budget plumbing; no Docker."""
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import types
@@ -8,9 +9,20 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from bench.models import ChallengeType, FailureReason, FetchResult, evaluate
 from tests.test_probe import Clock, FakeAdapter, load_probe
 
 PROBE_PATH = Path(__file__).resolve().parents[1] / 'bench' / 'providers' / 'docker' / 'probe.py'
+UNICODE_SEPARATORS = '\u0085\u2028\u2029'
+
+
+def _page_result(html: str, text: str) -> FetchResult:
+    return FetchResult(
+        provider='curl', provider_version='test', requested_url='https://example.invalid/',
+        final_url='https://example.invalid/', status=200, html=html, text=text,
+        elapsed_ms=1, startup_ms=0, cpu_ms=0, peak_rss_mb=0.1, bytes_received=1,
+        redirects=0, error_type=FailureReason.none, challenge=ChallengeType.none,
+    )
 
 
 class ContentProtocolTests(unittest.TestCase):
@@ -39,6 +51,60 @@ class ContentProtocolTests(unittest.TestCase):
         self.assertNotIn('PAGE_OK', text)
         self.assertIn('PAGE', text)
         self.assertIn('_OK', text)
+
+    def test_html_to_text_breaks_on_br_hr_and_block_edges(self):
+        cases = (
+            '<p>PAGE<br>_OK</p>',
+            '<p>PAGE<br/>_OK</p>',
+            '<p>PAGE<br />_OK</p>',
+            'PAGE<div>_OK</div>',
+            '<div>PAGE</div>_OK',
+            'PAGE<hr>_OK',
+            'PAGE<hr/>_OK',
+        )
+        for html in cases:
+            with self.subTest(html=html):
+                text = self.probe.html_to_text(html)
+                self.assertNotIn('PAGE_OK', text, text)
+                self.assertIn('PAGE', text)
+                self.assertIn('_OK', text)
+                ok, reason = evaluate(_page_result(html, text), 'PAGE_OK')
+                self.assertFalse(ok, f'evaluate accepted glued text {text!r}')
+                self.assertEqual(reason, FailureReason.content_missing)
+
+    def test_html_to_text_does_not_split_words_on_inline_markup(self):
+        cases = (
+            '<b>PAGE</b>_OK',
+            '<i>PAGE</i>_OK',
+            'PA<span>GE</span>_OK',
+            '<em>PAGE</em>_OK',
+            '<strong>PA</strong>GE_OK',
+        )
+        for html in cases:
+            with self.subTest(html=html):
+                text = self.probe.html_to_text(html)
+                self.assertIn('PAGE_OK', text, text)
+                self.assertNotIn('<', text)
+                ok, reason = evaluate(_page_result(html, text), 'PAGE_OK')
+                self.assertTrue(ok, f'evaluate missed inline sentinel in {text!r}')
+                self.assertEqual(reason, FailureReason.none)
+
+    def test_parse_output_keeps_unicode_separators_and_rejects_broken_last_line(self):
+        from bench.providers.registry import by_name, parse_output
+
+        html = f'keep{UNICODE_SEPARATORS}PAGE_OK'
+        payload = {'ok': True, 'html': html, 'text': html}
+        wire = json.dumps(payload, ensure_ascii=False, separators=(',', ':'))
+        self.assertGreater(len(wire.splitlines()), 1)
+        got = parse_output(by_name('curl'), 'log\n' + wire + '\ntrailer\n')
+        self.assertEqual(got['html'], html)
+        self.assertEqual(got['text'], html)
+        for char in UNICODE_SEPARATORS:
+            self.assertIn(char, got['html'])
+            self.assertIn(char, got['text'])
+        earlier = json.dumps({'ok': True, 'html': 'good'}, ensure_ascii=False)
+        with self.assertRaises(ValueError):
+            parse_output(by_name('curl'), earlier + '\n{broken')
 
     def test_include_content_false_omits_fields_even_on_failure(self):
         class Broken:

@@ -69,6 +69,18 @@ def _bound_timeout_ms(default: int) -> int:
     return max(1, min(default, int(deadline.remaining_s() * 1000)))
 
 
+_INERT_TAGS = frozenset({"script", "style", "template"})
+_BREAK_TAGS = frozenset({"br", "hr"})
+_BLOCK_TAGS = frozenset({
+    "address", "article", "aside", "blockquote", "body", "caption",
+    "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption",
+    "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
+    "header", "hgroup", "html", "li", "main", "nav", "ol", "p", "pre",
+    "section", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+    "legend", "summary", "menu",
+})
+
+
 class _VisibleText(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -76,17 +88,15 @@ class _VisibleText(HTMLParser):
         self._parts: list[str] = []
 
     def handle_starttag(self, tag, attrs):
-        if tag in {"script", "style", "template"}:
+        if tag in _INERT_TAGS:
             self._skip += 1
-
-    def handle_endtag(self, tag):
-        if self._skip and tag in {"script", "style", "template"}:
-            self._skip -= 1
-        elif self._skip == 0:
+        elif self._skip == 0 and tag in _BREAK_TAGS | _BLOCK_TAGS:
             self._parts.append(" ")
 
-    def handle_startendtag(self, tag, attrs):
-        if self._skip == 0:
+    def handle_endtag(self, tag):
+        if self._skip and tag in _INERT_TAGS:
+            self._skip -= 1
+        elif self._skip == 0 and tag in _BLOCK_TAGS:
             self._parts.append(" ")
 
     def handle_data(self, data):

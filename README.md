@@ -68,6 +68,11 @@ print(outcome.ok, outcome.provider, outcome.step)
 Ядро по-прежнему требует непустой sentinel: продуктовый вход без него и HTTP API
 ещё впереди.
 
+Имена `profiles` и `entrances` у `BenchFetcher` обязаны совпадать с именами в
+`GatewayRequest` (`egress_profiles` и входы плана). Несовпадение сейчас даёт
+`not_measured` на транспорте, а ядро M7 на этом reason не продолжает лестницу —
+это ограничение согласованного контракта, а не безопасный продуктовый запрос.
+
 Контракт транспорта: `fetcher(step, budget_ms) -> ProviderReply`. Ядро передаёт
 остаток общего бюджета перед каждой попыткой, записывает её результат и решение
 в `outcome.attempts`. На отказе содержимое пустое, `provider` и `age_hours` равны

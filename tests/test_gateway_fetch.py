@@ -57,6 +57,50 @@ class FetchPageContractTests(unittest.TestCase):
         self.assertEqual(result.elapsed_ms, 11)
         self.assertEqual(result.bytes_received, payload['bytes'])
 
+    def test_fetch_page_keeps_probe_unicode_separators_through_one_line_json(self):
+        from tests.test_probe import load_probe
+
+        separators = '\u0085\u2028\u2029'
+        html = f'<html><body>keep{separators}unique-marker-ω</body></html>'
+
+        class BodyAdapter:
+            version = 'probe-test'
+
+            def start(self):
+                return None
+
+            def close(self):
+                return None
+
+            def navigate(self, url):
+                return {
+                    'status': 200, 'final_url': url, 'body': html,
+                    'title': '', 'redirects': 0,
+                }
+
+        payload = load_probe().run_probe(
+            'curl', 'https://example.invalid/page', 'unique-marker-ω',
+            mode='cold', adapter_factory=lambda _: BodyAdapter(),
+            metrics=lambda: (0, 0), include_content=True,
+        )
+        self.assertEqual(payload['html'], html)
+        for char in separators:
+            self.assertIn(char, payload['html'])
+            self.assertIn(char, payload['text'])
+        wire = json.dumps(payload, ensure_ascii=False, separators=(',', ':')) + '\n'
+        self.assertGreater(len(wire.splitlines()), 1)
+        launcher = ProbeLauncher((0, wire, ''))
+        result, _ = fetch_page(
+            'curl', url='https://example.invalid/page', sentinel='unique-marker-ω',
+            budget_ms=900, launcher=launcher,
+        )
+        self.assertEqual(result.html, html)
+        self.assertEqual(result.text, payload['text'])
+        for char in separators:
+            self.assertIn(char, result.html)
+            self.assertIn(char, result.text)
+        self.assertEqual(result.error_type, FailureReason.none)
+
     def test_missing_body_is_provider_error_not_sentinel_success(self):
         payload = _probe_payload(sentinel=True, ok=True)
         del payload['html']
@@ -275,6 +319,63 @@ class BenchmarkIsolationTests(unittest.TestCase):
         with patch('subprocess.run', return_value=result) as run:
             DockerLauncher().run(command, timeout=1, env={'ABG_PROXY': 'http://p'})
         self.assertEqual(run.call_args.kwargs['env'], {'ABG_PROXY': 'http://p'})
+
+
+class LiveLauncherLabelTests(unittest.TestCase):
+    def test_labeled_launcher_wraps_real_dockerlauncher_and_labels_argv(self):
+        from tests.live_m9_fetch import LabeledDockerLauncher, inject_run_labels
+
+        self.assertIsInstance(LabeledDockerLauncher('run-x').inner, DockerLauncher)
+        argv = ['docker', 'run', '--rm', 'abg-curl:m2', 'https://example.invalid/', 'S']
+        labeled = inject_run_labels(argv, 'run-x')
+        self.assertEqual(labeled[:2], ['docker', 'run'])
+        self.assertEqual(labeled[labeled.index('--label') + 1], 'abg-m9-run=run-x')
+        self.assertIn('abg-m9-role=provider', labeled)
+        self.assertEqual(argv[:2], ['docker', 'run'])
+        self.assertNotIn('abg-m9-role=provider', argv)
+
+        class Inner:
+            def run(self, argv, timeout, *, env=None):
+                self.seen = list(argv)
+                self.timeout = timeout
+                self.env = env
+                return (0, json.dumps(_probe_payload()), '')
+
+        inner = Inner()
+        launcher = LabeledDockerLauncher('run-x', inner=inner)
+        result, _ = fetch_page(
+            'curl', url='https://example.invalid/', sentinel='probe-ok',
+            budget_ms=200, launcher=launcher,
+        )
+        self.assertEqual(result.error_type, FailureReason.none)
+        self.assertIn('--label', inner.seen)
+        self.assertEqual(inner.seen[inner.seen.index('--label') + 1], 'abg-m9-run=run-x')
+        self.assertIn('abg-m9-role=provider', inner.seen)
+        self.assertLess(inner.seen.index('--label'), inner.seen.index(by_name('curl').image))
+
+    def test_leftover_ids_do_not_treat_failed_ps_or_empty_stdout_as_clean(self):
+        from tests.live_m9_fetch import leftover_ids
+
+        with self.assertRaises(RuntimeError):
+            leftover_ids(subprocess.CompletedProcess(['docker', 'ps'], 1, '', 'boom'))
+        with self.assertRaises(RuntimeError):
+            leftover_ids(subprocess.CompletedProcess(['docker', 'ps'], 2, '', ''))
+        self.assertEqual(
+            leftover_ids(subprocess.CompletedProcess(['docker', 'ps'], 0, '', '')),
+            [],
+        )
+        self.assertEqual(
+            leftover_ids(subprocess.CompletedProcess(['docker', 'ps'], 0, 'cid1\ncid2\n', '')),
+            ['cid1', 'cid2'],
+        )
+
+    def test_live_browser_budget_stays_at_cold_start_limit(self):
+        from tests.live_m9_fetch import PROVIDER_BUDGETS
+
+        budgets = dict(PROVIDER_BUDGETS)
+        self.assertEqual(budgets['patchright'], 30_000)
+        self.assertEqual(budgets['scrapling'], 30_000)
+        self.assertLessEqual(max(budgets.values()), 30_000)
 
 
 if __name__ == '__main__':

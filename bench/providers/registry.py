@@ -62,7 +62,9 @@ def build_argv(provider: Provider, *, url: str, sentinel: str, network=None,
 
 def parse_output(provider: Provider, stdout: str) -> dict:
     """A broken last JSON line is a failure even if an earlier line was valid."""
-    candidates = [line for line in stdout.splitlines() if line.startswith('{')]
+    # One-line JSON from json.dumps(ensure_ascii=False) may contain U+0085,
+    # U+2028, or U+2029. splitlines() would split inside that payload.
+    candidates = [line for line in stdout.split('\n') if line.startswith('{')]
     try:
         payload = json.loads(candidates[-1]) if candidates else None
         if not isinstance(payload, dict):
