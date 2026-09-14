@@ -216,6 +216,28 @@ cf-fetch. Следующий шаг — независимый probe/этало�
 не повторять исходную разведку и готовую приёмку M9. В новой продуктовой
 границе обязательно валидировать тип URL/параметров и безопасно обрабатывать
 неизвестные entrances/profiles: M9 намеренно сохранила строгий контракт M7.
+  **Обновление 22:49 UTC:** исправленная подготовка принята, попытка
+  t-96ef542a62d6-a01 accepted; Grok-панель закрыта после завершения.
+  Новый probe commit25335c9dcbd7ddffa09587518f0209309f6603df,
+  SHA699d66eb29233728518d176c3dcc01bd1fb5c6fc29cc4860e80f56fdbf7fc013,
+  49687байт/1189строк/55тестов. Два независимых эталона green (module+unittest),
+  13 обходов — assertion kills, 0ERROR; BASE632 и точный авторскийb303 red
+  по отсутствию API. Исправлены все шесть пунктов приёмки; допустимые
+  вариации without slots/extra clock/entrance.next_step=None также green.
+  Прочитан diff probe, refs и scripts; проверены389 manifestentries и
+  argv/cwd/rc/SHA всех20прогонов. Старый пакет сохранён в probe/round1.
+  Новый preparation-result.md SHA256
+  6804a94095e5b778765fe25f0c9a0d2570e617556106fcaec23d3bef30fafcec.
+  Execution-спека заморожена: docs/specs/m10-product.md SHA256
+  5e4f56226e3aa91a121ae6e7d5266f799f17050da529f21da60cd128d749e820;
+  контракт01b9 неизменен. SHA/размер probe подставлены, preflight6AC rc0.
+  Запущен явный cx в abg-m10-product-20260914, BASEb303 остаётся;
+  pane cx-abg-m10-product-20260914, attempt t-810ca7584d29-a01 running.
+  Watcher cache/m10-product-watch.log. Реализация/ревью/полный авторский
+  гейт ожидаются; после FINAL нужны независимые Grok-мутации и приёмка.
+  Последний фактический Grok weekly3% (22:46UTC), 5h/reset неизвестны.
+  Spark/auto запрещены до указанного reset; cx разрешён владельцем.
+
 - [ ] **M10 и далее:** M10 — продуктовая лестница со Scrapling и живой
   браузерный сценарий; M11 — HTTP API с токеном, форматом
   text/html/markdown, бюджетом и ограничением браузеров; сервис на stand-host и CLI

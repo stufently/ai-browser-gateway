@@ -1,6 +1,6 @@
 # M10 — продуктовая лестница: execution-спека
 
-ЧЕРНОВИК ДО SHA НЕЗАВИСИМОГО PROBE. Реализацию пока не запускать.
+Спецификация заморожена после приёмки независимого probe 14.09.2026.
 
 ## Шапка и где работать
 
@@ -9,7 +9,7 @@ BASE_SHA `b303ecce7812f1a2cd4cb7a3cffdf4c0aabce2cf`
 (Preserve M10 contract and independent probe preparation).
 Клон /home/user/exec-clones/abg-m10-product-20260914, ветка m10-product.
 Исполнитель — явный cx по разрешению постановщика; Spark исчерпан до
-20.09.2026 15:59, auto запрещён. Последний Grok weekly4%, 5h/reset неизвестны;
+20.09.2026 15:59, auto запрещён. Последний Grok weekly3%, 5h/reset неизвестны;
 окна обычного cx неизвестны. Исправления остаются cx, новой монетки нет.
 Независимый probe/эталоны/мутации — Grok, отдельный клон m10-probes.
 Координатор пишет спецификацию и принимает, продукт/тесты/фиксы пишет cx.
@@ -71,7 +71,7 @@ JavaScript. Так bare HTTP вместо patchright/Scrapling не сможет
 Контракт уже сохранён в BASE. Execution-спека передана готовой правкой;
 закоммитить её без дальнейших изменений, контракт оставить неизменным.
 Независимый `tests/probe_m10_product.py` также коммитится БЕЗ правок:
-SHA256 [PROBE_SHA], размер [PROBE_SIZE]. Пакет подготовки
+SHA256 699d66eb29233728518d176c3dcc01bd1fb5c6fc29cc4860e80f56fdbf7fc013, размер 49687. Пакет подготовки
 /home/user/.cache/abg-coord-20260914/m10/probe/preparation-result.md.
 Эталоны в продукт не переносить. Full review diff должен быть <100000байт;
 если не помещается, остановиться до ревью, не обрезать вход.
@@ -91,7 +91,7 @@ evaluate/next_step или ослаблять проверки ради зелё�
 - **AC-101.** Полный unittest:
   `bash -c 'docker run --rm --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest discover -q -s tests -t .'`
 - **AC-102.** Неизменные контракт/независимые probes M9+M10:
-  `bash -c 'echo "01b9df3ffb99559883d3438b7fe8727c4ba0ccefd8e9591363a6bfb3d068ea84  docs/specs/m10-product-contract.md" | sha256sum -c - && echo "[PROBE_SHA]  tests/probe_m10_product.py" | sha256sum -c - && echo "4391024b03139e508978d86244cc27a81d386d5fbeea9d3c543fb1e424719190  tests/probe_m9_transport.py" | sha256sum -c - && docker run --rm --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product'`
+  `bash -c 'echo "01b9df3ffb99559883d3438b7fe8727c4ba0ccefd8e9591363a6bfb3d068ea84  docs/specs/m10-product-contract.md" | sha256sum -c - && echo "699d66eb29233728518d176c3dcc01bd1fb5c6fc29cc4860e80f56fdbf7fc013  tests/probe_m10_product.py" | sha256sum -c - && echo "4391024b03139e508978d86244cc27a81d386d5fbeea9d3c543fb1e424719190  tests/probe_m9_transport.py" | sha256sum -c - && docker run --rm --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product'`
 - **AC-103.** Живой сквозной сценарий:
   `bash -c 'python3 tests/live_m10_product.py'`
 - **AC-104.** Исторические мутации:
