@@ -7,3 +7,5 @@ build/
 report.json
 report-blocked.md
 docs/superpowers/
+tmp/
+review/
