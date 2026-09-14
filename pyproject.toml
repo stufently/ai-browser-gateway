@@ -10,5 +10,5 @@ requires-python = ">=3.12"
 dependencies = []
 
 [tool.setuptools.packages.find]
-include = ["bench*"]
+include = ["bench*", "gateway*"]
 exclude = ["tests*"]
