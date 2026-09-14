@@ -37,12 +37,51 @@ patchright → смена egress → человек
 | `docs/BENCHMARK_PLAN.md` | как меряем: два стенда, 12 сценариев, признак успеха |
 | `TASKS.md` | статус работ |
 
+## Ядро шлюза
+
+Пакет `gateway/` исполняет лестницу для одного URL: `curl`, затем по решению
+`bench.escalate.next_step` — `patchright` для рендеринга или `curl` через другой
+egress. После повторной блокировки на новом egress требуется человек.
+При `max_age_hours > 0` перед HTTP пробуются `rss` и `wayback`; успех входа
+требует найденного sentinel и известного возраста не больше заданного допуска.
+При нулевом допуске входов в плане нет.
+
+```python
+from bench.models import ChallengeType, FailureReason, FetchResult
+from gateway.engine import run
+from gateway.models import GatewayRequest, ProviderReply
+
+request = GatewayRequest(url="https://example.invalid/page", sentinel="PAGE_OK")
+
+def fake_fetcher(step, budget_ms):
+    # Демонстрационный ответ без сети. Реальный адаптер должен соблюдать budget_ms.
+    return ProviderReply(FetchResult(
+        provider=step.provider, provider_version="demo",
+        requested_url=request.url, final_url=request.url,
+        status=200, html="<p>PAGE_OK</p>", text="PAGE_OK",
+        elapsed_ms=0, startup_ms=0, cpu_ms=0, peak_rss_mb=0.0,
+        bytes_received=14, redirects=0,
+        error_type=FailureReason.none, challenge=ChallengeType.none,
+    ))
+
+outcome = run(request, fake_fetcher)
+print(outcome.ok, outcome.provider, outcome.step)  # True curl stop
+```
+
+Контракт транспорта: `fetcher(step, budget_ms) -> ProviderReply`. Ядро передаёт
+остаток общего бюджета перед каждой попыткой, записывает её результат и решение
+в `outcome.attempts`. На отказе содержимое пустое, `provider` и `age_hours` равны
+`None`, а `error_type` и `step` объясняют остановку. Исключения адаптера выходят
+вызывающему; штатные отказы адаптер возвращает как `FetchResult`.
+Сетевой адаптер поверх `bench.runner.execute` и HTTP-API остаются следующей вехе.
+
 ## Харнесс
 
 ```bash
 python3 -m bench.server            # поднять стенд A (12 детерминированных сценариев)
 python3 -m unittest discover -s tests -t .
 python3 tests/mutation_gate.py     # 17 мутаций, каждая обязана быть убита
+python3 tests/mutation_gate_gateway.py  # 5 мутаций ядра M7
 ```
 
 Ни одной сторонней зависимости: только стандартная библиотека Python.
