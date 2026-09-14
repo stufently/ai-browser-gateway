@@ -30,7 +30,8 @@ from xml.etree import ElementTree
 
 
 PROVIDERS = frozenset(
-    {"curl", "curl_cffi", "primp", "playwright", "patchright", "camoufox", "pydoll", "wayback", "rss"}
+    {"curl", "curl_cffi", "primp", "playwright", "patchright", "camoufox",
+     "pydoll", "scrapling", "wayback", "rss"}
 )
 
 
@@ -528,6 +529,48 @@ class PatchrightAdapter(PlaywrightAdapter):
     package = "patchright"
 
 
+class ScraplingAdapter:
+    version = "unknown"
+    solve_cloudflare = True
+
+    def start(self) -> None:
+        from scrapling.fetchers import StealthySession
+
+        self.version = _version("scrapling")
+        options: dict[str, Any] = {
+            "headless": False,
+            "real_chrome": True,
+            "solve_cloudflare": self.solve_cloudflare,
+            "google_search": False,
+            "timeout": 120_000,
+            "retries": 1,
+        }
+        proxy = _proxy_url()
+        if proxy:
+            options["proxy"] = playwright_proxy(proxy)
+        self.session = StealthySession(**options)
+        self.session.__enter__()
+
+    def navigate(self, url: str) -> dict[str, Any]:
+        if url == "about:blank":
+            return _result(None, url, b"", 0, headers=None)
+        response = self.session.fetch(url, solve_cloudflare=self.solve_cloudflare)
+        body = getattr(response, "body", b"")
+        if callable(body):
+            body = body()
+        if not isinstance(body, bytes):
+            body = b"" if body is None else str(body).encode("utf-8")
+        headers = _normalize_headers(getattr(response, "headers", None))
+        history = getattr(response, "history", None) or ()
+        status = getattr(response, "status", None)
+        final_url = str(getattr(response, "url", url) or url)
+        return _result(status, final_url, body, len(history), headers=headers)
+
+    def close(self) -> None:
+        if hasattr(self, "session"):
+            self.session.__exit__(None, None, None)
+
+
 class CamoufoxAdapter:
     version = "unknown"
 
@@ -666,6 +709,7 @@ def make_adapter(provider: str):
         "primp": PrimpAdapter,
         "playwright": PlaywrightAdapter,
         "patchright": PatchrightAdapter,
+        "scrapling": ScraplingAdapter,
         "camoufox": CamoufoxAdapter,
         "pydoll": PydollAdapter,
         "wayback": WaybackAdapter,

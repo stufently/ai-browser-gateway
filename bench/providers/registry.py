@@ -22,6 +22,7 @@ PROVIDERS: tuple[Provider, ...] = (
     Provider('primp', 'abg-primp:m2', 1, 'http', True),
     Provider('playwright', 'abg-playwright:m2', 2, 'browser', True),
     Provider('patchright', 'abg-patchright:m2', 2, 'browser', True),
+    Provider('scrapling', 'abg-scrapling:m8', 2, 'browser', True),
     Provider('camoufox', 'abg-camoufox:m2', 3, 'browser', True),
     Provider('pydoll', 'abg-pydoll:m2', 3, 'browser', True),
     Provider('wayback', 'abg-wayback:m4', 0, 'entrance', True),

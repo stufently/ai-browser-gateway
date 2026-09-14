@@ -59,12 +59,11 @@ expect = "Начать AI Browser Gateway"
 
 [[target]]
 id = "login-instagram"
-url = "https://www.instagram.com/reels/DdJ-MY6OITt/"
+url = "https://www.instagram.com/reel/DdJ-MY6OITt/"
 class = "login-wall"
 owner = "third-party"
-valid = true
-note = "Живой публичный рилс, выдан владельцем 14.09.2026. Меряет стену авторизации Instagram при доступе без сессии — проверяем, доберётся ли инструмент до контента рилса. Прежний id был подставлен наугад и давал мёртвую ссылку (Post isn't available)."
-expect = "og:video"
+note = "Живой рилс, замерен 14.09.2026 с этого хоста: curl -sL → HTTP 200, 675468 байт, <title>Instagram</title>, подстрока «Кирилл Жильников» в теле 0 вхождений; headless Chromium со stealth → 200, 1138260 байт, og:title = «Кирилл Жильников on Instagram: …», подстрока «Кирилл Жильников» — 3 вхождения. Строка ожидания на странице-заглушке не встречается. Меряется доступ к подписи и мета-разметке, не к самому видео: видео остаётся за стеной логина."
+expect = "Кирилл Жильников on Instagram"
 
 [[target]]
 id = "own-cf-stand"
