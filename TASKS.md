@@ -158,7 +158,7 @@
   probe/эталоны/мутации Grok. Клоны уже созданы с отключённым push:
   `/home/user/exec-clones/abg-m10-product-20260914` (m10-product),
   `/home/user/exec-clones/abg-m10-probes-20260914` (m10-probes).
-  Спека/BASE/SHA независимого probe ещё не заморожены, реализации нет.
+  Execution-спека и SHA независимого probe ещё не заморожены, реализации нет.
   Контракт в cache `m10-product-contract.md`: новый fetch_content без fake
   sentinel, сохранение M7/M9, validation/deadline/freshness/trace, лестница
   directHTTP→patchright→Scrapling→egress→human.
@@ -181,7 +181,17 @@
   статический preflight и shell syntax6команд прошли, но запуск cx запрещён
   до приёмки независимых эталонов/probe и подстановки SHA/размера.
   AC теперь101…106: предполёт не принимает четырёхзначные номера1001…1006.
-  Оба draft-файла скопированы в авторский клон untracked, автор не запущен.
+  Автор не запущен. После сохранения контракта авторский клон переведён на
+  BASE b303ecce7812f1a2cd4cb7a3cffdf4c0aabce2cf: bench/gateway/tests побайтно
+  те же, что на632b2df (git diff rc0). Контракт уже в базе; это исключает
+  повторные27КБ спецификаций из будущего полного review diff. Пробник уже
+  около45КБ, его качество ради лимита входа не сокращаем. Подготовка Grok
+  остаётся на632b2df; её продуктовый код идентичен новой авторской базе.
+  Предыдущие untracked draft-копии сохранены в stash авторского клона
+  `coordinator-m10-draft-before-base-update`; текущая execution-спека —
+  tracked modified с BASEb303ecc, по-прежнему [PROBE_SHA], не запускать.
+  Добавлено требование JS-маркера: live должен отличать настоящие patchright/
+  Scrapling от повторного bare HTTP. Предполёт после измененияBASE сноваrc0.
 
 ### Продолжение по распоряжению постановщика
 

@@ -5,8 +5,8 @@
 ## Шапка и где работать
 
 Репозиторий /home/user/github/ai-browser-gateway, 14.09.2026.
-BASE_SHA `632b2df314230c68da579811679a18409938f7e9`
-(Import accepted Grok two-egress measurement and product handoff).
+BASE_SHA `b303ecce7812f1a2cd4cb7a3cffdf4c0aabce2cf`
+(Preserve M10 contract and independent probe preparation).
 Клон /home/user/exec-clones/abg-m10-product-20260914, ветка m10-product.
 Исполнитель — явный cx по разрешению постановщика; Spark исчерпан до
 20.09.2026 15:59, auto запрещён. Последний Grok weekly4%, 5h/reset неизвестны;
@@ -61,7 +61,15 @@ bench/runner/execute.py, совместимые content-only изменения 
 README: пример ProductRequest+ProductFetcher, expected_text и его ограничения,
 trace/отказы, Docker; API/сервис ещё не объявлять готовыми.
 
-Спека и контракт приехали untracked; оба коммитятся БЕЗ правок.
+Уточнение live под риск подмены браузера обычным HTTP: отдельный URL стенда
+имеет пустой видимый текст в исходном HTML и создаёт уникальный текстовый
+маркер inline-JavaScript; curl→patchright должен вернуть маркер в HTML И text.
+В трёхступенчатом сценарии третья страница также создаёт видимый маркер через
+JavaScript. Так bare HTTP вместо patchright/Scrapling не сможет пройти live.
+Сохранить проверки directcurl, точного trace,403, timeout и scoped cleanup.
+
+Контракт уже сохранён в BASE. Execution-спека передана готовой правкой;
+закоммитить её без дальнейших изменений, контракт оставить неизменным.
 Независимый `tests/probe_m10_product.py` также коммитится БЕЗ правок:
 SHA256 [PROBE_SHA], размер [PROBE_SIZE]. Пакет подготовки
 /home/user/.cache/abg-coord-20260914/m10/probe/preparation-result.md.
@@ -89,7 +97,7 @@ evaluate/next_step или ослаблять проверки ради зелё�
 - **AC-104.** Исторические мутации:
   `bash -c 'docker run --rm --user 1002:1002 -v "$PWD":/work -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 tests/mutation_gate.py'`
 - **AC-105.** Старое ядро, исследования, статус и тесты неизменны:
-  `bash -c 'git diff --exit-code 632b2df314230c68da579811679a18409938f7e9 HEAD -- gateway/engine.py gateway/models.py gateway/plan.py bench/models.py bench/escalate.py docs/research TASKS.md CHANGELOG.md tests ":(exclude)tests/test_gateway_product.py" ":(exclude)tests/test_content_transport.py" ":(exclude)tests/live_m10_product.py" ":(exclude)tests/probe_m10_product.py"'`
+  `bash -c 'git diff --exit-code b303ecce7812f1a2cd4cb7a3cffdf4c0aabce2cf HEAD -- gateway/engine.py gateway/models.py gateway/plan.py bench/models.py bench/escalate.py docs/research TASKS.md CHANGELOG.md tests ":(exclude)tests/test_gateway_product.py" ":(exclude)tests/test_content_transport.py" ":(exclude)tests/live_m10_product.py" ":(exclude)tests/probe_m10_product.py"'`
 - **AC-106.** Состав коммита и чистота:
   `bash -c 'git ls-files --error-unmatch gateway/product.py tests/test_gateway_product.py tests/test_content_transport.py tests/live_m10_product.py tests/probe_m10_product.py docs/specs/m10-product.md docs/specs/m10-product-contract.md >/dev/null && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md" ":(exclude)review/")"'`
 
@@ -102,13 +110,14 @@ evaluate/next_step или ослаблять проверки ради зелё�
 cross-review-v1. Перед ревью коммит REVIEW_SHA; полный diff BASE..REVIEW.
 Автор cx сам запускает параллельно Grok+agy через АБСОЛЮТНЫЙ
 /home/user/gitlab/9qw/tg-claude-userbot/scripts/review_run.sh, обаread-only,
-раздельные контексты, один диапазон. ASK_MAX_FINDINGS=12,
+раздельные контексты, один диапазон. В контекст обоих ревью включить
+полный неизменный контракт M10, он уже в BASE и не повторяется в diff. ASK_MAX_FINDINGS=12,
 AGY_MODEL=gemini-3.8-flash-high, AGY_TIMEOUT=900.
 Дополнительно проект требует Codex result: отдельный read-only
 `bash ~/.claude/skills/ask-codex/scripts/run.sh result '<тот же контекст>' --file REVIEW_DIR/full.diff`.
 Сохранить raw/rc/SHA; не создавать дополнительную ручную квитанцию в журнале.
 Пример машинного review:
-`bash /home/user/gitlab/9qw/tg-claude-userbot/scripts/review_run.sh initial agy --clone /home/user/exec-clones/abg-m10-product-20260914 --base 632b2df314230c68da579811679a18409938f7e9 --range <BASE_SHA>..<REVIEW_SHA> --context '<контракт/риски; только чтение>'`.
+`bash /home/user/gitlab/9qw/tg-claude-userbot/scripts/review_run.sh initial agy --clone /home/user/exec-clones/abg-m10-product-20260914 --base b303ecce7812f1a2cd4cb7a3cffdf4c0aabce2cf --range <BASE_SHA>..<REVIEW_SHA> --context '<контракт/риски; только чтение>'`.
 Одинаковый --base обеих фаз, run_id=basename-clone+'-'+BASE[:12]. Квитанции
 пишет толькоreview_run.sh. Обрезанный вход/ответ, потолок находок, отсутствие
 финального ВЕРДИКТ: ПРИНЯТО либо НЕ ПРИНИМАТЬ — incomplete дажеrc0.
@@ -126,7 +135,7 @@ report.json v2 в корне untracked; ровно6 критериев AC-101…
 ```json
 {"schema_version":2,"policy_id":"cross-review-v1",
  "spec_sha256":"<sha256 этой execution-спеки>",
- "base_sha":"632b2df314230c68da579811679a18409938f7e9",
+ "base_sha":"b303ecce7812f1a2cd4cb7a3cffdf4c0aabce2cf",
  "reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
  "executor":{"backend":"codex","model":"<точная>"},
  "review":{"initial_receipts":[],"verification_receipts":[],"resolutions":[]},
