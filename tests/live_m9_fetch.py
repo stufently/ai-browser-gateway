@@ -275,8 +275,7 @@ def main() -> int:
         return 0
     finally:
         _docker('rm', '--force', stand, check=False)
-        listed = _run(['docker', 'ps', '-aq', '--filter', f'label=abg-m9-run={run_id}'])
-        for ident in listed.stdout.split():
+        for ident in _run_ids(run_id):
             _docker('rm', '--force', ident, check=False)
         remaining = _run_ids(run_id)
         if remaining:

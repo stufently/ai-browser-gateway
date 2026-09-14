@@ -354,6 +354,8 @@ class LiveLauncherLabelTests(unittest.TestCase):
         self.assertLess(inner.seen.index('--label'), inner.seen.index(by_name('curl').image))
 
     def test_leftover_ids_do_not_treat_failed_ps_or_empty_stdout_as_clean(self):
+        import inspect
+        from tests import live_m9_fetch
         from tests.live_m9_fetch import leftover_ids
 
         with self.assertRaises(RuntimeError):
@@ -368,6 +370,9 @@ class LiveLauncherLabelTests(unittest.TestCase):
             leftover_ids(subprocess.CompletedProcess(['docker', 'ps'], 0, 'cid1\ncid2\n', '')),
             ['cid1', 'cid2'],
         )
+        source = inspect.getsource(live_m9_fetch.main)
+        self.assertNotIn('.stdout.split()', source)
+        self.assertIn('_run_ids(run_id)', source)
 
     def test_live_browser_budget_stays_at_cold_start_limit(self):
         from tests.live_m9_fetch import PROVIDER_BUDGETS
