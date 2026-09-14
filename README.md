@@ -53,33 +53,26 @@ egress. После повторной блокировки на новом egres
 При нулевом допуске входов в плане нет.
 
 ```python
-from bench.models import ChallengeType, FailureReason, FetchResult
 from gateway.engine import run
-from gateway.models import GatewayRequest, ProviderReply
+from gateway.fetch import BenchFetcher
+from gateway.models import GatewayRequest
 
 request = GatewayRequest(url="https://example.invalid/page", sentinel="PAGE_OK")
-
-def fake_fetcher(step, budget_ms):
-    # Демонстрационный ответ без сети. Реальный адаптер должен соблюдать budget_ms.
-    return ProviderReply(FetchResult(
-        provider=step.provider, provider_version="demo",
-        requested_url=request.url, final_url=request.url,
-        status=200, html="<p>PAGE_OK</p>", text="PAGE_OK",
-        elapsed_ms=0, startup_ms=0, cpu_ms=0, peak_rss_mb=0.0,
-        bytes_received=14, redirects=0,
-        error_type=FailureReason.none, challenge=ChallengeType.none,
-    ))
-
-outcome = run(request, fake_fetcher)
-print(outcome.ok, outcome.provider, outcome.step)  # True curl stop
+fetcher = BenchFetcher(request.url, request.sentinel)
+outcome = run(request, fetcher)
+print(outcome.ok, outcome.provider, outcome.step)
 ```
+
+`BenchFetcher` запускает провайдер в Docker (`--user 1002:1002`, образы из
+реестра). Нужен работающий Docker; провайдерам не монтируется Docker socket.
+Ядро по-прежнему требует непустой sentinel: продуктовый вход без него и HTTP API
+ещё впереди.
 
 Контракт транспорта: `fetcher(step, budget_ms) -> ProviderReply`. Ядро передаёт
 остаток общего бюджета перед каждой попыткой, записывает её результат и решение
 в `outcome.attempts`. На отказе содержимое пустое, `provider` и `age_hours` равны
 `None`, а `error_type` и `step` объясняют остановку. Исключения адаптера выходят
 вызывающему; штатные отказы адаптер возвращает как `FetchResult`.
-Сетевой адаптер поверх `bench.runner.execute` и HTTP-API остаются следующей вехе.
 
 ## Харнесс
 

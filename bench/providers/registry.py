@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 
@@ -36,7 +37,8 @@ def by_name(name: str) -> Provider:
 
 
 def build_argv(provider: Provider, *, url: str, sentinel: str, network=None,
-               proxy_env: str | None = None) -> list[str]:
+               proxy_env: str | None = None, probe_bind=None,
+               include_content: bool = False, budget_ms: int | None = None) -> list[str]:
     """argv_extra holds Docker options, never shell fragments or probe arguments."""
     argv = ['docker', 'run', '--rm', '--user', '1002:1002']
     if provider.kind == 'browser':
@@ -46,7 +48,15 @@ def build_argv(provider: Provider, *, url: str, sentinel: str, network=None,
     argv.extend(provider.argv_extra)
     if proxy_env is not None:
         argv.extend(['--env', proxy_env])
+    if probe_bind is not None:
+        source = str(Path(probe_bind).resolve())
+        target = '/opt/abg' if Path(source).is_dir() else '/opt/abg/probe.py'
+        argv.extend(['--mount', f'type=bind,source={source},target={target},readonly'])
     argv.extend([provider.image, url, sentinel])
+    if include_content:
+        argv.append('--include-content')
+    if budget_ms is not None:
+        argv.extend(['--budget-ms', str(budget_ms)])
     return argv
 
 

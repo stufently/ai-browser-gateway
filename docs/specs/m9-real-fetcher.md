@@ -3,14 +3,15 @@
 ## Шапка и где работать
 
 - Реализацию запускать только после заморозки SHA независимого пробника.
-  Литерал PROBE_SHA_PENDING запрещает запуск даже при зелёном статическом preflight.
+  Замороженный SHA указан ниже; независимый проверяющий — cx по разрешению постановщика.
 - Репозиторий `/home/user/github/ai-browser-gateway`, дата 14.09.2026.
-- BASE_SHA `4af46c52a4376d903f0fc49f41d211f94149a6c8`
-  (`Record gateway readiness task and reconnaissance`). Клон снят именно с него.
+- BASE_SHA `72b7ce87713a8c12d0620704b598d8a9b6f3e215`
+  (`Save M9 spec and Spark quota handoff`). Клон обновлён fast-forward именно до него.
 - Клон `/home/user/exec-clones/abg-m9-real-fetcher-20260914`, ветка `m9-real-fetcher`.
-- Новая спека: `launch_executor.sh auto ... --select-only` бросает монетку один
-  раз; после подготовки независимых пробников запуск явным выбранным backend,
-  повторно монетку не бросать. Остатки 5h/weekly обоих backend неизвестны.
+- Ранее `auto --select-only` один раз выбрал Grok. Запуск реализации явно `gk`,
+  без новой монетки. Spark исчерпан до 20.09.2026 15:59; постановщик разрешил
+  явные gk/cx, запретил Spark и auto. Независимые пробники и мутации — cx.
+  Раздельные остатки 5h/weekly Grok неизвестны.
 - Код, тесты и все исправления пишет выбранный Grok/Spark. Основной Codex
   пишет спеку и принимает. Независимые пробники/мутации — противоположный backend.
 - Живое дерево и чужие клоны не трогать. `git push`, merge, deploy запрещены,
@@ -29,7 +30,9 @@ API, сервис, CLI и боевые профили egress идут после
 ## Что проверено вживую, а что предположение
 
 Разведка Grok: `/home/user/.cache/abg-coord-20260914/recon-result.md`, SHA256
-`bcddcd468c76d3bc792f9deab9a1accb7575052daf3e59203e77feaded988b21`, дерево BASE_SHA.
+`bcddcd468c76d3bc792f9deab9a1accb7575052daf3e59203e77feaded988b21`, дерево `4af46c52a4376d903f0fc49f41d211f94149a6c8`.
+Продуктовый код bench/gateway/tests на BASE_SHA идентичен этому дереву:
+координатор проверил `git diff --exit-code 4af46c5 72b7ce8 -- bench gateway tests`, rc=0.
 Логи, команды, cwd, rc и SHA артефактов там. Координатор прочитал указанные ниже
 тела в базовом дереве:
 
@@ -164,7 +167,7 @@ Direct не использует профили; остальные только
 - Эта спека, без редактирования коммитится вместе с работой.
 - Исполнителю обязательно закоммитить спеку `docs/specs/m9-real-fetcher.md`.
 - `tests/probe_m9_transport.py`, независимый от автора реализации, коммитится
-  без правок; SHA256 будет заморожен до запуска реализации: PROBE_SHA_PENDING.
+  без правок; SHA256 заморожен после принятия cx-пробника: 4391024b03139e508978d86244cc27a81d386d5fbeea9d3c543fb1e424719190.
 - Независимый автор пробника перед запуском реализации проверяет его на базе
   (красный по отсутствию fetch_page/BenchFetcher), на эталонных копиях (зелёный)
   и обходных копиях (красный). Код эталонов в продукт не переносить.
@@ -184,13 +187,13 @@ bench/providers/docker/content.py (если нужен, обеспечь дос�
 - **AC-901.** Полный сьют один раз:
   `bash -c 'docker run --rm --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest discover -q -s tests -t .'`
 - **AC-902.** Замороженный независимый пробник:
-  `bash -c 'echo "PROBE_SHA_PENDING  tests/probe_m9_transport.py" | sha256sum -c - && docker run --rm --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m tests.probe_m9_transport'`
+  `bash -c 'echo "4391024b03139e508978d86244cc27a81d386d5fbeea9d3c543fb1e424719190  tests/probe_m9_transport.py" | sha256sum -c - && docker run --rm --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m tests.probe_m9_transport'`
 - **AC-903.** Настоящие контейнеры и сквозной сценарий:
   `bash -c 'python3 tests/live_m9_fetch.py'`
 - **AC-904.** Регрессия старых мутаций транспорта/пробника:
   `bash -c 'docker run --rm --user 1002:1002 -v "$PWD":/work -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 tests/mutation_gate.py'`
 - **AC-905.** Инварианты ядра/политики и исторических измерений не изменены:
-  `bash -c 'git diff --exit-code 4af46c52a4376d903f0fc49f41d211f94149a6c8 HEAD -- gateway/engine.py gateway/models.py gateway/plan.py bench/models.py bench/escalate.py docs/research TASKS.md CHANGELOG.md'`
+  `bash -c 'git diff --exit-code 72b7ce87713a8c12d0620704b598d8a9b6f3e215 HEAD -- gateway/engine.py gateway/models.py gateway/plan.py bench/models.py bench/escalate.py docs/research TASKS.md CHANGELOG.md'`
 - **AC-906.** Ожидаемые файлы закоммичены, рабочее дерево чисто:
   `bash -c 'git ls-files --error-unmatch gateway/fetch.py tests/test_gateway_fetch.py tests/live_m9_fetch.py tests/probe_m9_transport.py docs/specs/m9-real-fetcher.md >/dev/null && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md" ":(exclude)review/")"'`
 
@@ -217,7 +220,7 @@ AGY_TIMEOUT=900. Дополнительно Codex result обязателен п
 для этого проекта, если автор Spark: отдельный read-only вызов ask-codex,
 сохранить сырой вердикт (самостоятельным автором реализации он не является).
 Пример квитанции:
-`bash /home/user/gitlab/9qw/tg-claude-userbot/scripts/review_run.sh initial agy --clone /home/user/exec-clones/abg-m9-real-fetcher-20260914 --base 4af46c52a4376d903f0fc49f41d211f94149a6c8 --range <BASE_SHA>..<REVIEW_SHA> --context '<суть; только чтение>'`.
+`bash /home/user/gitlab/9qw/tg-claude-userbot/scripts/review_run.sh initial agy --clone /home/user/exec-clones/abg-m9-real-fetcher-20260914 --base 72b7ce87713a8c12d0620704b598d8a9b6f3e215 --range <BASE_SHA>..<REVIEW_SHA> --context '<суть; только чтение>'`.
 Для обеих фаз одинаковый --base. run_id = basename клона + '-' + BASE_SHA[:12].
 Журнал вне клона в ~/.cache/tg-claude/review-journal/<run_id>/.
 Оборванный ответ, обрезанный вход, отсутствие финального `ВЕРДИКТ: ПРИНЯТО`
@@ -237,7 +240,7 @@ report.json v2 в корне untracked, ровно шесть критериев
 ```json
 {"schema_version":2,"policy_id":"cross-review-v1",
  "spec_sha256":"<sha256 этой спеки>",
- "base_sha":"4af46c52a4376d903f0fc49f41d211f94149a6c8",
+ "base_sha":"72b7ce87713a8c12d0620704b598d8a9b6f3e215",
  "reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
  "executor":{"backend":"grok|spark","model":"<точная модель>"},
  "review":{"initial_receipts":[],"verification_receipts":[],"resolutions":[]},
