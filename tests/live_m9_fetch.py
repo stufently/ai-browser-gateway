@@ -172,6 +172,7 @@ def inner_main() -> int:
         result = reply.result
         _assert(result.error_type is FailureReason.none, f'{provider} error={result.error_type}')
         _assert(sentinel in result.html, f'{provider} html missing sentinel')
+        _assert(prefix in result.html, f'{provider} html missing unique marker')
         _assert(sentinel in result.text, f'{provider} text missing sentinel')
         _assert(prefix in result.text, f'{provider} text missing unique marker')
         _assert('script-only' not in result.text, f'{provider} leaked script text')
@@ -201,6 +202,7 @@ def inner_main() -> int:
         BenchFetcher(f'{base}/ok', sentinel, launcher=launcher, network='host'),
     )
     _assert(ok_outcome.ok, f'gateway HTTP path failed: {ok_outcome.error_type}')
+    _assert(prefix in ok_outcome.html, 'gateway html missing unique marker')
     _assert(prefix in ok_outcome.text, 'gateway text missing unique marker')
 
     started = time.monotonic()
