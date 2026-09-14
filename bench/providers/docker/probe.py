@@ -21,6 +21,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from html.parser import HTMLParser
 from typing import Any
 from urllib.error import HTTPError
 from urllib.parse import unquote, urlencode, urlparse, urlunparse
@@ -35,7 +36,86 @@ PROVIDERS = frozenset(
 )
 
 
+class _Deadline:
+    """Shared remaining budget; None end keeps historical adapter timeouts."""
+
+    __slots__ = ("end", "clock")
+
+    def __init__(self, start: float, budget_ms: int | None, clock):
+        self.clock = clock
+        self.end = None if budget_ms is None else start + budget_ms / 1000.0
+
+    def remaining_s(self) -> float:
+        left = self.end - self.clock()
+        if left <= 0:
+            raise TimeoutError("budget exceeded")
+        return left
+
+
+_DEADLINE: _Deadline | None = None
+
+
+def _bound_timeout_s(default: float) -> float:
+    deadline = _DEADLINE
+    if deadline is None or deadline.end is None:
+        return default
+    return min(default, deadline.remaining_s())
+
+
+def _bound_timeout_ms(default: int) -> int:
+    deadline = _DEADLINE
+    if deadline is None or deadline.end is None:
+        return default
+    return max(1, min(default, int(deadline.remaining_s() * 1000)))
+
+
+_INERT_TAGS = frozenset({"script", "style", "template"})
+_BREAK_TAGS = frozenset({"br", "hr"})
+_BLOCK_TAGS = frozenset({
+    "address", "article", "aside", "blockquote", "body", "caption",
+    "dd", "details", "dialog", "div", "dl", "dt", "fieldset", "figcaption",
+    "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6",
+    "header", "hgroup", "html", "li", "main", "nav", "ol", "p", "pre",
+    "section", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+    "legend", "summary", "menu",
+})
+
+
+class _VisibleText(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._skip = 0
+        self._parts: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _INERT_TAGS:
+            self._skip += 1
+        elif self._skip == 0 and tag in _BREAK_TAGS | _BLOCK_TAGS:
+            self._parts.append(" ")
+
+    def handle_endtag(self, tag):
+        if self._skip and tag in _INERT_TAGS:
+            self._skip -= 1
+        elif self._skip == 0 and tag in _BLOCK_TAGS:
+            self._parts.append(" ")
+
+    def handle_data(self, data):
+        if self._skip == 0:
+            self._parts.append(data)
+
+    def text(self) -> str:
+        return "".join(self._parts)
+
+
+def html_to_text(body: str) -> str:
+    parser = _VisibleText()
+    parser.feed(body)
+    parser.close()
+    return parser.text()
+
+
 def urlopen(url, timeout=120):
+    timeout = _bound_timeout_s(timeout)
     proxy = os.environ.get("ABG_PROXY") or ""
     if proxy:
         return build_opener(ProxyHandler({"http": proxy, "https": proxy})).open(url, timeout=timeout)
@@ -419,6 +499,8 @@ class CurlAdapter:
                 "--output", "-", "--write-out",
                 marker + "%{http_code}\t%{url_effective}\t%{num_redirects}\t%{header_json}",
         ]
+        if _DEADLINE is not None and _DEADLINE.end is not None:
+            command.extend(["--max-time", str(_DEADLINE.remaining_s())])
         command.append(url)
         run_kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
         proxy = _proxy_url()
@@ -430,6 +512,8 @@ class CurlAdapter:
         raw_body, separator, raw_meta = completed.stdout.rpartition(marker.encode())
         if completed.returncode or not separator:
             detail = completed.stderr.decode("utf-8", "replace").strip()
+            if completed.returncode == 28:
+                raise TimeoutError(detail or "curl timed out")
             raise RuntimeError(detail or f"curl exited {completed.returncode}")
         status, final_url, redirects, header_json = raw_meta.decode("utf-8", "replace").split("\t", 3)
         header_map = _normalize_headers(json.loads(header_json))
@@ -448,7 +532,7 @@ class CurlCffiAdapter:
     def navigate(self, url: str) -> dict[str, Any]:
         from curl_cffi import requests
 
-        kwargs = dict(impersonate="chrome", allow_redirects=True, timeout=120)
+        kwargs = dict(impersonate="chrome", allow_redirects=True, timeout=_bound_timeout_s(120))
         proxy = _proxy_url()
         if proxy:
             kwargs["proxy"] = proxy
@@ -512,7 +596,7 @@ class PlaywrightAdapter:
         self.page = self.browser.new_page()
 
     def navigate(self, url: str) -> dict[str, Any]:
-        response = self.page.goto(url, wait_until="load", timeout=120_000)
+        response = self.page.goto(url, wait_until="load", timeout=_bound_timeout_ms(120_000))
         body = _playwright_body(self.page, getattr(self, "sentinel", ""))
         status = response.status if response is not None else None
         headers = None if response is None else _normalize_headers(response.headers)
@@ -542,7 +626,7 @@ class ScraplingAdapter:
             "real_chrome": True,
             "solve_cloudflare": self.solve_cloudflare,
             "google_search": False,
-            "timeout": 120_000,
+            "timeout": _bound_timeout_ms(120_000),
             "retries": 1,
         }
         proxy = _proxy_url()
@@ -554,7 +638,10 @@ class ScraplingAdapter:
     def navigate(self, url: str) -> dict[str, Any]:
         if url == "about:blank":
             return _result(None, url, b"", 0, headers=None)
-        response = self.session.fetch(url, solve_cloudflare=self.solve_cloudflare)
+        fetch_kwargs: dict[str, Any] = {"solve_cloudflare": self.solve_cloudflare}
+        if _DEADLINE is not None and _DEADLINE.end is not None:
+            fetch_kwargs["timeout"] = _bound_timeout_ms(120_000)
+        response = self.session.fetch(url, **fetch_kwargs)
         body = getattr(response, "body", b"")
         if callable(body):
             body = body()
@@ -587,7 +674,7 @@ class CamoufoxAdapter:
         self.page = self.browser.new_page()
 
     def navigate(self, url: str) -> dict[str, Any]:
-        response = self.page.goto(url, wait_until="load", timeout=120_000)
+        response = self.page.goto(url, wait_until="load", timeout=_bound_timeout_ms(120_000))
         body = _playwright_body(self.page, getattr(self, "sentinel", ""))
         status = response.status if response is not None else None
         headers = None if response is None else _normalize_headers(response.headers)
@@ -628,7 +715,7 @@ class PydollAdapter:
         self.tab = self.loop.run_until_complete(self.browser.start())
 
     def navigate(self, url: str) -> dict[str, Any]:
-        self.loop.run_until_complete(self.tab.go_to(url, timeout=120))
+        self.loop.run_until_complete(self.tab.go_to(url, timeout=_bound_timeout_s(120)))
         script = """(() => {
           const docs = [document];
           for (const frame of Array.from(window.frames)) {
@@ -687,6 +774,7 @@ def _result(
 
 def _playwright_body(page: Any, sentinel: str, timeout_ms: int = 5_000) -> str:
     """Collect main and iframe DOM, waiting briefly for asynchronous rendering."""
+    timeout_ms = _bound_timeout_ms(timeout_ms)
     deadline = time.monotonic() + timeout_ms / 1000
     body = ""
     while True:
@@ -729,7 +817,11 @@ def run_probe(
     adapter_factory=make_adapter,
     clock=time.perf_counter,
     metrics=_metrics,
+    include_content=False,
+    budget_ms=None,
 ) -> dict[str, Any]:
+    if budget_ms is not None and (type(budget_ms) is not int or budget_ms <= 0):
+        raise ValueError("invalid budget")
     adapter = None
     rss_monitor = _RssMonitor() if metrics is _metrics else None
     if rss_monitor is not None:
@@ -737,6 +829,9 @@ def run_probe(
     start = clock()
     startup_ms = 0
     navigation_start = start
+    global _DEADLINE
+    previous_deadline = _DEADLINE
+    _DEADLINE = _Deadline(start, budget_ms, clock)
     try:
         if not sentinel:
             raise ValueError("empty sentinel")
@@ -762,7 +857,7 @@ def run_probe(
         if rss_monitor is not None:
             peak_rss_mb = max(peak_rss_mb, rss_monitor.stop())
             rss_monitor = None
-        return {
+        payload = {
             "ok": found and (status is None or status < 400),
             "status": status,
             "final_url": response.get("final_url", url),
@@ -781,6 +876,11 @@ def run_probe(
             "headers": headers,
             "challenge_markers": list(markers),
         }
+        if include_content:
+            html = body if isinstance(body, str) else ""
+            payload["html"] = html
+            payload["text"] = html_to_text(html)
+        return payload
     except Exception as exc:
         finished = clock()
         cpu_ms, peak_rss_mb = metrics()
@@ -789,20 +889,35 @@ def run_probe(
             rss_monitor = None
         if startup_ms == 0:
             startup_ms = round((finished - start) * 1000)
-        return {
+        name = type(exc).__name__
+        if (
+            isinstance(exc, (TimeoutError, subprocess.TimeoutExpired))
+            or name in ("TimeoutError", "TimeoutExpired")
+        ):
+            err = "timeout"
+        else:
+            err = redact(f"{name}: {exc}")
+            if err.startswith(("TimeoutError:", "TimeoutExpired:")):
+                err = "timeout"
+        payload = {
             "ok": False, "status": None, "final_url": url, "bytes": 0,
             "sentinel": False, "challenge": "none", "title": "",
             "startup_ms": startup_ms,
             "elapsed_ms": round((finished - navigation_start) * 1000),
             "peak_rss_mb": peak_rss_mb, "cpu_ms": cpu_ms,
-            "err": redact(f"{type(exc).__name__}: {exc}"),
+            "err": err,
             "provider_version": getattr(adapter, "version", "unknown"),
             "redirects": 0,
             "headers": None,
             "challenge_markers": [],
             "entrance_age_hours": None,
         }
+        if include_content:
+            payload["html"] = ""
+            payload["text"] = ""
+        return payload
     finally:
+        _DEADLINE = previous_deadline
         if rss_monitor is not None:
             rss_monitor.stop()
         if adapter is not None:
@@ -812,11 +927,19 @@ def run_probe(
                 pass
 
 
+def _positive_budget(value: str) -> int:
+    if not value.isdigit() or int(value) <= 0:
+        raise argparse.ArgumentTypeError("budget-ms must be a positive integer")
+    return int(value)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("url")
     parser.add_argument("sentinel")
     parser.add_argument("--mode", choices=("cold", "warm"), default="cold")
+    parser.add_argument("--include-content", action="store_true")
+    parser.add_argument("--budget-ms", type=_positive_budget, default=None)
     args = parser.parse_args(argv)
     provider = os.environ.get("ABG_PROVIDER", "")
     with contextlib.redirect_stdout(sys.stderr):
@@ -824,9 +947,15 @@ def main(argv: list[str] | None = None) -> int:
             payload = run_probe(
                 provider, args.url, args.sentinel, mode=args.mode,
                 adapter_factory=make_adapter,
+                include_content=args.include_content,
+                budget_ms=args.budget_ms,
             )
         else:
-            payload = run_probe(provider, args.url, args.sentinel, mode=args.mode)
+            payload = run_probe(
+                provider, args.url, args.sentinel, mode=args.mode,
+                include_content=args.include_content,
+                budget_ms=args.budget_ms,
+            )
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
     return 0
 

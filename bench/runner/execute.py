@@ -17,20 +17,24 @@ from bench.runner.record import RunRecord
 
 
 class Launcher(Protocol):
-    def run(self, argv: list[str], timeout: int) -> tuple[int, str, str]: ...
+    def run(self, argv: list[str], timeout: float, *, env: dict[str, str] | None = None
+            ) -> tuple[int, str, str]: ...
 
 
 class DockerLauncher:
     """The host-side external-command boundary. No shell and no inherited stdin."""
 
-    def run(self, argv: list[str], timeout: int) -> tuple[int, str, str]:
+    def run(self, argv: list[str], timeout: float, *, env=None) -> tuple[int, str, str]:
         with tempfile.TemporaryDirectory(prefix='abg-run-') as directory:
             cidfile = Path(directory) / 'container.id'
             is_container = argv[:2] == ['docker', 'run']
             command = argv[:2] + ['--cidfile', str(cidfile)] + argv[2:] if is_container else argv
+            kwargs = dict(timeout=timeout, capture_output=True, text=True, errors='replace',
+                          stdin=subprocess.DEVNULL)
+            if env is not None:
+                kwargs['env'] = env
             try:
-                result = subprocess.run(command, timeout=timeout, capture_output=True,
-                                        text=True, errors='replace', stdin=subprocess.DEVNULL)
+                result = subprocess.run(command, **kwargs)
                 return result.returncode, result.stdout, result.stderr
             except subprocess.TimeoutExpired:
                 # Killing the Docker client alone does not stop its daemon's container.
@@ -198,3 +202,11 @@ def execute_plan(plan, *, launcher, cells, env, timeout=180, pause_s=0.0, sleep=
                 os.environ['ABG_PROXY'] = previous_proxy
             else:
                 os.environ.pop('ABG_PROXY', None)
+
+
+def fetch_page(provider, *, url, sentinel, budget_ms, launcher=None,
+               egress=None, entrance_url=None, network=None):
+    from bench.runner.fetch import fetch_page as _fetch_page
+    return _fetch_page(provider, url=url, sentinel=sentinel, budget_ms=budget_ms,
+                       launcher=launcher, egress=egress, entrance_url=entrance_url,
+                       network=network)
