@@ -237,6 +237,19 @@ cf-fetch. Следующий шаг — независимый probe/этало�
   гейт ожидаются; после FINAL нужны независимые Grok-мутации и приёмка.
   Последний фактический Grok weekly3% (22:46UTC), 5h/reset неизвестны.
   Spark/auto запрещены до указанного reset; cx разрешён владельцем.
+  M10-кандидат6066b0df766750cfb45bc2a5f20c5f950cedb153 остановился до ревью:
+  canonical full.diff103950байт превышал жёсткий лимит wrappers100000.
+  Сохранён report-blocked.md и исходный пакет; предварительно398 unittest и
+  пять live-сценариев прошли, probes после исправления ещё не заявлялись pass.
+  По заданию cache/m10-review-size-followup.md тот жеcx сократил только README:
+  commit4810e22f7a8b9427f112723b5e2b56d7fcbfece6, полныйdiff99861байт.
+  Код/тесты/контракт/спека неизменны, BASEb303 тот же. InitialGrok+Gemini и
+  отдельныйCodexresult запущены в22:59UTC, попытка остаётсяt-810ca7584d29-a01.
+  В TUI исполнителя фактически указан gpt-6-astra high. Пакет ещё не принят.
+  Заметки дальнейших вех в cache/m11-planning-notes.md и
+  cache/service-monitoring-notes.md, не execution-спеки. Для сервиса предложен
+  versioned release с одинаковым абсолютным RO-path на host и вAPIcontainer,
+  как в принятом liveM9; тогда не требуется менять transport радиprobe-bind.
 
 - [ ] **M10 и далее:** M10 — продуктовая лестница со Scrapling и живой
   браузерный сценарий; M11 — HTTP API с токеном, форматом
