@@ -56,7 +56,9 @@ class EngineTests(unittest.TestCase):
         self.assertTrue(out.ok)
 
     def test_disabled_browser_returns_unfulfilled_decision(self):
-        fetcher = FakeFetcher(reply(html="shell"))
+        # The spare reply is never consumed by a correct ladder; it exists so a
+        # ladder that keeps walking is caught by the assertions, not by the fake.
+        fetcher = FakeFetcher(reply(html="shell"), reply("curl"))
         out = self.run_fake(fetcher, allow_browser=False, egress_profiles=("gold",))
         self.assertEqual(out.step, Step.browser)
         self.assertFalse(out.ok)
@@ -64,7 +66,8 @@ class EngineTests(unittest.TestCase):
         self.assertEqual(fetcher.routes, [("curl", "direct")])
 
     def test_browser_is_not_retried_or_followed_by_unrequested_egress(self):
-        fetcher = FakeFetcher(reply(html="shell"), reply("patchright", html="shell"))
+        fetcher = FakeFetcher(reply(html="shell"), reply("patchright", html="shell"),
+                              reply("curl"))
         out = self.run_fake(fetcher, egress_profiles=("gold",))
         self.assertEqual(out.step, Step.browser)
         self.assertEqual(len(out.attempts), 2)
@@ -88,7 +91,7 @@ class EngineTests(unittest.TestCase):
     def test_blocked_http_without_egress_stops(self):
         for status in (403, 429):
             with self.subTest(status=status):
-                fetcher = FakeFetcher(reply(status=status))
+                fetcher = FakeFetcher(reply(status=status), reply("curl"))
                 out = self.run_fake(fetcher)
                 self.assertEqual(out.step, Step.change_egress)
                 self.assertFalse(out.ok)
@@ -243,9 +246,19 @@ class EngineTests(unittest.TestCase):
                     replace(valid, budget_ms=0), replace(valid, budget_ms=-1)]
         for request in requests:
             with self.subTest(request=request):
-                fetcher = FakeFetcher()
+                # A working clock and one scripted reply on purpose: a dropped
+                # check must then fail here on "ValueError not raised" or on the
+                # counters below, never on a helper's own AssertionError.
+                fetcher = FakeFetcher(reply())
+                ticks = []
+
+                def clock():
+                    ticks.append(fetcher.clock())
+                    return ticks[-1]
+
                 with self.assertRaises(ValueError):
-                    run(request, fetcher, clock=lambda: self.fail("clock called"))
+                    run(request, fetcher, clock=clock)
+                self.assertEqual(ticks, [])
                 self.assertEqual(fetcher.calls, [])
 
     def test_failure_with_stop_is_assertion_error(self):
