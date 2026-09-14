@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 2026-09-14
+
+### Изменено
+
+- **Репозиторий переехал из GitLab в GitHub** (решение владельца 14.09.2026):
+  `git@github.com:stufently/ai-browser-gateway.git`, private. Перенесены все
+  ветки (`main`, `m1-bench-core`…`m6-selection`) и вся история —
+  `main` = `4601ee5`, как в GitLab. Локальный клон переехал из
+  `~/gitlab/9qw/ai-browser-gateway` в `~/github/ai-browser-gateway`.
+  Проект в GitLab (`9qw/ai-browser-gateway`, id 194) удалён окончательно.
+  CI у проекта не было и не заводится: до 2026-10-06 действует правило
+  владельца «новые репозитории — без `.github/workflows/`», проверки гоняем
+  локально Docker'ом под `1002:1002`.
+
 ## 2026-09-07
 
 ### Добавлено
