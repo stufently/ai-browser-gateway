@@ -245,6 +245,14 @@
   watcher `cache/m11-mutations-watch.log`, output `cache/m11/mutations-gk/`.
   Авторский пакет/SHA перед запуском неизменны. Мутации до M12; выжившие
   assertions возвращаются автору cx. Повторный quota error не циклировать.
+  Первый Grok run035516-458082: baseline29/postbaseline rc0,12killed/5invalid,
+  0survived не означает pass. Исходники/HEAD/restore неизменны. Координатор
+  прочитал весь harness/run/test_runner и17patches; возврат тому же Grok
+  `cache/m11-mutations-first-return.md`: tracing не видит дочерний copied CLI;
+  M07 падает на normal release до exception, M13 неверно назван/может быть
+  эквивалентен контракту. Проверить probe-only на авторских tests и добавить
+  мутации global browser N/wrapper args/options. Автор cx тесты ещё не меняет;
+  первый пакет сохраняется, Grok исправляет только свой harness/доказательства.
   Контракт/BASE и остальные требования приёмки неизменны. Блокер машинной
   оснастки всё ещё воспроизводим по текущему исходнику; чужие scripts не менять.
   Дополнительная зависимость машинного gate: accept_run.py:300 требует
