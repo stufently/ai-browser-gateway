@@ -35,7 +35,7 @@ def render_content(outcome, format_name):
         elif node.tag == 'meta' and attrs.get('content') is not None:
             key = (attrs.get('name') or attrs.get('property') or '').lower()
             meta.setdefault(key, attrs['content'])
-        elif node.tag == 'link' and 'canonical' in (attrs.get('rel') or '').lower().split():
+        elif node.tag == 'link' and 'href' in attrs and 'canonical' in (attrs.get('rel') or '').lower().split():
             href = http_url(outcome.final_url, attrs.get('href') or '')
             if href:
                 result.setdefault('canonical', href)

@@ -33,8 +33,21 @@ def integer(value):
     return type(value) is int and value >= 0
 
 
-def member(value, choices):
-    return isinstance(value, str) and value in choices
+def string(value):
+    return isinstance(value, str)
+
+
+def optional(check):
+    return lambda v: v is None or check(v)
+
+
+def member(choices):
+    return lambda v: string(v) and v in choices
+
+
+def fields(value, **rules):
+    if not isinstance(value, dict) or any(k not in value or not check(value[k]) for k, check in rules.items()):
+        raise ValueError
 
 
 def unique(pairs):
@@ -51,31 +64,15 @@ def reject(value):
 
 
 def validate_response(value, mode):
-    if not isinstance(value, dict):
-        raise ValueError
-    required = {'ok', 'url', 'final_url', 'format', 'content', 'provider', 'age_hours',
-                'error_type', 'step', 'elapsed_ms', 'attempts'}
-    if (not required <= value.keys() or type(value['ok']) is not bool or value['format'] != mode
-            or not isinstance(value['url'], str) or not isinstance(value['final_url'], str)
-            or not (value['provider'] is None or isinstance(value['provider'], str))
-            or not (value['age_hours'] is None or number(value['age_hours']))
-            or not member(value['error_type'], FAILURES) or not member(value['step'], STEPS)
-            or not integer(value['elapsed_ms']) or not isinstance(value['attempts'], list)):
-        raise ValueError
-    valid_url(value['url'])
-    valid_url(value['final_url'])
+    fields(value, ok=lambda v: type(v) is bool, url=string, final_url=string,
+           format=lambda v: v == mode, content=lambda v: True,
+           provider=optional(string), age_hours=optional(number), error_type=member(FAILURES),
+           step=member(STEPS), elapsed_ms=integer, attempts=lambda v: isinstance(v, list))
     for attempt in value['attempts']:
-        keys = {'provider', 'egress_profile', 'success', 'error_type', 'challenge', 'status',
-                'elapsed_ms', 'age_hours', 'next_step'}
-        if (not isinstance(attempt, dict) or not keys <= attempt.keys()
-                or not isinstance(attempt['provider'], str) or not isinstance(attempt['egress_profile'], str)
-                or type(attempt['success']) is not bool or not member(attempt['error_type'], FAILURES)
-                or not member(attempt['challenge'], CHALLENGES)
-                or not (attempt['status'] is None or type(attempt['status']) is int and 100 <= attempt['status'] <= 599)
-                or not integer(attempt['elapsed_ms'])
-                or not (attempt['age_hours'] is None or number(attempt['age_hours']))
-                or not (attempt['next_step'] is None or member(attempt['next_step'], STEPS))):
-            raise ValueError
+        fields(attempt, provider=string, egress_profile=string, success=lambda v: type(v) is bool,
+               error_type=member(FAILURES), challenge=member(CHALLENGES), elapsed_ms=integer,
+               status=optional(lambda v: type(v) is int and 100 <= v <= 599),
+               age_hours=optional(number), next_step=optional(member(STEPS)))
     content = value['content']
     if mode in ('text', 'html', 'markdown'):
         if not isinstance(content, str):
@@ -84,17 +81,16 @@ def validate_response(value, mode):
         if not isinstance(content, list):
             raise ValueError
         for link in content:
-            if (not isinstance(link, dict) or set(link) != {'text', 'href'}
-                    or not isinstance(link['text'], str) or len(link['text']) > 100):
+            fields(link, text=lambda v: string(v) and len(v) <= 100, href=string)
+            if set(link) != {'text', 'href'}:
                 raise ValueError
-            valid_url(link['href'])
+            parsed = urlsplit(link['href'])
+            if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+                raise ValueError
     elif not isinstance(content, dict):
         raise ValueError
     elif value['ok']:
-        if not {'title', 'h1'} <= content.keys() or not isinstance(content['title'], str):
-            raise ValueError
-        if not isinstance(content['h1'], list) or any(not isinstance(h, str) for h in content['h1']):
-            raise ValueError
+        fields(content, title=string, h1=lambda v: isinstance(v, list) and all(map(string, v)))
         for key, item in content.items():
             if key != 'h1' and (key not in {'title', 'description', 'ogTitle', 'ogImage', 'canonical', 'lang'}
                                 or not isinstance(item, str)):

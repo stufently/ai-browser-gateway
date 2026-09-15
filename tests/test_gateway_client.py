@@ -12,6 +12,41 @@ CLIENT = Path(__file__).resolve().parents[1] / 'gateway/client.py'
 
 
 class ClientTests(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.target = Path(tmp.name) / 'client.py'
+        self.assertTrue(CLIENT.is_file(), 'standalone client missing')
+        self.target.write_bytes(CLIENT.read_bytes())
+
+    def client(self, addr, url=URL, mode='text'):
+        env = {k: v for k, v in os.environ.items() if not k.startswith('ABG_')}
+        env.update(ABG_URL='http://%s:%s/v1/fetch' % addr, ABG_TOKEN=TOKEN)
+        return subprocess.run([sys.executable, str(self.target), url, mode], cwd=self.target.parent,
+                              env=env, capture_output=True, text=True, timeout=8)
+
+    def test_api_result_urls_do_not_inherit_request_guard(self):
+        from dataclasses import replace
+        from gateway.httpapi import make_server
+        from tests.m11_helpers import reply
+        href, hits = 'https://user:pass@example.invalid/a', []
+        def factory(url, **kw):
+            hits.append(url)
+            value = reply(html='<a href="' + href + '">label</a>')
+            return lambda s, b: replace(value, result=replace(value.result, final_url=href))
+        with serving(make_server(('127.0.0.1', 0), token=TOKEN, fetcher_factory=factory)) as addr:
+            for url, mode in [(URL, 'links'), (URL, 'text'), (href, 'links')]:
+                with self.subTest(url=url, mode=mode):
+                    proc = self.client(addr, url, mode)
+                    if url == href:
+                        self.assertNotEqual(proc.returncode, 0)
+                        self.assertEqual(proc.stdout, '')
+                    else:
+                        self.assertEqual((proc.returncode, proc.stderr), (0, ''))
+                        self.assertEqual(json.loads(proc.stdout) if mode == 'links' else proc.stdout.strip(),
+                                         [{'text': 'label', 'href': href}] if mode == 'links' else 'page')
+            self.assertEqual(hits, [URL, URL])
+
     def test_standalone_response_validation_and_redirect_refusal(self):
         hits, response = [], [200, None]
         class Handler(BaseHTTPRequestHandler):
@@ -28,18 +63,15 @@ class ClientTests(unittest.TestCase):
                 self.wfile.write(body)
         good = dict(ok=True, url=URL, final_url=URL, format='text', content='selected',
                     provider='curl', age_hours=None, error_type='none', step='stop', elapsed_ms=1, attempts=[])
-        self.assertTrue(CLIENT.is_file(), 'standalone client missing')
-        with serving(ThreadingHTTPServer(('127.0.0.1', 0), Handler)) as addr, tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / 'client.py'
-            target.write_bytes(CLIENT.read_bytes())
-            env = {k: v for k, v in os.environ.items() if not k.startswith('ABG_')}
-            env.update(ABG_URL='http://%s:%s/v1/fetch' % addr, ABG_TOKEN=TOKEN)
+        with serving(ThreadingHTTPServer(('127.0.0.1', 0), Handler)) as addr:
             for status, obj, success in [(200, good, True), (302, good, False),
                     (200, dict(good, attempts=[{}]), False), (200, dict(good, ok=False), False),
-                    (500, {'error': TOKEN}, False), (200, dict(good, content=[]), False)]:
+                    (500, {'error': TOKEN}, False), (200, dict(good, content=[]), False),
+                    *[(200, dict(good, format='links', content=[{'text': 'L', 'href': h}]), False)
+                      for h in ('javascript:bad()', 'mailto:a@b', '/relative', 12)]]:
                 response[:] = status, obj
                 before = len(hits)
-                proc = subprocess.run([sys.executable, str(target), URL], env=env, capture_output=True, text=True)
+                proc = self.client(addr, mode=obj.get('format', 'text'))
                 self.assertEqual(len(hits), before + 1)
                 self.assertEqual(hits[-1], 'Bearer ' + TOKEN)
                 if success:

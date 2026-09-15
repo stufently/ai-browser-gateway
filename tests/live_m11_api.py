@@ -8,42 +8,18 @@ import subprocess
 import sys
 import time
 
-ROOT = Path(__file__).resolve().parents[1]
-IMAGE = 'sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6'
+# Reuse M10's stdlib Docker orchestration and JS fixture, without running its inner().
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from tests.live_m10_product import ROOT, IMAGE, docker, server as stand
+
 LABEL = 'abg-m11-run'
-
-
-def docker(*args, check=True):
-    proc = subprocess.run(['docker', *args], capture_output=True, text=True)
-    if check and proc.returncode:
-        raise RuntimeError(proc.stderr or proc.stdout)
-    return proc
 
 
 def ids(run):
     return docker('ps', '-aq', '--filter', f'label={LABEL}={run}').stdout.split()
 
 
-def stand():
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-    class Handler(BaseHTTPRequestHandler):
-        def log_message(self, *args):
-            pass
-        def do_GET(self):
-            marker = self.path.rsplit('/', 1)[-1]
-            parts = json.dumps([marker[:8], marker[8:]])
-            body = ('<html><body><script>document.body.appendChild(document.createElement("p"))'
-                    '.textContent=' + parts + '.join("");</script></body></html>').encode()
-            self.send_response(403 if self.path.startswith('/forbidden/') else 200)
-            self.send_header('Content-Type', 'text/html; charset=utf-8')
-            self.send_header('Content-Length', str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-    ThreadingHTTPServer(('0.0.0.0', 8080), Handler).serve_forever()
-
-
 def api(run):
-    sys.path.insert(0, str(ROOT))
     from bench.runner.execute import DockerLauncher
     from gateway.fetch import ProductFetcher
     from gateway.httpapi import make_server

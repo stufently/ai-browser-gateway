@@ -6,6 +6,15 @@ from gateway.models import GatewayOutcome
 
 
 class FormatTests(unittest.TestCase):
+    def test_canonical_missing_empty_and_relative_href(self):
+        from gateway.format import render_content
+        obj = GatewayOutcome(True, 'https://a/x', 'https://b/dir/page', '',
+                             'page', 'curl', None, F.none, Step.stop, (), 0)
+        for attr, expected in [('', None), (' href=""', obj.final_url), (' href="../c"', 'https://b/c')]:
+            with self.subTest(attr=attr):
+                meta = render_content(replace(obj, html='<link rel="canonical"' + attr + '>'), 'meta')
+                self.assertEqual(meta, {'title': '', 'h1': []} | ({'canonical': expected} if expected else {}))
+
     def test_visible_inline_structure_links_and_metadata(self):
         from gateway.format import render_content
         html = ('<html lang="en"><title>A &amp; B</title><h1>One <i>two</i></h1>'
