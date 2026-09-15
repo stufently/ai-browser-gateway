@@ -223,7 +223,7 @@
   Основной бот готовую приёмку M10 не повторяет. Хронология подготовки и
   возвратов сохранена в TASKS.md коммита `6c65d04` и исходных пакетах.
 
-- [ ] **M11 — HTTP API и CLI.** Следующая разрешённая веха: token auth,
+- [ ] **M11 — HTTP API и CLI, пакет сохранён; приёмка заблокирована.** Token auth,
   URL/свежесть/budget/expected_text, content+trace, пять режимов cf-fetch,
   общий лимит браузеров с ожиданием внутри бюджета. Runtime в Docker1002.
   Контракт `docs/specs/m11-api-cli-contract.md` зафиксирован; execution-спека
@@ -255,7 +255,7 @@
   watcher `cache/m11-probes-watch.log`. Клон автора заранее создан:
   `/home/user/exec-clones/abg-m11-api-cli-20260915`, ветка m11-api-cli;
   подготовка принята; автор запущен отдельной панелью
-  `cx-abg-m11-api-cli-20260915`, attempt t-4b15b59fa8c8-a01 running.
+  `cx-abg-m11-api-cli-20260915`, attempt t-4b15b59fa8c8-a01 blocked.
   Watcher `cache/m11-author-watch.log`; пакет автора `cache/m11/author/`.
   Первый пакет3685bdc54644918d820cbecdef14617ab2b11bcc возвращён:
   403unit/94frozen/live+6AC rc0, но reviews ещё не вызваны — full.diff102280
@@ -275,9 +275,45 @@
   Codex initial нашёл три дефекта Markdown, автор воспроизвёл их в Docker.
   Исправления db83793c8415e5e267bfe2f3d784ea34b1919115: глубокий HTML,
   implicit head и экранирование видимого текста. Полный delta прочитан;
-  доступные Codex/Gemini verify запущены, пакет и итоговая приёмка ожидаются.
+  доступный verify завершён; его находка закрыта возвратом ниже.
   Заметки `cache/m11-review-progress.md`; отложенный mutation task подготовлен
   в `cache/m11-mutations-draft.md` (DRAFT, без launch до reset/final SHA).
+
+  **Итоговый handoff 15.09, около03:37UTC.** Автор FINAL
+  `7c424f9aaf484e6132319a4d09da6d75d3128fcf`, initial REVIEW
+  `909ed88c7aacfaeae489968d022d86831dff6df9`; BASE сохранён. Подтверждённые
+  дефекты закрыты тем же cx: canonical, response URLs, глубокий HTML,
+  implicit head, Markdown literal/alt/equals и destinations. Координатор
+  прочитал полный initial и все последующие delta; продукт сам не правил.
+  Все6авторских AC на FINAL rc0:409unit,94frozen, live CLI→API→реальный
+  ProductFetcher→JS patchright, wrongtoken/okfalse и scoped cleanup.
+  Codex принял новый полный delta; Gemini принял его прямым штатным ask-agy,
+  rc0/no findings. Доступные ревью завершены, повторять их на том же коде не надо.
+  Initial99844bytes, исправленный delta8960bytes — полные, без усечения.
+
+  Пакет `cache/m11/author/`, report SHA256
+  be64ad3c7196f1fc524f0239018346555c11f0311bc2c635fd13e6053ba0ddb3;
+  manifest148entries, SHA5218b9f11ffa46b0440655d91cedc16100691f586acdcaa006554693b32fdb78.
+  Все148хешей, ACcommands/logs, metadata и оригинальные receipts сверены;
+  `cache/m11-coordinator-packet-check.json`. История `cache/m11/author-history/`.
+  Коммиты сохранены в авторском клоне, локальной m11-author-work-20260915 и
+  проверенном bundle `cache/m11-author-7c424f9.bundle`, SHA256
+  7c3f524f2ee8320dcb6bd3aa42e54a6ac7e5ceeed68884d33af44e864f9f8e48.
+  Код НЕ принят/не слит/не отправлен в origin. Завершённая авторская панель
+  закрыта после проверки пустого ввода, фоновых исполнительских задач нет.
+
+  **Осталось два блокера:** (1) Grok weekly0: после reset независимые reviews
+  и мутации новых M11 tests на FINAL; очередь `cache/m11-mutations-queued.md`,
+  запуск только явный gk после подтверждённого reset, без quota retry цикла.
+  (2) За владельцем оснастки tg-claude-userbot: поддержать явный возврат приёмки
+  на неизменном BASE. review_run отверг новый verify rc2 из-за старой успешной
+  фазы; accept_run на FINAL rc3 «verify-agy-1.json: устаревший snapshot_sha/range».
+  Гейт остановился на metadata, AC он не повторял. Старые receipts сохранены
+  на исходных местах; прямой Gemini не выдан за machine receipt. Разбор и
+  требования: `cache/m11-review-journal-blocker.md`; чужие scripts не менялись.
+  После снятия обоих блокеров — полный пакет Grok и одна финальная независимая
+  приёмка координатора с accept_run/сквозным сценарием. Собственный финальный
+  gate ещё не запускался на неполном пакете. **До этого M12 не начинать.**
   В обоих клонах origin push отключён.
   Окончательный контракт SHA256
   80248e5768bd165f0e8ea4e0686e704f0c381b74030e4008b87569e3ec2a59ce.
@@ -325,11 +361,13 @@
   Заметку сохраняем, отказ M11 не стираем и quota retry по ней не запускаем.
   Предпочтение постановщика: реализация/фиксы на cx, gk только для необходимых
   независимых этапов. M10 уже принята; повторных исполнительских прогонов нет.
-  Решение владельца разрешает отдельный cx на подготовку M11; работа
-  возобновлена, авто-закрытие координатора во время подготовки/приёмки нельзя.
+  Решение владельца об отдельном cx выполнено: подготовка принята, авторский
+  пакет сохранён. Активных разрешённых исполнительских задач больше нет.
   Grok-мутации остаются обязательными после reset ДО старта M12.
   Проект ещё НЕ готов к использованию: M9/M10 приняты и опубликованы;
-  API/CLI в работе, сервис ждёт завершения M11 и независимых мутаций.
+  API/CLI реализованы в непринятой ветке; сервис ждёт двух блокеров M11.
+  Handoff сохранён; idle-координатор не требуется. Возобновить при reset Grok
+  и/или решении оснастки, не восстанавливать закрытую сессию автоматически.
 
 ## Остальной бэклог
 
