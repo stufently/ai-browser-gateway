@@ -153,194 +153,110 @@
   `docs/research/data/m10-egress.jsonl` SHAbaf4fdf1f7310993ec30ed0c83dc559d3a90f17a740b6267e246859aedac5550.
   Это отдельная приёмка готового исследования, не реализация M10.
 
-- [ ] **Подготовка M10 product.** Нарезка: product+живые браузеры, затем API/CLI,
-  затем сервис/пул/развёрнутый прогон. Планируется явный cx, независимые
-  probe/эталоны/мутации Grok. Клоны уже созданы с отключённым push:
-  `/home/user/exec-clones/abg-m10-product-20260914` (m10-product),
-  `/home/user/exec-clones/abg-m10-probes-20260914` (m10-probes).
-  Execution-спека и SHA независимого probe ещё не заморожены, реализации нет.
-  Контракт в cache `m10-product-contract.md`: новый fetch_content без fake
-  sentinel, сохранение M7/M9, validation/deadline/freshness/trace, лестница
-  directHTTP→patchright→Scrapling→egress→human.
-  Дополнительный вопрос о приёме страниц вернул пустой ответ: выбран
-  рекомендованный необязательный expected_text от клиента, URL-only остаётся
-  default. Явное ожидание позволяет подтвердить suspected/captcha по реальному
-  телу; HTTP-отказ/interactive/ошибки оно не отменяет, challenge в trace сохраняется.
-  Старые draft-файлы в cache не являются исполняемыми спеками.
-  Последний фактический Grok weekly4% (21:45–21:53 UTC), 5h/reset неизвестны.
-  Spark/auto не запускать; обычный cx разрешён постановщиком, окна неизвестны.
-  Прочитан целиком skill healthchecks-monitoring из tg-claude-userbot;
-  требования к будущему сервису в cache `service-monitoring-notes.md`.
-  Подготовка probe запущена: Grok `gk-abg-m10-probes-20260914`, попытка
-  `t-96ef542a62d6-a01`, BASE632b2df314230c68da579811679a18409938f7e9.
-  Задание cache/m10-probe-preparation.md, watcher cache/m10-probe-watch.log;
-  пакет ожидается cache/m10/probe/preparation-result.md.
-  Неизменный контракт `docs/specs/m10-product-contract.md` SHA256
+- [x] **M10 — продуктовая лестница принята (15.09.2026).**
+  Автор cx, `gpt-6-astra high`; FINAL
+  `ebb852410c3c218b41acae068b11bda653ee0dc4`, клон
+  `/home/user/exec-clones/abg-m10-product-20260914`, ветка `m10-product`.
+  Исходный BASE `b303ecce7812f1a2cd4cb7a3cffdf4c0aabce2cf`, REVIEW
+  `4810e22f7a8b9427f112723b5e2b56d7fcbfece6`.
+  Спека `docs/specs/m10-product.md`, SHA256
+  `5e4f56226e3aa91a121ae6e7d5266f799f17050da529f21da60cd128d749e820`;
+  контракт `m10-product-contract.md`, SHA256
   `01b9df3ffb99559883d3438b7fe8727c4ba0ccefd8e9591363a6bfb3d068ea84`.
-  Execution-спека `docs/specs/m10-product.md` пока DRAFT с [PROBE_SHA]:
-  статический preflight и shell syntax6команд прошли, но запуск cx запрещён
-  до приёмки независимых эталонов/probe и подстановки SHA/размера.
-  AC теперь101…106: предполёт не принимает четырёхзначные номера1001…1006.
-  Автор не запущен. После сохранения контракта авторский клон переведён на
-  BASE b303ecce7812f1a2cd4cb7a3cffdf4c0aabce2cf: bench/gateway/tests побайтно
-  те же, что на632b2df (git diff rc0). Контракт уже в базе; это исключает
-  повторные27КБ спецификаций из будущего полного review diff. Пробник уже
-  около45КБ, его качество ради лимита входа не сокращаем. Подготовка Grok
-  остаётся на632b2df; её продуктовый код идентичен новой авторской базе.
-  Предыдущие untracked draft-копии сохранены в stash авторского клона
-  `coordinator-m10-draft-before-base-update`; текущая execution-спека —
-  tracked modified с BASEb303ecc, по-прежнему [PROBE_SHA], не запускать.
-  Добавлено требование JS-маркера: live должен отличать настоящие patchright/
-  Scrapling от повторного bare HTTP. Предполёт после измененияBASE сноваrc0.
-  Первый пакет probe получен: commit783b6ace35187532d5c7ec5e362ba764abfba8cd,
-  SHA46a6c5317795804966a68d2509b3bc3387a105e3d4620dd1a796985bccfd79e0,
-  45520bytes/1090строк/53теста; дваэталонаgreen,10обходовassertionred, BASEred.
-  Координатор прочитал весьprobe, все4references, builder/run_case, report;
-  manifest192строки проверен. Пакет НЕ принят: лишние slots/порядокCLI/
-  фиксированное числоclockreads/значениеуспешногоentrance.next_step;
-  вакуумный dedup-тест; отсутствуют проверкиport и успеха3конкурентныхответов;
-  .cwd записываетmountsource вместореальногоhostcwd.
-  Исправления одним списком cache/m10-probe-corrections.md отправлены тому же
-  Grok в той же попытке t-96ef542a62d6-a01. Требуется архивround1, новые
-  green-эталоны с допустимыми вариациями, новые дедуп/port/CLI-обходы и точный
-  BASEred дополнительно на авторскомb303ecc. Контракт01b9df3f не меняется.
-  Реализациюcx НЕ запускать, пока новыйprobe не принят и SHA не заморожен.
+  Новый URL-only вход использует явный content-only транспорт, общий deadline,
+  RSS/Wayback по свежести, curl → patchright → Scrapling → egress → human.
+  Необязательный `expected_text` клиента подтверждает suspected/captcha по
+  реальному телу; HTTP/interactive/ошибки не отменяет, challenge остаётся в trace.
+  Вопрос о вариантах вернул пустой ответ, выбран рекомендованный optional режим.
 
-### Продолжение по распоряжению постановщика
+  Независимый probe Grok: commit `25335c9dcbd7ddffa09587518f0209309f6603df`,
+  SHA256 `699d66eb29233728518d176c3dcc01bd1fb5c6fc29cc4860e80f56fdbf7fc013`,
+  49687 байт, 55 тестов. Два различных эталона green, 13 обходов assertion-red;
+  точный BASE автора red по отсутствию API. Исправлены лишние ограничения
+  первого probe и пробелы dedup/port/concurrency/cwd; старый пакет в `probe/round1`.
+  Подготовка `t-96ef542a62d6-a01` accepted; report SHA256
+  `6804a94095e5b778765fe25f0c9a0d2570e617556106fcaec23d3bef30fafcec`.
 
-Ожидание reset отменено явным разрешением `cx`; M9 принята координатором.
-Проект **ещё не готов к использованию**: есть реальный транспорт, но
-продуктовый запрос без sentinel, расширенная лестница, API, сервис и CLI
-остаются следующими разрешёнными задачами. Не переключать потребителей
-cf-fetch. Следующий шаг — независимый probe/эталоны и заморозка спеки M10;
-не повторять исходную разведку и готовую приёмку M9. В новой продуктовой
-границе обязательно валидировать тип URL/параметров и безопасно обрабатывать
-неизвестные entrances/profiles: M9 намеренно сохранила строгий контракт M7.
-  **Обновление 22:49 UTC:** исправленная подготовка принята, попытка
-  t-96ef542a62d6-a01 accepted; Grok-панель закрыта после завершения.
-  Новый probe commit25335c9dcbd7ddffa09587518f0209309f6603df,
-  SHA699d66eb29233728518d176c3dcc01bd1fb5c6fc29cc4860e80f56fdbf7fc013,
-  49687байт/1189строк/55тестов. Два независимых эталона green (module+unittest),
-  13 обходов — assertion kills, 0ERROR; BASE632 и точный авторскийb303 red
-  по отсутствию API. Исправлены все шесть пунктов приёмки; допустимые
-  вариации without slots/extra clock/entrance.next_step=None также green.
-  Прочитан diff probe, refs и scripts; проверены389 manifestentries и
-  argv/cwd/rc/SHA всех20прогонов. Старый пакет сохранён в probe/round1.
-  Новый preparation-result.md SHA256
-  6804a94095e5b778765fe25f0c9a0d2570e617556106fcaec23d3bef30fafcec.
-  Execution-спека заморожена: docs/specs/m10-product.md SHA256
-  5e4f56226e3aa91a121ae6e7d5266f799f17050da529f21da60cd128d749e820;
-  контракт01b9 неизменен. SHA/размер probe подставлены, preflight6AC rc0.
-  Запущен явный cx в abg-m10-product-20260914, BASEb303 остаётся;
-  pane cx-abg-m10-product-20260914, attempt t-810ca7584d29-a01 running.
-  Watcher cache/m10-product-watch.log. Реализация/ревью/полный авторский
-  гейт ожидаются; после FINAL нужны независимые Grok-мутации и приёмка.
-  Последний фактический Grok weekly3% (22:46UTC), 5h/reset неизвестны.
-  Spark/auto запрещены до указанного reset; cx разрешён владельцем.
-  M10-кандидат6066b0df766750cfb45bc2a5f20c5f950cedb153 остановился до ревью:
-  canonical full.diff103950байт превышал жёсткий лимит wrappers100000.
-  Сохранён report-blocked.md и исходный пакет; предварительно398 unittest и
-  пять live-сценариев прошли, probes после исправления ещё не заявлялись pass.
-  По заданию cache/m10-review-size-followup.md тот жеcx сократил только README:
-  commit4810e22f7a8b9427f112723b5e2b56d7fcbfece6, полныйdiff99861байт.
-  Код/тесты/контракт/спека неизменны, BASEb303 тот же. InitialGrok+Gemini и
-  отдельныйCodexresult запущены в22:59UTC, попытка остаётсяt-810ca7584d29-a01.
-  В TUI исполнителя фактически указан gpt-6-astra high. Пакет ещё не принят.
-  Заметки дальнейших вех в cache/m11-planning-notes.md и
-  cache/service-monitoring-notes.md, не execution-спеки. Для сервиса предложен
-  versioned release с одинаковым абсолютным RO-path на host и вAPIcontainer,
-  как в принятом liveM9; тогда не требуется менять transport радиprobe-bind.
-  **23:23UTC: авторский пакет получен.** cache/m10/readme-followup/handoff.md,
-  report.json SHA7a0d9f27a0a0151fd05034643832e358c8317ffe9edde258b444aa2dab690fd0;
-  все66хешей проверены. BASEb303, REVIEW=FINAL4810e22, полныйdiff99861байт,
-  SHA cf242f393f4206f4ff1dc3c1e8301cc5099603ed922a25bcf2fa2764f4c55cac.
-  Codex и Gemini initial без находок, Grok-1rc1 из-за отсутствия точки в
-  «Находок нет.», разрешённый единственный повтор Grok-2rc0. Всеraw сохранены,
-  input/response SHA и полный контракт в контекстах сверены. Код послеREVIEW
-  не менялся, verification не нужна. Авторский полныйгейт6/6rc0: suite4s,
-  probes2s, live18s,105историческихмутаций119s, invariants/clean0s.
-  Первый исторический запуск на фоне ревью был недостоверным: временные
-  изменения продолжались после завершения авторского процесса, источник не
-  установлен. Последовательный повтор и финальныйгейт105/105green; дерево
-  восстановилось без ручных правок. Сигналов чужим процессам не посылали.
-  Координатор прочитал полный дифф (frozenprobe уже прочитан и SHA подтверждён),
-  запускает собственный полныйгейт: cache/m10/coordinator-gate.log.
-  Независимые Grok-мутации запущены по cache/m10-mutations-gk.md в новом клоне
-  /home/user/exec-clones/abg-m10-mutations-20260914, веткаm10-mutations,
-  HEAD4810e22, pushотключён. Attempt t-3d10b8113041-a01 running, pane
-  gk-abg-m10-mutations-20260914, watcher cache/m10-mutations-watch.log.
-  Результат ожидается cache/m10/mutations-gk/mutation-result.md, сводныйпакет
-  cache/m10/final-package/final-result.md. Авторскаяcx-панель пока оставлена
-  для возможного возврата дефектов, продукт ещё НЕ принят/не слит.
-  Собственный coordinator-gate завершёнrc0,6/6на4810e22: unittest4s,
-  probes2s, live18s,105историческихмутаций126s, invariants/clean0s.
-  Повторный отдельный suite/live не нужен. Итоговые заметки собственного
-  разбора cache/m10/coordinator-review-notes.md; подтверждённых дефектов нет,
-  остаются независимые новые мутации. Последний фактический Grok weekly2%
-  (23:24UTC),5h/reset неизвестны; quotaerror не получен. НикакихSpark/auto.
-  **23:44UTC: независимый пакет проверен, один тест возвращён cx.**
-  Grok final-package/final-result.md SHA256
-  fd3287733c1a2bace82b1e848109d242b1eb8c1a01878f3c4b9069075a026f92,
-  все413manifestentries проверены; полныйharness/run.sh/test_runner прочитаны,
-  все14patch/activation/assertion/restore сверены. На4810: baseline68green,
-  14killed/0survived/0invalid, source/head/statusunchanged, runrc0.
-  Harness SHA8557139c2feaf6c94d4f7ad2d3623ffc2bbbe676eb4419f9cdd294d0ebb63a9a.
-  Но первый прогон выявил ложноположительный сегмент нового авторского
-  test_legacy_still_requires_sentinel: self.fail внутри run_probe перехватывается,
-  его текст содержит ожидаемое 'empty sentinel', поэтому assertion проходит.
-  Общей дыры покрытия нет: этот же мутант ловит frozen probe. Тем не менее
-  конкретный авторский assertion не подтверждает свой запрет вызова адаптера.
-  Единственный дефект возвращён тому жеcx в той же попытке по
-  cache/m10-test-guard-fix.md SHA80ebf6fa521fc41bd48e1baed5f61396dfd1615d094bf594e5ef2b91b8cbad3d.
-  Меняется только авторский тест, не product/frozenprobe. Initialreviews не
-  повторять; verification полного4810..NEWdelta + projectCodex, затем полный
-  авторскийгейт, пакет cache/m10/test-guard-fix/. Grok отдельно повторитM03 на
-  исправленном авторскомтесте и14-набор наNEW_SHA, потом проверка координатора
-  толькоизменений/связанныхрисков и свойгейтNEW_SHA. Старые пакеты сохраняются.
-  Gk-панель завершила пакет, оставлена для этого follow-up; t-3d10b8113041-a01
-  пока не закрыта. M10 НЕ принята и не слита, следующий шаг разрешён и выполняется.
-  **23:56UTC: исправление cx получено.** NEW_FINAL
-  ebb852410c3c218b41acae068b11bda653ee0dc4, только test_content_transport.py:
-  factory записывает вызов и нормально возвращаетAdapter, внешний assertion
-  проверяет отсутствие вызова; legacy/protocol/CLI assertions сохранены.
-  Пакет cache/m10/test-guard-fix/,60хешей проверены; reportSHA
-  164382506b1db3df9458edd02a96fda933d82fc08c15fa86e5fa6d9b13277030.
-  Delta1115байт SHAcb76cff81e266a7822ee8ab99bccf2f450ebd8cdf3daa012ee47f22c6e4e1b1d;
-  полныйBASE..NEW100043байта SHA
-  ff739df240cc4184c82074a1ef9ce24d9aa14591db1b59de6fd96911f3a548d3.
-  Все изменения покрыты прежним полнымinitial99861 и полнымdelta1115, обрезкинет.
-  VerifyGrok+Gemini и projectCodexrc0/no findings; квитанции/input/rawSHA
-  сверены, initialнеповторён. Полныйавторскийгейт6/6rc0.
-  Координатор прочитал толькоdelta/связанныйриск, запускает новыйownfullgate:
-  cache/m10/coordinator-test-guard-gate.log. Старыйgate4810непереписан.
-  Grok в той же панели/попытке получил cache/m10-mutations-after-test-fix.md:
-  ffсвоегоклонакebb, архивстарогоharness/пакетов, M03наисправленномавторскомтесте,
- 14-наборнаebb, новыйпакетcache/m10/test-guard-final-package/final-result.md.
-  M11 контракт покаDRAFT: cache/m11-contract-draft.md, зависит от принятойM10;
-  реализацияAPI/CLI ещё не запущена, сервис/пул остаются следующим шагом.
+  Полный diff и delta прочитаны координатором; frozen probe прочитан при
+  подготовке и проверен по SHA. Initial Grok+Gemini и отдельный Codex приняли;
+  после исправления теста те же verification-рецензенты приняли полный delta.
+  Первый Grok-ответ без точки в «Находок нет.» не зачтён, единственный технический
+  повтор rc=0. Initial неизменного кода не повторялись, квитанции не правились.
+  Журнал `~/.cache/tg-claude/review-journal/abg-m10-product-20260914-b303ecce7812/`.
+  Проверены SHA входов/raw, границы BASE/REVIEW/FINAL и полный контракт в контекстах.
+  Initial full.diff 99861 байт SHA
+  `cf242f393f4206f4ff1dc3c1e8301cc5099603ed922a25bcf2fa2764f4c55cac`;
+  delta 1115 байт SHA
+  `cb76cff81e266a7822ee8ab99bccf2f450ebd8cdf3daa012ee47f22c6e4e1b1d`.
+  Накопленный полный diff 100043 байта SHA
+  `ff739df240cc4184c82074a1ef9ce24d9aa14591db1b59de6fd96911f3a548d3`:
+  все изменения покрыты полными initial+verification, обрезки нет.
 
-- [ ] **M10 и далее:** M10 — продуктовая лестница со Scrapling и живой
-  браузерный сценарий; M11 — HTTP API с токеном, форматом
-  text/html/markdown, бюджетом и ограничением браузеров; сервис на stand-host и CLI
-  с режимами cf-fetch; M12 — сервис и прокси `ms1-15.example.net`; сквозной
-  прогон развёрнутого сервиса по всем `valid=true` целям и README.
-  Спека следующей вехи пишется после приёмки предыдущей. Каждая веха проходит
-  независимую приёмку и мутации, затем commit/push. Потребителей cf-fetch
-  автоматически не переключать. DNS, внешнюю публикацию и изменения чужих
-  сервисов оставить за владельцем. CF-стенд и дополнительные инструменты —
-  после готового пути fetcher/API/service/CLI.
+  Один дефект приёмки исправлен тем же cx: assertion внутри adapter_factory
+  проглатывался `run_probe`, и его текст давал ложный pass. Теперь callback
+  нормально возвращает Adapter, а вызов проверяется внешним assertion.
+  Общей дыры покрытия не было: frozen probe ловил тот же мутант раньше.
+  Задание `cache/m10-test-guard-fix.md`, SHA256
+  `80ebf6fa521fc41bd48e1baed5f61396dfd1615d094bf594e5ef2b91b8cbad3d`.
+  Производственный код после REVIEW не менялся, исправлен только новый тест.
+
+  Авторский полный gate и собственный gate координатора на FINAL: 6/6, rc=0.
+  Свой лог `m10/coordinator-test-guard-gate.log`: unittest 3s, 76 frozen probes
+  1s, live 17s, 105 исторических мутаций 133s, invariants/clean 0s.
+  Live доказывает реальные JS-маркеры patchright/Scrapling в HTML и text,
+  exact trace/count, отказ403, timeout и scoped cleanup. Отдельный повтор не нужен.
+  Старый неудачный historical run на фоне ревью сохранён, источник пересечения
+  не установлен; последовательный повтор и оба финальных гейта прошли.
+
+  Независимые мутации Grok на FINAL: baseline 68, 14 activated assertion kills,
+  0 survived/invalid, source/HEAD/status и finally restore проверены. M03 теперь
+  убит именно внешним assertion исправленного авторского теста (`['curl'] != []`).
+  Прочитан весь harness/run/test_runner, проверены patches/активация/логи/SHA.
+  Harness SHA256 `f44454aac94d03344ca3afd4e9456935c1721690d1e5c5160007745ce757ac7e`.
+  Итоговый пакет в `/home/user/.cache/abg-coord-20260914/m10/test-guard-final-package/`,
+  все 646 хешей сверены; `final-result.md` SHA256
+  `24ce3e9ec5f6d3177cda1bc65a2af6a150cd3aa9109ada53cfebf95f59eee067`.
+  Старые пакеты `readme-followup`, `final-package` и `mutations-gk/archive-4810`
+  сохранены. Отчёт исправления SHA256
+  `164382506b1db3df9458edd02a96fda933d82fc08c15fa86e5fa6d9b13277030`.
+  Попытки автора `t-810ca7584d29-a01` и мутаций `t-3d10b8113041-a01` accepted.
+  Основной бот готовую приёмку M10 не повторяет. Хронология подготовки и
+  возвратов сохранена в TASKS.md коммита `6c65d04` и исходных пакетах.
+
+- [ ] **M11 — HTTP API и CLI.** Следующая разрешённая веха: token auth,
+  URL/свежесть/budget/expected_text, content+trace, пять режимов cf-fetch,
+  общий лимит браузеров с ожиданием внутри бюджета. Runtime в Docker1002.
+  Черновик контракта `cache/m11-contract-draft.md`, дополнительные заметки
+  `cache/m11-planning-notes.md`; это ещё не исполняемые спеки. После принятой
+  M10 заморозить контракт, независимый probe/два эталона Grok, затем явный cx.
+  Транспорт M10 не переписывать; `cf-fetch` и потребителей не переключать.
+
+- [ ] **M12 — сервис, пул и deployed-прогон.** Compose в
+  `/home/user/services/ai-browser-gateway/`, только loopback-публикация,
+  Docker1002, проверенные registry pins, healthcheck и настоящий периодический
+  healthchecks-пинг. Пул `ms1-15.example.net`, credentials только программно из
+  существующего источника; все профили проверить, секреты не выводить.
+  Прогон всех valid=true целей через развёрнутый API, числа в research,
+  README с примерами. Заметки `cache/service-monitoring-notes.md` основаны
+  на прочитанном skill healthchecks-monitoring. Предложен versioned RO release
+  на одинаковом абсолютном пути host/API, как в live M9, без изменения probe-bind.
+  DNS, публичный443/WAF и чужие сервисы — за владельцем; свой CF-стенд после
+  работающего основного пути. MCP добавлять только при пользе сверх CLI.
+
+  **Текущие квоты:** Spark исчерпан до20.09.2026 15:59 (timezone неизвестен).
+  Spark и auto не запускать. Постановщик явно разрешил gk/cx. Последний факт
+  Grok weekly2%, 5h/reset неизвестны; обычный cx — окна неизвестны. Не опрашивать
+  модели ради статуса. Проект ещё не готов к использованию: API/CLI/сервис впереди.
 
 ## Остальной бэклог
 
 - [ ] **Инструменты из рилса `DdJ-MY6OITt` — что ещё взять в проект.** Рилс
   (`zhilnikov_it`, 11.09.2026) целиком про Scrapling: «выглядит как настоящий
   браузер», «чинит себя сам при смене вёрстки», «подключается к Claude Code и
-  Codex». Первое уже замерено вехой M8 (incremental 1 на `cf-bizprofile`), в
-  ядро не встроено. Разобрать остальное по `scrapling==0.4.15`:
-  1. **Встроить `scrapling` в меню провайдеров `gateway/`** ступенью после
-     `patchright` — единственное, что M8 доказал числом. Решение — после
-     сравнительного замера со второго egress (`ms1-15`), иначе «пробил CF» не
-     отличить от «адрес пустили».
+  Codex». Первое замерено вехой M8 и встроено в продуктовую лестницу M10 после
+  сравнительного замера двух egress. Остальное по `scrapling==0.4.15`:
+  1. **Готово: Scrapling после patchright в M10.** Решение опирается на
+     принятый сравнительный замер direct/ms1; код принят15.09.2026.
   2. **MCP-сервер `scrapling[ai]`** (`mcp>=2.0.0`) — сравнить с нашим
      `cf-fetch` для агентов; вероятнее, что шлюзу нужен свой MCP поверх
      лестницы, а не чужой поверх одного инструмента.

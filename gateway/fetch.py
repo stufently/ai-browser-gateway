@@ -31,3 +31,26 @@ class BenchFetcher:
             network=self.network,
         )
         return ProviderReply(result, age)
+
+
+class ProductFetcher:
+    """One content-only cold request, with per-instance route configuration."""
+
+    def __init__(self, url, *, entrances=None, profiles=None,
+                 launcher=None, network=None):
+        self.url = url
+        self.entrances = dict(entrances or {})
+        self.profiles = dict(profiles or {})
+        self.launcher = launcher
+        self.network = network
+
+    def __call__(self, step: PlanStep, budget_ms: int) -> ProviderReply:
+        from bench.runner.execute import fetch_content
+        egress = (None if step.egress_profile == 'direct' else
+                  (step.egress_profile, self.profiles.get(step.egress_profile)))
+        result, age = fetch_content(
+            step.provider, url=self.url, budget_ms=budget_ms, launcher=self.launcher,
+            egress=egress, entrance_url=self.entrances.get(step.provider),
+            network=self.network,
+        )
+        return ProviderReply(result, age)

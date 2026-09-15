@@ -23,22 +23,45 @@ def _failed(provider: str, url: str, reason: FailureReason) -> tuple[FetchResult
 
 def fetch_page(provider, *, url, sentinel, budget_ms, launcher=None,
                egress=None, entrance_url=None, network=None):
+    return _fetch(provider, url=url, sentinel=sentinel, budget_ms=budget_ms,
+                  launcher=launcher, egress=egress, entrance_url=entrance_url,
+                  network=network)
+
+
+def validate_url(url):
+    """Reject ambiguous URLs before IO, without echoing caller data."""
+    try:
+        if (not isinstance(url, str) or not url or url != url.strip()
+                or any(ord(char) < 32 or ord(char) == 127 for char in url)):
+            raise ValueError
+        parsed = urlsplit(url)
+        if (parsed.scheme not in ('http', 'https') or not parsed.hostname
+                or parsed.username is not None or parsed.password is not None
+                or parsed.port == 0):
+            raise ValueError
+    except (TypeError, ValueError):
+        raise ValueError('invalid URL') from None
+
+
+def fetch_content(provider, *, url, budget_ms, launcher=None,
+                  egress=None, entrance_url=None, network=None):
+    return _fetch(provider, url=url, sentinel=None, budget_ms=budget_ms,
+                  launcher=launcher, egress=egress, entrance_url=entrance_url,
+                  network=network, content_only=True)
+
+
+def _fetch(provider, *, url, sentinel, budget_ms, launcher=None,
+           egress=None, entrance_url=None, network=None, content_only=False):
     from bench.runner.execute import DockerLauncher, _validated
 
-    if type(budget_ms) is not int or budget_ms <= 0:
+    if (type(budget_ms) is not int or budget_ms <= 0
+            or (content_only and budget_ms > 180_000)):
         raise ValueError('invalid budget')
-    if not isinstance(sentinel, str) or not sentinel:
+    if not content_only and (not isinstance(sentinel, str) or not sentinel):
         raise ValueError('invalid sentinel')
+    validate_url(url)
     try:
         selected = by_name(provider)
-        parsed = urlsplit(url)
-        if (
-            parsed.scheme not in ('http', 'https')
-            or not parsed.hostname
-            or parsed.username is not None
-            or parsed.password is not None
-        ):
-            raise ValueError('invalid URL')
     except (KeyError, TypeError, ValueError):
         raise ValueError('invalid request') from None
 
@@ -54,6 +77,7 @@ def fetch_page(provider, *, url, sentinel, budget_ms, launcher=None,
         selected, url=target, sentinel=sentinel, network=network,
         proxy_env='ABG_PROXY' if proxy else None,
         probe_bind=PROBE_FILE, include_content=True, budget_ms=budget_ms,
+        **({'content_only': True} if content_only else {}),
     )
     argv.extend(['--mode', 'cold'])
     runner = DockerLauncher() if launcher is None else launcher

@@ -811,7 +811,7 @@ def make_adapter(provider: str):
 def run_probe(
     provider: str,
     url: str,
-    sentinel: str,
+    sentinel: str | None = None,
     *,
     mode: str,
     adapter_factory=make_adapter,
@@ -819,9 +819,11 @@ def run_probe(
     metrics=_metrics,
     include_content=False,
     budget_ms=None,
+    content_only=False,
 ) -> dict[str, Any]:
     if budget_ms is not None and (type(budget_ms) is not int or budget_ms <= 0):
         raise ValueError("invalid budget")
+    include_content = include_content or content_only
     adapter = None
     rss_monitor = _RssMonitor() if metrics is _metrics else None
     if rss_monitor is not None:
@@ -833,8 +835,10 @@ def run_probe(
     previous_deadline = _DEADLINE
     _DEADLINE = _Deadline(start, budget_ms, clock)
     try:
-        if not sentinel:
+        if not content_only and not sentinel:
             raise ValueError("empty sentinel")
+        if content_only:
+            sentinel = ""
         adapter = adapter_factory(provider)
         adapter.sentinel = sentinel
         adapter.start()
@@ -849,7 +853,7 @@ def run_probe(
         finished = clock()
         elapsed_ms = round((finished - navigation_start) * 1000)
         body = response.get("body", "")
-        found = sentinel in body
+        found = not content_only and sentinel in body
         status = response.get("status")
         headers = response.get("headers")
         challenge, markers = detect_challenge(status, headers, body)
@@ -936,11 +940,14 @@ def _positive_budget(value: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("url")
-    parser.add_argument("sentinel")
+    parser.add_argument("sentinel", nargs="?")
+    parser.add_argument("--content-only", action="store_true")
     parser.add_argument("--mode", choices=("cold", "warm"), default="cold")
     parser.add_argument("--include-content", action="store_true")
     parser.add_argument("--budget-ms", type=_positive_budget, default=None)
     args = parser.parse_args(argv)
+    if not args.content_only and not args.sentinel:
+        parser.error("sentinel is required without --content-only")
     provider = os.environ.get("ABG_PROVIDER", "")
     with contextlib.redirect_stdout(sys.stderr):
         if provider not in PROVIDERS:
@@ -949,12 +956,14 @@ def main(argv: list[str] | None = None) -> int:
                 adapter_factory=make_adapter,
                 include_content=args.include_content,
                 budget_ms=args.budget_ms,
+                content_only=args.content_only,
             )
         else:
             payload = run_probe(
                 provider, args.url, args.sentinel, mode=args.mode,
                 include_content=args.include_content,
                 budget_ms=args.budget_ms,
+                content_only=args.content_only,
             )
     print(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), flush=True)
     return 0

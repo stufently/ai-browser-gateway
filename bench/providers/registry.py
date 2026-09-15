@@ -36,9 +36,10 @@ def by_name(name: str) -> Provider:
     return _BY_NAME[name]
 
 
-def build_argv(provider: Provider, *, url: str, sentinel: str, network=None,
+def build_argv(provider: Provider, *, url: str, sentinel: str | None = None, network=None,
                proxy_env: str | None = None, probe_bind=None,
-               include_content: bool = False, budget_ms: int | None = None) -> list[str]:
+               include_content: bool = False, budget_ms: int | None = None,
+               content_only: bool = False) -> list[str]:
     """argv_extra holds Docker options, never shell fragments or probe arguments."""
     argv = ['docker', 'run', '--rm', '--user', '1002:1002']
     if provider.kind == 'browser':
@@ -52,7 +53,13 @@ def build_argv(provider: Provider, *, url: str, sentinel: str, network=None,
         source = str(Path(probe_bind).resolve())
         target = '/opt/abg' if Path(source).is_dir() else '/opt/abg/probe.py'
         argv.extend(['--mount', f'type=bind,source={source},target={target},readonly'])
-    argv.extend([provider.image, url, sentinel])
+    if not content_only and (not isinstance(sentinel, str) or not sentinel):
+        raise ValueError('invalid sentinel')
+    argv.extend([provider.image, url])
+    if content_only:
+        argv.append('--content-only')
+    else:
+        argv.append(sentinel)
     if include_content:
         argv.append('--include-content')
     if budget_ms is not None:

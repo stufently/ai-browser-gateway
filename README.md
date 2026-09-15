@@ -65,8 +65,23 @@ print(outcome.ok, outcome.provider, outcome.step)
 
 `BenchFetcher` запускает провайдер в Docker (`--user 1002:1002`, образы из
 реестра). Нужен работающий Docker; провайдерам не монтируется Docker socket.
-Ядро по-прежнему требует непустой sentinel: продуктовый вход без него и HTTP API
-ещё впереди.
+Ядро требует sentinel. Python-вход M10:
+
+```python
+from gateway.fetch import ProductFetcher
+from gateway.product import ProductRequest, run_product
+
+request = ProductRequest("https://example.org")
+outcome = run_product(request, ProductFetcher(request.url))
+```
+
+URL-only не подтверждает смысл. `expected_text` клиента — точная подстрока
+HTML/text; HTTP-ошибки и interactive challenge она не отменяет.
+Trace с challenge — `outcome.attempts`; отказ: пустые html/text,
+причина `error_type`, решение `step`.
+Docker UID/GID `1002:1002`; live: `python3 tests/live_m10_product.py`.
+[Контракт M10](docs/specs/m10-product-contract.md).
+HTTP API/CLI — M11, сервис — M12.
 
 Имена `profiles` и `entrances` у `BenchFetcher` обязаны совпадать с именами в
 `GatewayRequest` (`egress_profiles` и входы плана). Несовпадение сейчас даёт

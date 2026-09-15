@@ -210,3 +210,10 @@ def fetch_page(provider, *, url, sentinel, budget_ms, launcher=None,
     return _fetch_page(provider, url=url, sentinel=sentinel, budget_ms=budget_ms,
                        launcher=launcher, egress=egress, entrance_url=entrance_url,
                        network=network)
+
+
+def fetch_content(provider, *, url, budget_ms, launcher=None,
+                  egress=None, entrance_url=None, network=None):
+    from bench.runner.fetch import fetch_content as _fetch_content
+    return _fetch_content(provider, url=url, budget_ms=budget_ms, launcher=launcher,
+                          egress=egress, entrance_url=entrance_url, network=network)
