@@ -6,6 +6,25 @@ from gateway.models import GatewayOutcome
 
 
 class FormatTests(unittest.TestCase):
+    def test_markdown_keeps_equals_as_visible_text(self):
+        from gateway.format import render_content
+        obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', '<p>price<br>===</p>',
+                             'price ===', 'curl', None, F.none, Step.stop, (), 0)
+        self.assertEqual(render_content(obj, 'markdown'), 'price\n' + r'\=\=\=')
+
+    def test_markdown_destinations_encode_delimiters(self):
+        from gateway.format import render_content
+        for href, raw, encoded in [('https://example.invalid/a)b', 'https://example.invalid/a)b',
+                                   'https://example.invalid/a%29b'),
+                                  ('/a b', 'https://a/a b', 'https://a/a%20b')]:
+            html = f'<a href="{href}">label</a><img src="{href}" alt="alt"><link rel="canonical" href="{href}">'
+            obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', html,
+                                 'label', 'curl', None, F.none, Step.stop, (), 0)
+            with self.subTest(href=href):
+                self.assertEqual(render_content(obj, 'markdown'), f'[label]({encoded})![alt]({encoded})')
+                self.assertEqual(render_content(obj, 'links'), [{'text': 'label', 'href': raw}])
+                self.assertEqual(render_content(obj, 'meta')['canonical'], raw)
+
     def test_markdown_implicit_head_and_literal_text(self):
         from gateway.format import render_content
         obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', '', 'page',

@@ -1,7 +1,7 @@
 """Small tolerant HTML tree; no network or browser dependencies."""
 from html.parser import HTMLParser
 import re
-from urllib.parse import urljoin, urlsplit
+from urllib.parse import quote, urljoin, urlsplit
 
 VOID = frozenset('area base br col embed hr img input link meta param source track wbr'.split())
 HIDDEN = frozenset('script style noscript iframe svg nav header footer head'.split())
@@ -13,7 +13,7 @@ def normalized(text):
 
 
 def escaped(text):
-    return re.sub(r'([\\`*_{}\[\]()#+\-.!<>|&~])', r'\\\1', text)
+    return re.sub(r'([\\`*_{}\[\]()#+\-.!<>|&~=])', r'\\\1', text)
 
 
 def http_url(base, value):
@@ -22,6 +22,11 @@ def http_url(base, value):
         return url if urlsplit(url).scheme in ('http', 'https') and urlsplit(url).netloc else None
     except ValueError:
         return None
+
+
+def destination(base, value):
+    url = http_url(base, value)
+    return re.sub(r'[\s()<>\\]', lambda m: quote(m[0], safe=''), url) if url else None
 
 
 class Node:
@@ -113,10 +118,10 @@ def markdown_element(node, text, base, pre):
         marker = '**' if tag in ('strong', 'b') else '*'
         return marker + text + marker
     if tag == 'a':
-        href = http_url(base, attrs.get('href') or '') if 'href' in attrs else None
+        href = destination(base, attrs.get('href') or '') if 'href' in attrs else None
         return '[' + text + '](' + href + ')' if href else text
     if tag == 'img':
-        src = http_url(base, attrs.get('src') or '') if 'src' in attrs else None
+        src = destination(base, attrs.get('src') or '') if 'src' in attrs else None
         alt = escaped(attrs.get('alt') or '')
         return '![' + alt + '](' + src + ')' if src else alt
     if tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
