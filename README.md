@@ -158,14 +158,12 @@ Live JS/Docker assertions: `python3 tests/live_m11_api.py`.
 
 ## M12a local service
 
-Local Docker delivery of the M11 API, profile pool, and health sidecar.
-Production deploy, real credentials, and 15-proxy/target measurement are M12b.
+Local Docker API + profile pool + health sidecar. Production/15-proxy is M12b.
 
 ```bash
 docker build -t abg-runtime:m12a -f deploy/Dockerfile .
 scripts/abg-release prepare --repo . --sha <40-char-sha> --root "$HOME/services/ai-browser-gateway"
-# 0600 token, proxies.toml (abg-provision --source <env> --output <toml> on a
-# synthetic source), ping URL file; values never in argv/env
+# 0600 token, proxies.toml, ping file; values never in argv/env
 export ABG_RELEASE="$HOME/services/ai-browser-gateway/releases/<40-char-sha>"
 export ABG_TOKEN_FILE=... ABG_PROFILES_FILE=... ABG_PING_FILE=...
 export ABG_INSTANCE=local-m12a ABG_RUNTIME_IMAGE=abg-runtime:m12a
@@ -173,8 +171,8 @@ export ABG_DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
 docker compose -f deploy/compose.yaml -p ai-browser-gateway up -d
 scripts/abg-fetch https://example.org text
 docker compose -f deploy/compose.yaml -p ai-browser-gateway down
-# rollback: set ABG_RELEASE to a previous releases/<sha> and up again
+# rollback: ABG_RELEASE=.../releases/<older-sha> and up again
 ```
 
-`GET /health` unauthenticated; `POST /v1/fetch` is the M11 Bearer JSON API.
+`GET /health` unauthenticated; `POST /v1/fetch` is M11 Bearer JSON.
 Host publish `127.0.0.1:8765`. Live: `python3 tests/live_m12_service.py`.
