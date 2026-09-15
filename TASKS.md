@@ -226,9 +226,9 @@
 - [ ] **M11 — HTTP API и CLI.** Следующая разрешённая веха: token auth,
   URL/свежесть/budget/expected_text, content+trace, пять режимов cf-fetch,
   общий лимит браузеров с ожиданием внутри бюджета. Runtime в Docker1002.
-  Черновик контракта `cache/m11-contract-draft.md`, дополнительные заметки
-  `cache/m11-planning-notes.md`; это ещё не исполняемые спеки. После принятой
-  M10 заморозить контракт, независимый probe/два эталона Grok, затем явный cx.
+  Контракт `docs/specs/m11-api-cli-contract.md` зафиксирован; execution-спека
+  `docs/specs/m11-api-cli.md` пока DRAFT с placeholders, не запускать автора.
+  Следующий шаг — независимый probe/два эталона Grok, затем явный cx.
   Транспорт M10 не переписывать; `cf-fetch` и потребителей не переключать.
 
 - [ ] **M12 — сервис, пул и deployed-прогон.** Compose в
