@@ -223,7 +223,7 @@
   Основной бот готовую приёмку M10 не повторяет. Хронология подготовки и
   возвратов сохранена в TASKS.md коммита `6c65d04` и исходных пакетах.
 
-- [ ] **M11 — HTTP API и CLI, независимые Grok-мутации выполняются.** Token auth,
+- [ ] **M11 — HTTP API и CLI, Grok-мутации приняты; выполняется Grok verify.** Token auth,
   URL/свежесть/budget/expected_text, content+trace, пять режимов cf-fetch,
   общий лимит браузеров с ожиданием внутри бюджета. Runtime в Docker1002.
   Контракт `docs/specs/m11-api-cli-contract.md` зафиксирован; execution-спека
@@ -285,6 +285,25 @@
   и запрет повторного trace-dir. В mutation-клон доставлен чистый e6f7f0c;
   около04:37UTC Grok получил `cache/m11-mutations-final-e6f7f0c.md` на полную
   свежую серию, включая прямые kills пяти новых авторских assertions.
+  **Итог на e6f7f0c: независимые Grok-мутации приняты координатором.**
+  Полный run044141-1284080:20killed/1M13equivalent/1M19invalid. M19 пойман
+  более ранним содержательным запретом token value в argv, harness ожидал
+  следующийassertion. Возврат `cache/m11-final-m19-return.md` меняет только
+  binding; адресный run044454-1336322 дал1killed, raw первого не переписан.
+  Объединение: **21/21 qualified kills, все primary author tests**, 0remaining
+  survived/invalid; M13excluded отдельно, один ID не посчитан дважды.
+  Baseline/post33green, каждый original baseline с instrumentation-on,
+  отдельные trace-dir, exactSHA/invocation/activation/AssertionError/restore.
+  Проверены517+50run hashes,5+5harness и9top; всеpatches byte-identical ранее
+  прочитанным рецептам, все assertion frames разобраны,71coordinatorcheck pass:
+  `cache/m11/coordinator-final-mutation-check.json`. Пакет
+  `cache/m11/final-package-e6f7f0c/final-result.md`, SHA256
+  2cb1922af4d0cd8fdaddf4db58be018ca63a9ec9d158c74b52f546c4ebe617f0.
+  Автор cx получил разрешение на единственный недостающий Grok verify:
+  `cache/m11-grok-verify-queued.md`, REVIEW909ed88..FINALe6f7f0c,
+  canonical22244bytes SHA77a6ac29e8856a4eec7f516439be1de1e9bb8e1b29a95dc165f91973b0dd079c.
+  Новый output `cache/m11/grok-verify/`. Продукт/тесты/BASE не меняются;
+  Codex/Gemini и AC не повторяются. Grok mutation-панель idle до финальной сборки.
   Старый объединённый пакет заморожен с раскрытыми symlinks в
   `cache/m11/history/mutation-package-7c424f9-before-author-test-fixes/`.
   Параллельно автор cx был возобновлён для недостающего Grok initial на
@@ -297,8 +316,8 @@
   manifest52entries проверен. Оговорка: raw упоминает поздние commits и прежние
   Codex reviews, строгая независимость initial не подтверждена. Receipt/raw
   и оговорка сохранены; успешный historical initial не повторяется.
-  Эта же cx-панель сейчас закрывает пять test-gaps. Продукт неизменен;
-  Grok verify отложен до результата мутаций и окончательного test-SHA.
+  Эта же cx-панель закрыла пять test-gaps и выполняет Grok verify после
+  принятия независимых мутаций. Продукт неизменен.
   Контракт/BASE и остальные требования приёмки неизменны. Блокер машинной
   оснастки всё ещё воспроизводим по текущему исходнику; чужие scripts не менять.
   Дополнительная зависимость машинного gate: accept_run.py:300 требует
@@ -427,12 +446,12 @@
   Предпочтение постановщика: реализация/фиксы на cx, gk только для необходимых
   независимых этапов. M10 уже принята; повторных исполнительских прогонов нет.
   Решение владельца об отдельном cx выполнено: подготовка принята, авторский
-  пакет сохранён. Активна независимая Grok-проверка; работу не прерывать.
-  Grok-мутации остаются обязательными после reset ДО старта M12.
+  пакет сохранён. Независимые Grok-мутации наFINALe6f7f0c приняты; выполняется
+  Grok verify. Работу не прерывать; M12 ждёт окончательной приёмки M11.
   Проект ещё НЕ готов к использованию: M9/M10 приняты и опубликованы;
   API/CLI реализованы в непринятой ветке; сервис ждёт приёмки M11.
   Координатор возобновлён по новому сообщению владельца; следующий шаг —
-  результат Grok-мутаций, затем связанные исправления/оставшиеся reviews/gate.
+  Grok verify, финальная сборка пакета и разрешение технического journal/gate-блокера.
 
 ## Остальной бэклог
 
