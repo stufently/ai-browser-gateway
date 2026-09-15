@@ -118,3 +118,76 @@ python3 tests/mutation_gate_gateway.py  # 5 мутаций ядра M7
   хост, и провал засчитывался успехом.
 - **Замер без egress ничего не доказывает.** Один и тот же образ с одним
   отпечатком получает 200 с одного адреса и 403 с другого.
+
+## M11: HTTP API и Docker CLI
+
+Это интерфейсы для локального запуска; deployed service, профили/ротация пула,
+monitoring и production-конфигурация относятся к M12.
+
+HTTP API использует stdlib и существующий `ProductFetcher`. Для локального
+запуска из корня клона с уже подготовленным **тестовым** token в окружении:
+
+```bash
+docker run --rm --user 1002:1002 \
+  --group-add "$(stat -c %g /var/run/docker.sock)" \
+  -p 127.0.0.1:8765:8765 \
+  -v "$PWD:$PWD:ro" -w "$PWD" \
+  -v /usr/bin/docker:/usr/bin/docker:ro \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e ABG_TOKEN \
+  python@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 \
+  python3 -m gateway.httpapi
+```
+
+Вместо `-e ABG_TOKEN` сервер принимает `ABG_TOKEN_FILE`: смонтируйте подготовленный
+файл только для чтения и передайте путь внутри контейнера. Файл должен читаться
+UID 1002. Значение `ABG_TOKEN` имеет приоритет, в том числе пустое значение,
+которое отклоняется. Без токена сервер завершается со статической ошибкой.
+Не храните private token в репозитории. Defaults: `ABG_BIND=0.0.0.0`,
+`ABG_PORT=8765`, `ABG_BROWSER_LIMIT=1`.
+
+```bash
+# ABG_TOKEN уже задан в окружении; его значение не входит в Docker argv.
+scripts/abg-fetch https://example.org text
+scripts/abg-fetch https://example.org html
+scripts/abg-fetch https://example.org markdown
+scripts/abg-fetch https://example.org links
+scripts/abg-fetch https://example.org meta
+
+# Или существующий файл пользователя; значение токена не передаётся аргументом.
+ABG_TOKEN_FILE="$HOME/.config/abg/client-token" scripts/abg-fetch https://example.org
+```
+
+Wrapper работает через symlink, запускает только самостоятельный `client.py` в
+Docker UID 1002:1002 с `--network host` и RO mount одного файла клиента. По
+умолчанию файл токена ищется относительно **host HOME**; CLI не получает repo,
+server config или Docker socket. `ABG_CLIENT_IMAGE` переопределяет образ клиента.
+
+`GET /health` возвращает `200 {"ok":true}` без авторизации и fetch.
+`POST /v1/fetch` требует `Authorization: Bearer <token>`, `Content-Length` и
+`Content-Type: application/json`; тело — объект с обязательным `url` и опциями:
+
+| Поле JSON | CLI env | По умолчанию |
+| --- | --- | --- |
+| `budget_ms` | `ABG_BUDGET_MS` | 30000, максимум 180000 |
+| `max_age_hours` | `ABG_MAX_AGE_HOURS` | 0 |
+| `allow_browser` | `ABG_ALLOW_BROWSER` | true; env только 0/1 |
+| `expected_text` | `ABG_EXPECTED_TEXT` | null, если env отсутствует |
+| `format` | второй positional CLI | text |
+
+`ABG_URL` по умолчанию `http://127.0.0.1:8765/v1/fetch`. Неизвестные поля,
+повторные JSON keys, некорректный framing, неполное или превышающее 64 KiB тело
+дают 400. Общее время чтения тела ограничено четырьмя секундами.
+
+Валидный запрос возвращает HTTP 200 даже при `ok:false`: это результат продуктовой
+политики, а не transport error. Ответ содержит выбранный `content`, `provider`,
+`error_type`, `step`, `elapsed_ms` и `attempts`. Trace сохраняет status/challenge,
+решения и имена proxy profiles без URL/credentials и промежуточных страниц.
+На неуспехе content пустой (`""`, `[]` или `{}` по формату).
+
+CLI выводит только content: строки для text/html/markdown, JSON для links/meta.
+Ошибки HTTP/сети, `ok:false` и неверная response schema дают ненулевой rc,
+пустой stdout и статический JSON error в stderr. Redirects не выполняются.
+Общий бюджет включает ожидание единого browser semaphore на экземпляр сервера;
+HTTP/RSS/Wayback и `/health` не занимают browser slot. Политику переходов M10 API
+не дублирует. Живая проверка на изолированном JS stand: `python3 tests/live_m11_api.py`.
