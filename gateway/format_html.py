@@ -5,10 +5,15 @@ from urllib.parse import urljoin, urlsplit
 
 VOID = frozenset('area base br col embed hr img input link meta param source track wbr'.split())
 HIDDEN = frozenset('script style noscript iframe svg nav header footer head'.split())
+HEAD_CONTENT = frozenset('base link meta title style script noscript template'.split())
 
 
 def normalized(text):
     return ' '.join(text.split())
+
+
+def escaped(text):
+    return re.sub(r'([\\`*_{}\[\]()#+\-.!<>|&~])', r'\\\1', text)
 
 
 def http_url(base, value):
@@ -24,7 +29,14 @@ class Node:
         self.tag, self.attrs, self.children = tag, dict(attrs), []
 
     def text(self):
-        return ''.join(n if isinstance(n, str) else n.text() for n in self.children)
+        pending, chunks = [self], []
+        while pending:
+            node = pending.pop()
+            if isinstance(node, str):
+                chunks.append(node)
+            else:
+                pending.extend(reversed(node.children))
+        return ''.join(chunks)
 
     def walk(self):
         # Iterative traversal also handles deeply nested upstream documents.
@@ -44,6 +56,8 @@ class Document(HTMLParser):
         self.close()
 
     def handle_starttag(self, tag, attrs):
+        if self.stack[-1].tag == 'head' and tag not in HEAD_CONTENT:
+            self.handle_endtag('head')
         node = Node(tag, attrs)
         self.stack[-1].children.append(node)
         if tag not in VOID:
@@ -61,20 +75,40 @@ class Document(HTMLParser):
                 break
 
     def handle_data(self, data):
+        if self.stack[-1].tag == 'head' and data.strip():
+            self.handle_endtag('head')
         self.stack[-1].children.append(data)
 
 
 def markdown(node, base, pre=False):
-    if isinstance(node, str):
-        return node if pre else re.sub(r'\s+', ' ', node)
+    # Explicit postorder stack avoids Python's recursion limit on valid deep DOMs.
+    pending, chunks = [(node, pre, pre, None)], []
+    while pending:
+        node, pre, literal, start = pending.pop()
+        if isinstance(node, str):
+            text = node if pre else re.sub(r'\s+', ' ', node)
+            chunks.append(text if literal else escaped(text))
+        elif start is not None:
+            text = ''.join(chunks[start:])
+            del chunks[start:]
+            chunks.append(markdown_element(node, text, base, pre))
+        elif node.tag not in HIDDEN:
+            pending.append((node, pre, literal, len(chunks)))
+            pending.extend((child, pre or node.tag == 'pre', literal or node.tag in ('pre', 'code'), None)
+                           for child in reversed(node.children))
+    return ''.join(chunks)
+
+
+def markdown_element(node, text, base, pre):
     tag, attrs = node.tag, node.attrs
-    if tag in HIDDEN:
-        return ''
-    text = ''.join(markdown(n, base, pre or tag == 'pre') for n in node.children)
     if tag == 'pre':
-        return '\n\n```\n' + text + '\n```\n\n'
+        fence = '`' * max(3, max((len(m[0]) + 1 for m in re.finditer(r'`+', text)), default=0))
+        return '\n\n' + fence + '\n' + text + '\n' + fence + '\n\n'
     if tag == 'code':
-        return text if pre else '`' + text + '`'
+        if pre:
+            return text
+        fence = '`' * max((len(m[0]) + 1 for m in re.finditer(r'`+', text)), default=1)
+        return fence + (' ' + text + ' ' if '`' in text else text) + fence
     if tag in ('strong', 'b', 'em', 'i'):
         marker = '**' if tag in ('strong', 'b') else '*'
         return marker + text + marker
@@ -83,7 +117,7 @@ def markdown(node, base, pre=False):
         return '[' + text + '](' + href + ')' if href else text
     if tag == 'img':
         src = http_url(base, attrs.get('src') or '') if 'src' in attrs else None
-        alt = attrs.get('alt') or ''
+        alt = escaped(attrs.get('alt') or '')
         return '![' + alt + '](' + src + ')' if src else alt
     if tag in ('h1', 'h2', 'h3', 'h4', 'h5', 'h6'):
         return '\n\n' + '#' * int(tag[1]) + ' ' + text.strip() + '\n\n'

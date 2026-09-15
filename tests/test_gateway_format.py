@@ -6,6 +6,22 @@ from gateway.models import GatewayOutcome
 
 
 class FormatTests(unittest.TestCase):
+    def test_markdown_implicit_head_and_literal_text(self):
+        from gateway.format import render_content
+        obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', '', 'page',
+                             'curl', None, F.none, Step.stop, (), 0)
+        for body in ('<body><p>visible</p>', '<p>visible</p>', 'visible'):
+            html = '<html><head><title>hidden</title>' + body
+            md = render_content(replace(obj, html=html), 'markdown')
+            self.assertIn('visible', md)
+            self.assertNotIn('hidden', md)
+        md = render_content(replace(obj, html='<p>&lt;b&gt;X&lt;/b&gt; *literal*</p><code>&lt;b&gt;</code>'
+                                   '<img alt="&lt;b&gt;" src="/x">'), 'markdown')
+        self.assertIn(r'\<b\>X\</b\>', md)
+        self.assertIn(r'\*literal\*', md)
+        self.assertIn('`<b>`', md)
+        self.assertIn(r'![\<b\>](https://a/x)', md)
+
     def test_canonical_missing_empty_and_relative_href(self):
         from gateway.format import render_content
         obj = GatewayOutcome(True, 'https://a/x', 'https://b/dir/page', '',

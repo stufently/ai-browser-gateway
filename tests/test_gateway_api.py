@@ -6,6 +6,18 @@ from tests.m11_helpers import URL, TOKEN, reply, serving, request
 
 
 class APITests(unittest.TestCase):
+    def test_deep_html_keeps_success_for_all_parsed_formats(self):
+        from gateway.httpapi import make_server
+        html = '<h1><a href="/x">' + '<span>' * 2000 + 'visible' + '</span>' * 2000 + '</a></h1>'
+        factory = lambda *a, **kw: lambda s, b: reply(html=html)
+        with serving(make_server(('127.0.0.1', 0), token=TOKEN, fetcher_factory=factory)) as addr:
+            for mode in ('markdown', 'links', 'meta'):
+                with self.subTest(mode=mode):
+                    status, value = request(addr, {'url': URL, 'format': mode})
+                    self.assertEqual(status, 200)
+                    self.assertTrue(value['ok'])
+                    self.assertIn('visible', str(value['content']))
+
     def test_validation_framing_auth_and_internal_error(self):
         from gateway.httpapi import make_server
         calls = []
