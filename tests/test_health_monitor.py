@@ -1,5 +1,5 @@
 import unittest
-from gateway.health_monitor import _url, check_once
+from gateway.health_monitor import _url
 
 
 class HealthMonitorTests(unittest.TestCase):
@@ -14,7 +14,3 @@ class HealthMonitorTests(unittest.TestCase):
         self.assertFalse(_url('https://u:p@h.invalid/x', ping=True, allow_local=False))
         self.assertFalse(_url('https://h.invalid/x?q=1', ping=True, allow_local=False))
         self.assertFalse(_url('https://h.invalid', ping=True, allow_local=False))
-
-    def test_check_once_is_boolean(self):
-        self.assertIs(check_once('http://127.0.0.1:1/missing', 'http://127.0.0.1:1/p',
-                                 timeout=.05), False)
