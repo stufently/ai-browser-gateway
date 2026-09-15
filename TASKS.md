@@ -223,7 +223,15 @@
   Основной бот готовую приёмку M10 не повторяет. Хронология подготовки и
   возвратов сохранена в TASKS.md коммита `6c65d04` и исходных пакетах.
 
-- [ ] **M11 — HTTP API и CLI: доказательства готовы, машинная приёмка blocked.** Token auth,
+- [ ] **M11 — HTTP API и CLI: ПРИНЯТА РЕШЕНИЕМ ВЛАДЕЛЬЦА 15.09.2026, осталось влить.**
+  **Решение 15.09 (владелец через координатора tg-claude-userbot):** машинный gate `accept_run` v2 не
+  применяется к возврату исполнителю после verify — протокол cross-review-v1 такого перехода не имеет
+  (`VERIFY_ONLY → FIX_ONCE` запрещён), оснастку под него не строим. M11 принимается по уже собранным
+  доказательствам на FINAL `e6f7f0c` (6 AC green, 413 unit/94 frozen/live, Codex+Gemini приняли код и
+  test-only дельту, мутации Grok 21/21, native verify Grok accepted/0 findings). Следующий шаг
+  координатора: влить `m11-author-tests-20260915` (FINAL e6f7f0c) в main, запушить, затем M12.
+  Впредь возврат после verify = НОВАЯ веха: новый клон от прежнего FINAL, BASE = прежний FINAL.
+  Ниже — история до решения, как была. Token auth,
   URL/свежесть/budget/expected_text, content+trace, пять режимов cf-fetch,
   общий лимит браузеров с ожиданием внутри бюджета. Runtime в Docker1002.
   Контракт `docs/specs/m11-api-cli-contract.md` зафиксирован; execution-спека
