@@ -241,7 +241,7 @@
   `gk-abg-m11-mutations-20260915`, attempt `t-5dc975739851-a01` running,
   наблюдаемая модель Grok4.6 high. Задача прочитана, модель приступила к работе.
   Отдельный клон `/home/user/exec-clones/abg-m11-mutations-20260915`, ветка
-  m11-mutations, FINAL7c424f9, push отключён. Задание `cache/m11-mutations-gk.md`,
+  m11-mutations, исходный FINAL7c424f9, push отключён. Задание `cache/m11-mutations-gk.md`,
   watcher `cache/m11-mutations-watch.log`, output `cache/m11/mutations-gk/`.
   Авторский пакет/SHA перед запуском неизменны. Мутации до M12; выжившие
   assertions возвращаются автору cx. Повторный quota error не циклировать.
@@ -261,7 +261,17 @@
   M19 token в Docker argv, M20 expected_text/options. Возврат тому же cx
   `cache/m11-mutation-test-fixes.md`; создан test-only e6f7f0c844ebf9fa3d6d1194d921302e8ab1d211,
   предварительно10targetedgreen и пять неизменных Grokpatches red/green.
-  На этом SHA выполняются6AC и Codex+Gemini reviews только нового test-delta.
+  На e6f7f0c прошли6AC:413unit/94frozen/live, оба параллельных Codex+Gemini
+  reviews нового полного test-delta13851bytes приняты без находок. SHA delta
+  3619d038f6eda3bfbc3459aa39d570972d9368d89857242a99294f827a01c972,
+  contextSHA e73ddbaea352e5511f86cc24fc7425a2542e686131047651b0b9125207fd5196.
+  Координатор прочитал весь delta и REPORT, сверил6команд со спекой, логи,
+  canonicaldiff и122manifest entries: `cache/m11/author-test-fixes/`, manifestSHA
+  4694cdcbfde05ca64d4118e310bc74f723a2b34cb4cd70c71535246cd3efd387.
+  Резервная локальная ветка m11-author-tests-20260915 и проверенный полный
+  bundle `cache/m11-author-e6f7f0c.bundle`, SHA256
+  d22bb59a7b7f442244de3fb203bdb8f86b9a85e224a9dbb71aee13276b963f27.
+  Авторская панель ожидает финальных мутаций перед Grok verify.
   Координатор прочитал return-harness69/204/1012строк, проверил manifests
   16/664/193/244 и source/restore SHA: `cache/m11/coordinator-mutation-return-check.json`.
   До финального независимого прогона Grok исправляет изоляцию child trace-dir
@@ -269,6 +279,12 @@
   `cache/m11-mutation-trace-controls.md`. Первый829-строчный harness не был
   сохранён автором до замены; это явно отмечено. На новом FINAL требуется
   полная свежая серия с заранее сохранённым harness, без подмены истории.
+  Подготовленный harness/controls разобраны:3instrumentedgreen на исходном
+  7c424f9,5harness+104control hashes совпали; childSHA/invocation корректны.
+  Оставшаяся правка перед запуском: strict invocation безNone/empty fallback
+  и запрет повторного trace-dir. В mutation-клон доставлен чистый e6f7f0c;
+  около04:37UTC Grok получил `cache/m11-mutations-final-e6f7f0c.md` на полную
+  свежую серию, включая прямые kills пяти новых авторских assertions.
   Старый объединённый пакет заморожен с раскрытыми symlinks в
   `cache/m11/history/mutation-package-7c424f9-before-author-test-fixes/`.
   Параллельно автор cx был возобновлён для недостающего Grok initial на
