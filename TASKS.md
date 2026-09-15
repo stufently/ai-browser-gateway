@@ -467,7 +467,15 @@
   BASE и контракт задним числом не менять. После принятой M11 продолжить M12.
   Транспорт M10 не переписывать; `cf-fetch` и потребителей не переключать.
 
-- [ ] **M12 — сервис, пул и deployed-прогон.** Compose в
+- [ ] **M12 — сервис, пул и deployed-прогон: разведка запущена15.09.2026.**
+  Задание `docs/specs/m12-recon.md`, копия запуска
+  `/home/user/.cache/abg-coord-20260915/m12/recon-task.md`.
+  Явный Grok, панель `gk-abg-m12-recon-20260915`, отдельный клон
+  `/home/user/exec-clones/abg-m12-recon-20260915`, BASE `92d8ad5`.
+  Push отключён; продукт/тесты/сервис в разведке не меняются. Пакет ожидается
+  в `/home/user/.cache/abg-coord-20260915/m12/recon-result.md`, сторож
+  `watch.log` там же. После фактов — execution-спека и штатная приёмка.
+  Compose в
   `/home/user/services/ai-browser-gateway/`, только loopback-публикация,
   Docker1002, проверенные registry pins, healthcheck и настоящий периодический
   healthchecks-пинг. Пул `ms1-15.example.net`, credentials только программно из
