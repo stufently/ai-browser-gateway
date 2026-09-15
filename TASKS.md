@@ -470,24 +470,33 @@
 - [ ] **M12 — возобновлена по обновлённой директиве владельца15.09.**
   **Позднее решение15.09: «форсируй все задачи» — STOP снят.** Продолжить
   M12a и следующие разрешённые пункты обычным флоу, сессию не закрывать.
-  Принятая подготовка ниже сохраняется; следующий шаг — execution-спека,
-  свежийBASE/клон и предполёт M12a, затем Grok-реализация.
-  Execution-спека `docs/specs/m12a-service.md` зафиксирована, staticpreflight
-  pass6критериев. Клон `/home/user/exec-clones/abg-m12a-service-20260915`,
+  **Сейчас: Grok реализует M12a**, попытка `t-4d3f90646502-a01`, панель
+  `gk-abg-m12a-service-20260915`, хозяин `cxc-ai-browser-gateway`.
+  Execution-спека `docs/specs/m12a-service.md`, SHA256
+  `5acfb7e415b6e23d636537877caed13a3bcf54d9ee7575ab90199169695faeb9`.
+  Клон `/home/user/exec-clones/abg-m12a-service-20260915`, ветка m12a-service,
   BASE `7ca38c1aa62174a0a1de1a7685fee268c2ba2042`, origin push DISABLED.
-  Запущен явный Grok на baseline-подготовку, `t-706cc296943e-a01`, панель
-  `gk-abg-m12a-service-20260915`; task `docs/specs/m12a-baseline-preparation.md`.
-  Только6команд AC и проверка наличияimages, продукт не пишет. Пакет ожидается
-  в `/home/user/.cache/abg-coord-20260915/m12/preflight/result.md`.
-  Сторож `preflight/watch.log`, PID `preflight/watch.pid`, detached setsid.
-  После принятой baseline-подготовки — отдельный запуск той же gk реализации
-  по неизменной execution-спеке; preflight не подменяет продуктовую приёмку.
+  Static preflight pass6критериев. Baseline-подготовка `t-706cc296943e-a01`
+  принята; исходные413unit green, прежние94frozen green, новые20probe red
+  ровно по отсутствующим API. AC-303/305 red по отсутствующей реализации,
+  AC-304/306 green; все6команд посимвольно совпали, HEAD/spec/probe unchanged.
+  Пакет `/home/user/.cache/abg-coord-20260915/m12/preflight/result.md`, SHA256
+  `692c24b2b5dcf64de4c5c1efe3d6da786b75ed98d457ba404482128276f83408`;
+  manifest `cada547aa215be330660d4ef12d42576c774fef364e5e7c1e43170ff3e2474ab`,
+  21хеш проверен. Свои test-containers отсутствуют, добавившиеся MCPsidecars
+  отделены по образам/времени; чужие контейнеры не трогались. Подготовительная
+  панель закрыта idle с пустым вводом, реализация запущена отдельным заданием.
+  Пакет автора ожидается в `m12/author/`, сторож `author/watch.log`, PID
+  `author/watch.pid` вcacheвыше (detached setsid). После пакета: независимые
+  мутации новых авторскихtests, полная приёмка/diff/reviews/v2gate/live, merge.
+  План следующего этапа `docs/specs/m12b-deployment-plan.md` ещё НЕ execution-
+  спека; production deployment начнётся после приёмки M12a. Сервис пока не готов.
   **Предыдущий handoff (остановка отменена решением выше):**
   **Финальный handoff:** текущий `cx-abg-m12a-probes-20260915` завершён,
   подготовка принята; панель закрыта после пустого ввода, отсутствия фоновых
   команд и своих Docker-контейнеров. Попытка `t-32c88bfc1f12-a01` accepted.
   Прежний запрет новых запусков снят обновлённым решением владельца.
-  Реализация M12a, production deployment и M12b НЕ начаты; сервис не готов.
+  На момент прежнего handoff реализация ещё не начиналась; текущий статус выше.
 
   Принятый probe: commit `6b54caf5ecf6687958fda86a07d88f87152e824a`,
   опубликован в `origin/accepted-m12a-probes-20260915`, в main не влит:
