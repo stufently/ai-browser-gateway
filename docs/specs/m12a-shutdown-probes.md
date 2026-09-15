@@ -1,4 +1,4 @@
-# M12a — независимые мутации и probe остановки
+# M12a — независимые мутации и probe регрессий
 
 15.09.2026. Подготовительная задача противоположному cx, не реализация продукта.
 Клон /home/user/exec-clones/abg-m12a-shutdown-probes-20260915,
@@ -39,9 +39,18 @@ error не kill. Падение frozenprobe/старыхtests не считат�
 Эквивалентные и invalid отдельно. Исходные tests не ослаблять и не чинить.
 В конце восстановленный green, source HEAD и дерево unchanged.
 
+Отдельно один обязательный live-мутант: заменить команду Compose-monitor
+на пассивный процесс, оставив рабочими image/env и docker exec. BASE live
+сейчас проверяет автоматические пинги через дополнительный monitor из checkout,
+а в настоящем sidecar вручную вызывает check_once. Покажи, проходит ли
+существующий tests/live_m12_service.py при выключенном sidecar loop. Нужны
+baseline, доказательство реальной Cmd/Image/mount активации мутанта, rc/log,
+restore. Внешние цели не нужны; свои локальные Dockerресурсы и finally cleanup.
+Не засчитывать проверку из checkout как проверку Compose release.
+
 ### 2. Новый frozen regression probe для следующей вехи
 
-Единственный разрешённый tracked новый файл: tests/probe_m12_shutdown.py.
+Единственный разрешённый tracked новый файл: tests/probe_m12_service_regressions.py.
 Он описывает НАБЛЮДАЕМОЕ устранение verify-codex-1:F001:
 
 > При SIGTERM обработчик, ожидающий browser semaphore, может продолжить
@@ -66,7 +75,19 @@ error не kill. Падение frozenprobe/старыхtests не считат�
 Host tmux socket, kill-server, сигналы в чужие процессы запрещены. Для проверки
 SIGTERM адресовать конкретный собственный процесс внутри тестового контейнера.
 
-Зонд постановщика валидировать: этот BASE red именно из-за нарушения shutdown,
+Дополнительно подтвердить через CLI/публичный make_service и включить в тот
+же probe ещё два обнаруженных координатором нарушения исходного контракта:
+- proxy URL с U+00A0 или U+0085 сейчас принимается _proxy, хотя контракт
+  запрещает whitespace/control; проверить fail-closed до bind через make_service;
+- scripts/abg-release manifest() принимает symlink вместо файла
+  manifests/<sha>.sha256. Проверить через prepare CLI: отказ без изменения
+  внешнего target, при обычном manifest/repeat поведение остаётся корректным.
+Компонентные Docker-подтверждения координатора (не замена твоего CLI-probe):
+/home/user/.cache/abg-coord-20260915/m12/coordinator-proxy-check.json и
+coordinator-manifest-check.json в том же каталоге. Источник FINAL неизменен.
+Не добавлять произвольный hardening сверх исходных no-symlink/URL правил.
+
+Зонд постановщика валидировать: этот BASE red именно по этим нарушениям,
 не среды/отсутствующего API; ДВА различных корректных эталона на отдельных
 копиях — green; обходные варианты (включая два sweep/sleep, проверку closed
 слишком рано, пропуск pending handler и ослабление scope) — assertion-red.
