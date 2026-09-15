@@ -472,6 +472,16 @@
   M12a и следующие разрешённые пункты обычным флоу, сессию не закрывать.
   Принятая подготовка ниже сохраняется; следующий шаг — execution-спека,
   свежийBASE/клон и предполёт M12a, затем Grok-реализация.
+  Execution-спека `docs/specs/m12a-service.md` зафиксирована, staticpreflight
+  pass6критериев. Клон `/home/user/exec-clones/abg-m12a-service-20260915`,
+  BASE `7ca38c1aa62174a0a1de1a7685fee268c2ba2042`, origin push DISABLED.
+  Запущен явный Grok на baseline-подготовку, `t-706cc296943e-a01`, панель
+  `gk-abg-m12a-service-20260915`; task `docs/specs/m12a-baseline-preparation.md`.
+  Только6команд AC и проверка наличияimages, продукт не пишет. Пакет ожидается
+  в `/home/user/.cache/abg-coord-20260915/m12/preflight/result.md`.
+  Сторож `preflight/watch.log`, PID `preflight/watch.pid`, detached setsid.
+  После принятой baseline-подготовки — отдельный запуск той же gk реализации
+  по неизменной execution-спеке; preflight не подменяет продуктовую приёмку.
   **Предыдущий handoff (остановка отменена решением выше):**
   **Финальный handoff:** текущий `cx-abg-m12a-probes-20260915` завершён,
   подготовка принята; панель закрыта после пустого ввода, отсутствия фоновых
