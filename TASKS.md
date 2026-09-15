@@ -257,6 +257,17 @@
   подготовка принята; автор запущен отдельной панелью
   `cx-abg-m11-api-cli-20260915`, attempt t-4b15b59fa8c8-a01 running.
   Watcher `cache/m11-author-watch.log`; пакет автора `cache/m11/author/`.
+  Первый пакет3685bdc54644918d820cbecdef14617ab2b11bcc возвращён:
+  403unit/94frozen/live+6AC rc0, но reviews ещё не вызваны — full.diff102280
+  байт (SHA2b91f1b85095c4d49575a004255310ad5d5a5ef0555733db55a7113c0f49044e),
+  выше100k. Gate4 на metadata, не повторялAC. Все36artifacthashes совпали.
+  Координатор прочитал весь новый код/tests/live/README/измененияспеки;
+  обнаружены canonical безhref и чрезмерная requestвалидация link.href вCLI.
+  Единый возврат тому же cx: `cache/m11-author-first-return.md`, исправить
+  двадефекта и сократить новый README/полныйdiff безослабления, затем доступные
+  Codex+Gemini reviews. Первыйпакет сохранён `cache/m11/initial-blocked-3685/`.
+  Коммит дополнительно сохранён локально в m11-author-work-20260915;
+  НЕ принят, не слит/не отправлен вorigin. Grok gate/мутации всёещё pending.
   В обоих клонах origin push отключён.
   Окончательный контракт SHA256
   80248e5768bd165f0e8ea4e0686e704f0c381b74030e4008b87569e3ec2a59ce.
@@ -265,6 +276,7 @@
   `cx-abg-m11-probes-20260915`, attempt t-4106a3e48244-a01 accepted.
   Панель закрыта после готового пакета; watcher `cache/m11-probes-cx-watch.log`.
   Принятый probe commit f2ef5633bf9f574772fca9d4ee44d2ff010971bf,
+  дополнительно опубликован в origin/accepted-m11-probes-20260915,
   SHA509d765167bd322d0b2f5c40127a95ed977760af8bd4a35c03a830267dc10997,
   40049bytes,18methods. Координатор прочитал весьprobe/обаэталона/скрипты;
   319hashes проверены, BASEred и обаcorrectrefgreen обоимиentrypoints,
