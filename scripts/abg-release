@@ -30,7 +30,7 @@ def members(raw):
     with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as tar:
         for item in tar.getmembers():
             name = item.name
-            if name.endswith('/'):
+            if item.isdir() or name.endswith('/'):
                 continue
             path = Path(name)
             if (item.issym() or item.islnk() or not item.isreg()

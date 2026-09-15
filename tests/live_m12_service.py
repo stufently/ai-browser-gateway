@@ -206,26 +206,26 @@ def main():
               '-e', 'PYTHONDONTWRITEBYTECODE=1', '-v', f'{ROOT}:{ROOT}:ro', '-w', str(ROOT)]
     daemon = ['--group-add', gid, '-v', '/var/run/docker.sock:/var/run/docker.sock',
               '-v', '/usr/bin/docker:/usr/bin/docker:ro']
-    docker('build', '-t', image, '-f', str(ROOT / 'deploy/Dockerfile'), str(ROOT))
-    ver = docker('run', '--rm', *common, image, 'docker', 'version', '--format', '{{.Client.Version}}')
-    assert '29.' in ver.stdout, ver.stdout + ver.stderr
-    subprocess.run(
-        [sys.executable, str(ROOT / 'scripts/abg-release'), 'prepare',
-         '--repo', str(ROOT), '--sha', sha, '--root', str(root)],
-        check=True, capture_output=True, text=True)
-    release = root / 'releases' / sha
-    env = dict(os.environ)
-    env.update(
-        ABG_RELEASE=str(release), ABG_TOKEN_FILE=str(token_file),
-        ABG_PROFILES_FILE=str(profiles_file), ABG_PING_FILE=str(ping_side),
-        ABG_INSTANCE=instance, ABG_DOCKER_GID=gid, ABG_HOST_PORT=host_port,
-        ABG_COMPOSE_PROJECT=project, ABG_RUNTIME_IMAGE=image,
-        ABG_PROVIDER_NETWORK=project + '_default')
     compose = ['docker', 'compose', '-f', str(ROOT / 'deploy/compose.yaml'), '-p', project]
-    docker('run', '-d', '--name', run + '-foreign', *labeled,
-           '--label', 'abg.owner=other', '--label', 'abg.instance=foreign',
-           '--label', 'abg.role=provider', PY, 'sleep', '3600')
+    env = dict(os.environ)
     try:
+        docker('build', '-t', image, '-f', str(ROOT / 'deploy/Dockerfile'), str(ROOT))
+        ver = docker('run', '--rm', *common, image, 'docker', '--version')
+        assert '29.' in ver.stdout, ver.stdout + ver.stderr
+        subprocess.run(
+            [sys.executable, str(ROOT / 'scripts/abg-release'), 'prepare',
+             '--repo', str(ROOT), '--sha', sha, '--root', str(root)],
+            check=True, capture_output=True, text=True)
+        release = root / 'releases' / sha
+        env.update(
+            ABG_RELEASE=str(release), ABG_TOKEN_FILE=str(token_file),
+            ABG_PROFILES_FILE=str(profiles_file), ABG_PING_FILE=str(ping_side),
+            ABG_INSTANCE=instance, ABG_DOCKER_GID=gid, ABG_HOST_PORT=host_port,
+            ABG_COMPOSE_PROJECT=project, ABG_RUNTIME_IMAGE=image,
+            ABG_PROVIDER_NETWORK=project + '_default')
+        docker('run', '-d', '--name', run + '-foreign', *labeled,
+               '--label', 'abg.owner=other', '--label', 'abg.instance=foreign',
+               '--label', 'abg.role=provider', PY, 'sleep', '3600')
         up = subprocess.run(compose + ['up', '-d'], env=env, capture_output=True, text=True)
         if up.returncode:
             raise RuntimeError(up.stderr or up.stdout)
