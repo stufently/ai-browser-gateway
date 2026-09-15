@@ -253,6 +253,12 @@
   эквивалентен контракту. Проверить probe-only на авторских tests и добавить
   мутации global browser N/wrapper args/options. Автор cx тесты ещё не меняет;
   первый пакет сохраняется, Grok исправляет только свой harness/доказательства.
+  Параллельно возобновлён автор cx только для недостающего Grok initial на
+  неизменном историческом REVIEW909ed88: задача `cache/m11-grok-initial-only.md`,
+  attempt `t-1b0cdfbaed75-a01` running, панель cx-abg-m11-api-cli-20260915,
+  модель gpt-6-astra high. Output `cache/m11/grok-initial/`, watcher
+  `cache/m11-grok-initial-author-watch.log`. Код/тесты/готовый author packet
+  не меняются; Grok verify отложен до результата мутаций и возможных фиксов.
   Контракт/BASE и остальные требования приёмки неизменны. Блокер машинной
   оснастки всё ещё воспроизводим по текущему исходнику; чужие scripts не менять.
   Дополнительная зависимость машинного gate: accept_run.py:300 требует
