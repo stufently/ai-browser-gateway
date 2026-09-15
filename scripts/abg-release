@@ -1,0 +1,162 @@
+#!/usr/bin/env python3
+"""Prepare a versioned release directory from git archive of one commit."""
+from __future__ import annotations
+
+import hashlib
+import io
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import tarfile
+
+_SHA = re.compile(r'[0-9a-f]{40}')
+_FLAGS = ('--repo', '--sha', '--root')
+
+
+def fail():
+    print('{"error":"invalid_configuration"}', file=sys.stderr)
+    return 1
+
+
+def git(repo, *args):
+    return subprocess.run(
+        ['git', '-C', str(repo), *args], capture_output=True, timeout=60,
+        stdin=subprocess.DEVNULL)
+
+
+def members(raw):
+    files = {}
+    with tarfile.open(fileobj=io.BytesIO(raw), mode='r:') as tar:
+        for item in tar.getmembers():
+            name = item.name
+            if name.endswith('/'):
+                continue
+            path = Path(name)
+            if (item.issym() or item.islnk() or not item.isreg()
+                    or path.is_absolute() or '..' in path.parts
+                    or not name or name.startswith('/')):
+                raise ValueError
+            handle = tar.extractfile(item)
+            if handle is None:
+                raise ValueError
+            mode = item.mode & 0o777
+            files[name] = (handle.read(), 0o755 if mode & 0o111 else 0o644)
+    if not files:
+        raise ValueError
+    return files
+
+
+def snapshot(release: Path):
+    found = {}
+    for path in release.rglob('*'):
+        if path.is_file():
+            found[str(path.relative_to(release))] = (
+                path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+    return found
+
+
+def write_tree(root: Path, files):
+    root.mkdir(parents=True, exist_ok=True)
+    os.chmod(root, 0o755)
+    for name, (data, mode) in files.items():
+        dest = root / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        for folder in [dest.parent, *dest.parent.parents]:
+            if folder == root or root in folder.parents:
+                os.chmod(folder, 0o755)
+        fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
+        try:
+            os.write(fd, data)
+            os.fchmod(fd, mode)
+        finally:
+            os.close(fd)
+    os.chmod(root, 0o755)
+
+
+def manifest(root: Path, sha, files):
+    folder = root / 'manifests'
+    folder.mkdir(parents=True, exist_ok=True)
+    os.chmod(folder, 0o755)
+    lines = [
+        hashlib.sha256(data).hexdigest() + '  ' + name
+        for name, (data, _mode) in sorted(files.items())
+    ]
+    path = folder / (sha + '.sha256')
+    if path.exists():
+        return
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+    try:
+        os.write(fd, ('\n'.join(lines) + '\n').encode())
+        os.fchmod(fd, 0o644)
+    finally:
+        os.close(fd)
+
+
+def prepare(repo, sha, root):
+    repo, root = Path(repo), Path(root)
+    if not _SHA.fullmatch(sha) or not repo.is_dir():
+        raise ValueError
+    typed = git(repo, 'cat-file', '-t', sha)
+    parsed = git(repo, 'rev-parse', '--verify', sha + '^{commit}')
+    if (typed.returncode or typed.stdout.strip() != b'commit'
+            or parsed.returncode or parsed.stdout.strip() != sha.encode()):
+        raise ValueError
+    archived = git(repo, 'archive', '--format=tar', sha)
+    if archived.returncode:
+        raise ValueError
+    files = members(archived.stdout)
+    releases = root / 'releases'
+    final = releases / sha
+    if final.is_symlink():
+        raise ValueError
+    if final.exists():
+        if snapshot(final) != {name: (data, mode) for name, (data, mode) in files.items()}:
+            raise ValueError
+        manifest(root, sha, files)
+        return
+    releases.mkdir(parents=True, exist_ok=True)
+    os.chmod(releases, 0o755)
+    staging = releases / ('.tmp-' + sha + '-' + os.urandom(4).hex())
+    try:
+        write_tree(staging, files)
+        try:
+            os.rename(staging, final)
+        except OSError:
+            raise ValueError from None
+    except Exception:
+        if staging.exists():
+            for path in sorted(staging.rglob('*'), reverse=True):
+                path.unlink() if path.is_file() else path.rmdir()
+            staging.rmdir()
+        raise
+    os.chmod(final, 0o755)
+    manifest(root, sha, files)
+
+
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if not argv or argv[0] != 'prepare':
+        return fail()
+    argv = argv[1:]
+    values = {}
+    while argv:
+        if argv[0] in _FLAGS and len(argv) > 1:
+            values[argv[0][2:]] = argv[1]
+            argv = argv[2:]
+        else:
+            return fail()
+    if set(values) != {'repo', 'sha', 'root'}:
+        return fail()
+    try:
+        prepare(values['repo'], values['sha'], values['root'])
+    except (OSError, ValueError, tarfile.TarError, subprocess.SubprocessError):
+        return fail()
+    print('prepared')
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
