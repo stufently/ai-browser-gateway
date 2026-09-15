@@ -1,6 +1,4 @@
-"""Deployed API entry: fail-closed files, rotation, labeled provider runs."""
-from __future__ import annotations
-
+"""Fail-closed service entry, rotation, labeled provider runs."""
 import os
 from pathlib import Path
 import re

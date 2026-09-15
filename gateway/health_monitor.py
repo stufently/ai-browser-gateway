@@ -1,6 +1,4 @@
-"""Sidecar health loop: GET /health, then ping or ping/fail. No secrets in logs."""
-from __future__ import annotations
-
+"""Sidecar health loop: GET /health, then ping or ping/fail."""
 import json
 import math
 import os

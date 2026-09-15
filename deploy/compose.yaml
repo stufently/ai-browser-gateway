@@ -30,13 +30,7 @@ services:
       - ${ABG_TOKEN_FILE}:/run/abg/token:ro
       - ${ABG_PROFILES_FILE}:/run/abg/proxies.toml:ro
     healthcheck:
-      test:
-        [
-          "CMD",
-          "python3",
-          "-c",
-          "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=4)); raise SystemExit(0 if isinstance(d, dict) and d.get('ok') is True else 1)",
-        ]
+      test: ["CMD", "python3", "-c", "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=4)); raise SystemExit(0 if isinstance(d, dict) and d.get('ok') is True else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3

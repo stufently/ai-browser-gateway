@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Scoped live M12a stand. Host orchestrates Docker; assertions run inside."""
+"""Scoped live M12a: host orchestrates Docker, assertions run inside."""
 import json
 import os
 from pathlib import Path
@@ -35,8 +35,13 @@ def private(path, data):
     return path
 
 
+def _http(handler, addr):
+    from http.server import ThreadingHTTPServer
+    ThreadingHTTPServer(addr, handler).serve_forever()
+
+
 def proxy():
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
     from urllib.request import Request, urlopen
 
     class Handler(BaseHTTPRequestHandler):
@@ -54,11 +59,11 @@ def proxy():
             self.end_headers()
             self.wfile.write(body)
 
-    ThreadingHTTPServer(('0.0.0.0', 8126), Handler).serve_forever()
+    _http(Handler, ('0.0.0.0', 8126))
 
 
 def receiver(port):
-    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from http.server import BaseHTTPRequestHandler
     from threading import Lock
     hits, lock = [], Lock()
 
@@ -68,19 +73,18 @@ def receiver(port):
 
         def do_GET(self):
             path = self.path.split('?', 1)[0]
-            if path == '/hits':
-                with lock:
+            with lock:
+                if path == '/hits':
                     body = json.dumps(hits).encode()
-            else:
-                with lock:
+                else:
                     hits.append(path)
-                body = b'ok'
+                    body = b'ok'
             self.send_response(200)
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
             self.wfile.write(body)
 
-    ThreadingHTTPServer(('127.0.0.1', int(port)), Handler).serve_forever()
+    _http(Handler, ('127.0.0.1', int(port)))
 
 
 def inner(run, api_port, stand_port, recv_port):

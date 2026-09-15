@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """Prepare a versioned release directory from git archive of one commit."""
-from __future__ import annotations
-
 import hashlib
 import io
 import os
@@ -59,14 +57,9 @@ def snapshot(release: Path):
 
 
 def write_tree(root: Path, files):
-    root.mkdir(parents=True, exist_ok=True)
-    os.chmod(root, 0o755)
     for name, (data, mode) in files.items():
         dest = root / name
         dest.parent.mkdir(parents=True, exist_ok=True)
-        for folder in [dest.parent, *dest.parent.parents]:
-            if folder == root or root in folder.parents:
-                os.chmod(folder, 0o755)
         fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
         try:
             os.write(fd, data)
@@ -74,6 +67,9 @@ def write_tree(root: Path, files):
         finally:
             os.close(fd)
     os.chmod(root, 0o755)
+    for path in root.rglob('*'):
+        if path.is_dir():
+            os.chmod(path, 0o755)
 
 
 def manifest(root: Path, sha, files):

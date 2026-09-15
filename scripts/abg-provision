@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 """Build ms1..ms15 HTTP proxy profiles from PROXY_LOGIN/PROXY_PASSWORD."""
-from __future__ import annotations
-
 import json
 import os
 from pathlib import Path
