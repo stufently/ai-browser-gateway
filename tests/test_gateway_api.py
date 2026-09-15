@@ -2,10 +2,38 @@ import socket
 import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
+from http.client import HTTPConnection
+import json
 from tests.m11_helpers import URL, TOKEN, reply, serving, request
 
 
 class APITests(unittest.TestCase):
+    def test_duplicate_json_keys_rejected_before_factory(self):
+        from gateway.httpapi import make_server
+        calls = []
+        def factory(url, **kw):
+            calls.append(url)
+            return lambda s, b: reply()
+        bodies = [
+            '{"url":"https://example.invalid/a","url":"https://example.invalid/b"}',
+            '{"url":"https://example.invalid/a","format":"text","format":"html"}',
+            '{"url":"https://example.invalid/a","budget_ms":1000,"budget_ms":1000}',
+        ]
+        with serving(make_server(('127.0.0.1', 0), token=TOKEN, fetcher_factory=factory)) as addr:
+            for body in bodies:
+                with self.subTest(body=body):
+                    conn = HTTPConnection(*addr, timeout=8)
+                    try:
+                        conn.request('POST', '/v1/fetch', body.encode(),
+                                     {'Authorization': 'Bearer ' + TOKEN,
+                                      'Content-Type': 'application/json'})
+                        res = conn.getresponse()
+                        self.assertEqual((res.status, json.loads(res.read())),
+                                         (400, {'error': 'invalid_request'}))
+                    finally:
+                        conn.close()
+            self.assertEqual(calls, [], 'duplicate JSON reached the fetcher factory')
+
     def test_deep_html_keeps_success_for_all_parsed_formats(self):
         from gateway.httpapi import make_server
         html = '<h1><a href="/x">' + '<span>' * 2000 + 'visible' + '</span>' * 2000 + '</a></h1>'
@@ -100,3 +128,66 @@ class APITests(unittest.TestCase):
             limit_fetcher(broken, gate, url=URL)(step, 100)
         self.assertTrue(gate.acquire(blocking=False))
         gate.release()
+
+    def test_configured_browser_limit_admits_two_and_bounds_queue(self):
+        from gateway.httpapi import make_server
+        entered = [threading.Event(), threading.Event()]
+        release, queued_http = threading.Event(), threading.Event()
+        active, maximum, browser_urls = [0], [0], []
+        lock = threading.Lock()
+        def factory(url, **kw):
+            def fetch(step, budget):
+                if step.provider == 'curl':
+                    if url.endswith('/queued'):
+                        queued_http.set()
+                    return reply(status=403)
+                with lock:
+                    browser_urls.append(url)
+                    active[0] += 1
+                    maximum[0] = max(maximum[0], active[0])
+                if url.endswith('/first'):
+                    entered[0].set()
+                elif url.endswith('/second'):
+                    entered[1].set()
+                try:
+                    if not release.wait(6):
+                        raise RuntimeError('test gate timed out')
+                    return reply(step.provider)
+                finally:
+                    with lock:
+                        active[0] -= 1
+            return fetch
+        server = make_server(('127.0.0.1', 0), token=TOKEN, browser_limit=2,
+                             fetcher_factory=factory)
+        with serving(server) as addr, ThreadPoolExecutor(3) as pool:
+            first = pool.submit(request, addr, {'url': URL + '/first'})
+            second = pool.submit(request, addr, {'url': URL + '/second'})
+            try:
+                self.assertTrue(all(event.wait(2) for event in entered),
+                                'configured browser_limit=2 must admit two held calls')
+                with lock:
+                    self.assertEqual(active[0], 2)
+                queued = pool.submit(request, addr, {'url': URL + '/queued', 'budget_ms': 200})
+                self.assertTrue(queued_http.wait(2))
+                status, value = queued.result(3)
+                self.assertEqual(status, 200)
+                self.assertFalse(value['ok'])
+                self.assertEqual(value['error_type'], 'timeout')
+                self.assertIsNone(value['attempts'][-1]['status'])
+                with lock:
+                    self.assertNotIn(URL + '/queued', browser_urls)
+                    self.assertEqual(active[0], 2)
+                self.assertEqual(request(addr, method='GET', path='/health'), (200, {'ok': True}))
+            finally:
+                release.set()
+            for future in (first, second):
+                status, value = future.result(3)
+                self.assertEqual(status, 200)
+                self.assertTrue(value['ok'])
+            status, value = request(addr, {'url': URL + '/after-release'})
+            self.assertEqual(status, 200)
+            self.assertTrue(value['ok'])
+        self.assertEqual(maximum[0], 2)
+        self.assertEqual(active[0], 0)
+        self.assertCountEqual(browser_urls, [URL + suffix for suffix in
+                                            ('/first', '/second', '/after-release')])
