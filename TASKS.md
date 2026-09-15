@@ -228,7 +228,18 @@
   общий лимит браузеров с ожиданием внутри бюджета. Runtime в Docker1002.
   Контракт `docs/specs/m11-api-cli-contract.md` зафиксирован; execution-спека
   `docs/specs/m11-api-cli.md` пока DRAFT с placeholders, не запускать автора.
-  Следующий шаг — независимый probe/два эталона Grok, затем явный cx.
+  Grok готовит независимый probe/два эталона; затем явный cx.
+  BASE обоих клонов f336f266e22b5b5c6a31b3c30806c617f6fd3276. Подготовка:
+  `/home/user/exec-clones/abg-m11-probes-20260915`, ветка m11-probes,
+  `gk-abg-m11-probes-20260915`, attempt t-a8c73d0e9e83-a01 running.
+  Задание `cache/m11-probe-preparation.md`, пакет `cache/m11/probe/`,
+  watcher `cache/m11-probes-watch.log`. Клон автора заранее создан:
+  `/home/user/exec-clones/abg-m11-api-cli-20260915`, ветка m11-api-cli;
+  автор пока НЕ запущен. В обоих клонах origin push отключён.
+  Окончательный контракт SHA256
+  80248e5768bd165f0e8ea4e0686e704f0c381b74030e4008b87569e3ec2a59ce.
+  Финализировать execution-спеку из `cache/m11-execution-draft.md` после
+  принятия probe, не менять BASE и контракт задним числом.
   Транспорт M10 не переписывать; `cf-fetch` и потребителей не переключать.
 
 - [ ] **M12 — сервис, пул и deployed-прогон.** Compose в
