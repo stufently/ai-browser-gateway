@@ -467,28 +467,58 @@
   BASE и контракт задним числом не менять. После принятой M11 продолжить M12.
   Транспорт M10 не переписывать; `cf-fetch` и потребителей не переключать.
 
-- [ ] **M12 — сервис, пул и deployed-прогон: подготовка M12a.**
-  M12 разделена на M12a (код/локальные проверки) и M12b (развёртывание,
- 15proxy/all-valid-targets). Ответ на выбор разреза пустой, выбран рекомендуемый;
-  оба этапа уже авторизованы, перед M12b новой авторизации не требуется.
-  Grok-разведка принята: `t-8f6a9317325f-a01`, клон
-  `/home/user/exec-clones/abg-m12-recon-20260915`, BASE `92d8ad5`.
-  Задание `docs/specs/m12-recon.md`. Пакет
-  `/home/user/.cache/abg-coord-20260915/m12/recon-result.md`, SHA256
-  `ceaf2f6efcad8cb8027fef695bd5903de2ad3140e3e3cc21491eb408ac9543e7`.
-  Manifest `d664cf0247deff90aede572b187a0703a34c36e1cc70fc98fd01f5c872450b22`,
-  78/78hashes pass. Round1 сохранён; исправлены SHA/пути manifest и неизвестные
-  исторические rc, host-import продукта не было. Клон чист, панель закрыта.
-  Факты: service-dir отсутствует,8765свободен, socket gid983; runtime Python
-  3.14.7/DockerCLI29.8.0 registry pins подтверждены. API main не грузит profiles.
-  Контракт `docs/specs/m12a-service-contract.md` опубликован `89a7c95`.
-  Продукт M12a пишет Grok (Spark исчерпан); противоположный cx готовит только
-  независимые probes/эталоны до автора: `t-32c88bfc1f12-a01`, панель
-  `cx-abg-m12a-probes-20260915`, клон
-  `/home/user/exec-clones/abg-m12a-probes-20260915`, BASE `89a7c95`.
-  Задание `cache/m12/probe-task.md` в cache20260915 выше, пакет `m12/probe/`,
-  сторож `m12/probe-watch.log`. Push отключён. После принятого frozen probe —
-  execution-спека на свежем main, preflight/BASEпроверки и Grok-реализация.
+- [ ] **M12 — подготовка probe M12a принята; STOP по владельцу15.09.**
+  **Финальный handoff:** текущий `cx-abg-m12a-probes-20260915` завершён,
+  подготовка принята; панель закрыта после пустого ввода, отсутствия фоновых
+  команд и своих Docker-контейнеров. Попытка `t-32c88bfc1f12-a01` accepted.
+  Новые вехи, панели и разведки НЕ запускать без нового решения владельца.
+  Реализация M12a, production deployment и M12b НЕ начаты; сервис не готов.
+
+  Принятый probe: commit `6b54caf5ecf6687958fda86a07d88f87152e824a`,
+  опубликован в `origin/accepted-m12a-probes-20260915`, в main не влит:
+  он проверяет ещё отсутствующий M12service. Единственный новый файл
+  `tests/probe_m12_service.py`, 36067bytes,20testmethods, SHA256
+  `2b5713ea3d3b743a6c469bd26bd893cb343f132b83deb7eadc6182e007ad71e0`.
+  Клон `/home/user/exec-clones/abg-m12a-probes-20260915`, BASE
+  `89a7c9535ffcdc461a7f10707a679e13a08300ae`, clean, origin push DISABLED.
+  Исполнитель cx/gpt-6-astra high; код сервиса он не писал.
+
+  Пакет `/home/user/.cache/abg-coord-20260915/m12/probe/preparation-result.md`,
+  SHA256 `e3051b4cec6182f35123b646ac244266a9e22ec35928ed256184d288538a0298`.
+  Manifest `c1a4d5d7194ad4c2046214ee3426883c8acf87681b0499224e449e97f3c7cd3e`:
+  795datahashes/modes/size совпали;2самоссылочные записи отдельно (797entries).
+  Координатор прочитал весьprobe, обаэталона, runner/mutations/audit/package;
+  проверил36семантических отказов (18вариантов ×2эталона), source/restoreSHA,
+  строкиassertions, неизменностьprobe/контракта и378metadata-checks.
+  Собственный Docker1002:1002 replay: BASE rc1,20missing-APIassertions/0errors;
+  эталонA20/20rc0 (35.401s), эталонB20/20rc0 (35.210s). Все мутации —
+  содержательныеassertion-red,0survivors/fixtureerrors; эталоны восстановлены.
+  Логи/команды/rc: `m12/acceptance/{replay.json,base.log,reference-a.log,
+  reference-b.log,evidence-check.json,scoped-containers.json}` вcacheвыше.
+
+  Это приёмка независимого probe, НЕ реализации/деплоя M12a. Машинный v2gate
+  и продуктовые Codex/Gemini reviews здесь не заявлены: подготовительное
+  задание их не требовало. Пробник использует PythonCLI и fakegit archive;
+  настоящий git/runtime/Compose/labels/cleanup/browser/live остаются будущей
+  приёмке. Новые авторскиеtests будущего продукта потребуют чужихмутаций.
+  Эталоны/обходы/контекст подготовки НЕ передавать автору продукта; только
+  byte-identicalprobe и `m12/probe/probe-baseline.md` после нового разрешения.
+  Дополнительный полный bundle `m12/accepted-m12a-probes.bundle`, проверен,
+  SHA256 `6af7f93c0c59c151425705fcd6be7bbacb9d505679ae7a0ef8bf44a29dc3ab26`.
+
+  Разведка M12 Grok ранее принята (`t-8f6a9317325f-a01`), панель закрыта:
+  `m12/recon-result.md` SHA256
+  `ceaf2f6efcad8cb8027fef695bd5903de2ad3140e3e3cc21491eb408ac9543e7`,
+  manifest `d664cf0247deff90aede572b187a0703a34c36e1cc70fc98fd01f5c872450b22`,
+  78hashes pass; round1/unknown historicalrc сохранены. Service-dir отсутствовал,
+  8765свободен, socketgid983, registry Python3.14.7/DockerCLI29.8.0 проверены.
+  Контракт `docs/specs/m12a-service-contract.md` вmain (`89a7c95`), SHA256
+  `9231045abeef2a7eef8722ac655f4121d824bdec883d50f421654917b88b58df`.
+  Черновик `m12/m12a-execution-draft.md` вcache имеет HOLD/placeholders,
+  не preflight-ready и не разрешён к запуску. После нового решения владельца:
+  свежийBASE/клон, freeze execution-spec с принятымprobe, preflight и BASEchecks;
+  затем M12a implementation → приёмка → M12b deployment/15proxy/6targets.
+  Разрез на два этапа выбран при пустом ответе на вопрос, скоуп не снят.
   Compose в
   `/home/user/services/ai-browser-gateway/`, только loopback-публикация,
   Docker1002, проверенные registry pins, healthcheck и настоящий периодический
@@ -513,8 +543,8 @@
   Предпочтение постановщика: реализация/фиксы на cx, gk только для необходимых
   независимых этапов. M10 уже принята; повторных исполнительских прогонов нет.
   M11 принята владельцем, влита; технический journal/gate-блокер закрыт
-  решением15.09, оснастку не менять. M12 разрешена и разведка принята;
-  текущий шаг — независимая подготовка probe M12a, затем execution-спека.
+  решением15.09, оснастку не менять. Разведка и подготовка probe M12a
+  приняты; дальнейший запуск остановлен последней директивой владельца.
   Проект ещё НЕ готов к использованию: M9–M11 приняты, развёрнутый сервис
   и итоговый deployed-прогон остаются в M12.
 
