@@ -251,21 +251,45 @@
   `cache/m11-mutations-first-return.md`: tracing не видит дочерний copied CLI;
   M07 падает на normal release до exception, M13 неверно назван/может быть
   эквивалентен контракту. Проверить probe-only на авторских tests и добавить
-  мутации global browser N/wrapper args/options. Автор cx тесты ещё не меняет;
-  первый пакет сохраняется, Grok исправляет только свой harness/доказательства.
-  Параллельно возобновлён автор cx только для недостающего Grok initial на
+  мутации global browser N/wrapper args/options. Первый пакет сохранён.
+  Return run041242-843367:10killed/1survived/0invalid, baseline/postgreen.
+  M13 raw survived сохранён, но представленное поведение не нарушает контракт:
+  CLI не обязан отсеивать userinfo до HTTP, сервер отклоняет запрос до factory.
+  Этот сценарий исключён из квалифицированных мутаций, не переименован в kill.
+  M13r отдельно проверяет допустимый response href. Подтверждены пять пробелов
+  авторских tests: M03 duplicateJSON, M16 redirect receiver, M18 browserN2,
+  M19 token в Docker argv, M20 expected_text/options. Возврат тому же cx
+  `cache/m11-mutation-test-fixes.md`; создан test-only e6f7f0c844ebf9fa3d6d1194d921302e8ab1d211,
+  предварительно10targetedgreen и пять неизменных Grokpatches red/green.
+  На этом SHA выполняются6AC и Codex+Gemini reviews только нового test-delta.
+  Координатор прочитал return-harness69/204/1012строк, проверил manifests
+  16/664/193/244 и source/restore SHA: `cache/m11/coordinator-mutation-return-check.json`.
+  До финального независимого прогона Grok исправляет изоляцию child trace-dir
+  и добавляет парный instrumentation-on green baseline:
+  `cache/m11-mutation-trace-controls.md`. Первый829-строчный harness не был
+  сохранён автором до замены; это явно отмечено. На новом FINAL требуется
+  полная свежая серия с заранее сохранённым harness, без подмены истории.
+  Старый объединённый пакет заморожен с раскрытыми symlinks в
+  `cache/m11/history/mutation-package-7c424f9-before-author-test-fixes/`.
+  Параллельно автор cx был возобновлён для недостающего Grok initial на
   неизменном историческом REVIEW909ed88: задача `cache/m11-grok-initial-only.md`,
   attempt `t-1b0cdfbaed75-a01` running, панель cx-abg-m11-api-cli-20260915,
   модель gpt-6-astra high. Output `cache/m11/grok-initial/`, watcher
-  `cache/m11-grok-initial-author-watch.log`. Код/тесты/готовый author packet
-  не меняются; Grok verify отложен до результата мутаций и возможных фиксов.
+  `cache/m11-grok-initial-author-watch.log`. Initial завершён04:18UTC, rc0,
+  полный отрицательный вердикт: две находки, обе уже fixed вdb83793/7c424f9.
+  Канонический input99844bytes SHAd1ac722a8a6c783cc3083d4b9f0c24180eb9e77b358fb23b9d4e62409316ba9c;
+  manifest52entries проверен. Оговорка: raw упоминает поздние commits и прежние
+  Codex reviews, строгая независимость initial не подтверждена. Receipt/raw
+  и оговорка сохранены; успешный historical initial не повторяется.
+  Эта же cx-панель сейчас закрывает пять test-gaps. Продукт неизменен;
+  Grok verify отложен до результата мутаций и окончательного test-SHA.
   Контракт/BASE и остальные требования приёмки неизменны. Блокер машинной
   оснастки всё ещё воспроизводим по текущему исходнику; чужие scripts не менять.
   Дополнительная зависимость машинного gate: accept_run.py:300 требует
   пару agy+grok для executor.backend=codex. После результата мутаций завершить
   оставшиеся reviews на точных снимках, не повторяя валидные Codex/Gemini.
   Сохранить готовую реализацию/доступные проверки, затем завершить оставшиеся
-  квитанции и полный gate после reset. Подмена backend/квитанций запрещена.
+  квитанции и полный gate после исправления оснастки. Подмена backend/квитанций запрещена.
   BASE обоих клонов f336f266e22b5b5c6a31b3c30806c617f6fd3276. Подготовка:
   `/home/user/exec-clones/abg-m11-probes-20260915`, ветка m11-probes,
   `gk-abg-m11-probes-20260915`, attempt t-a8c73d0e9e83-a01 blocked.
