@@ -470,8 +470,22 @@
 - [ ] **M12 — возобновлена по обновлённой директиве владельца15.09.**
   **Позднее решение15.09: «форсируй все задачи» — STOP снят.** Продолжить
   M12a и следующие разрешённые пункты обычным флоу, сессию не закрывать.
-  **Сейчас: Grok реализует M12a**, попытка `t-4d3f90646502-a01`, панель
-  `gk-abg-m12a-service-20260915`, хозяин `cxc-ai-browser-gateway`.
+  **Сейчас: M12a требует новой вехи после verify.** Grok сохраняет пакет
+  `t-4d3f90646502-a01`, панель `gk-abg-m12a-service-20260915`.
+  REVIEW `53ca5f95babb157885bb44d0ae0a428360aa6704`, FINAL
+  `62de539f586b95e6aeb971c3ab1f51e6f7080260`, handoff_status=needs_owner.
+  verify-codex-1:F001: ожидающий browser semaphore обработчик может создать
+  provider после последнего sweep при shutdown. Sleep0.2 и повторная уборка
+  гонку не закрывают. Код НЕ принят/НЕ влит/НЕ опубликован; M12b ещё не начата.
+  По действующему правилу исправление пойдёт новой вехой BASE=этот FINAL.
+  Чтобы собрать единый список, подготовлено независимое задание
+  `docs/specs/m12a-shutdown-probes.md`: мутации шести новых авторских unit-tests
+  и frozen regression probe остановки с двумя эталонами/обходами.
+  Клон `/home/user/exec-clones/abg-m12a-shutdown-probes-20260915`, branch
+  m12a-shutdown-probes, BASE=62de539, push DISABLED. Попытка cx не запустилась:
+  общий лимит4живых попыток. После завершения пакета Grok закрыть только нашу
+  панель и повторить подготовленный cx запуск при свободном слоте.
+  Пакет подготовки ожидается в `m12/shutdown-probe/` вcacheниже.
   Execution-спека `docs/specs/m12a-service.md`, SHA256
   `5acfb7e415b6e23d636537877caed13a3bcf54d9ee7575ab90199169695faeb9`.
   Клон `/home/user/exec-clones/abg-m12a-service-20260915`, ветка m12a-service,
@@ -486,9 +500,11 @@
   21хеш проверен. Свои test-containers отсутствуют, добавившиеся MCPsidecars
   отделены по образам/времени; чужие контейнеры не трогались. Подготовительная
   панель закрыта idle с пустым вводом, реализация запущена отдельным заданием.
-  Пакет автора ожидается в `m12/author/`, сторож `author/watch.log`, PID
-  `author/watch.pid` вcacheвыше (detached setsid). После пакета: независимые
-  мутации новых авторскихtests, полная приёмка/diff/reviews/v2gate/live, merge.
+  Пакет автора собирается в `m12/author/`, сторож `author/watch.log`, PID
+  `author/watch.pid` вcacheвыше (detached setsid). Старый preflight-сторож
+  завершён по проверенному собственному PID. Следующий шаг — независимая
+  подготовка, затем новая спека/клон/Grok для исправления после verify.
+  Полная приёмка/diff/reviews/v2gate/live и merge — после закрытия дефектов.
   План следующего этапа `docs/specs/m12b-deployment-plan.md` ещё НЕ execution-
   спека; production deployment начнётся после приёмки M12a. Сервис пока не готов.
   **Предыдущий handoff (остановка отменена решением выше):**
