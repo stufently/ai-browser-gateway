@@ -254,7 +254,9 @@
   Задание `cache/m11-probe-preparation.md`, пакет `cache/m11/probe/`,
   watcher `cache/m11-probes-watch.log`. Клон автора заранее создан:
   `/home/user/exec-clones/abg-m11-api-cli-20260915`, ветка m11-api-cli;
-  подготовка принята, запуск отдельного автора разрешён.
+  подготовка принята; автор запущен отдельной панелью
+  `cx-abg-m11-api-cli-20260915`, attempt t-4b15b59fa8c8-a01 running.
+  Watcher `cache/m11-author-watch.log`; пакет автора `cache/m11/author/`.
   В обоих клонах origin push отключён.
   Окончательный контракт SHA256
   80248e5768bd165f0e8ea4e0686e704f0c381b74030e4008b87569e3ec2a59ce.
