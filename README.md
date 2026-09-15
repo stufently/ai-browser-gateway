@@ -118,3 +118,40 @@ python3 tests/mutation_gate_gateway.py  # 5 мутаций ядра M7
   хост, и провал засчитывался успехом.
 - **Замер без egress ничего не доказывает.** Один и тот же образ с одним
   отпечатком получает 200 с одного адреса и 403 с другого.
+
+## M11 HTTP / CLI
+
+Local interfaces; deployed service/pool/monitoring belong to M12.
+From the clone root, with an existing test `ABG_TOKEN`:
+
+```bash
+docker run --rm --user 1002:1002 \
+  --group-add "$(stat -c %g /var/run/docker.sock)" \
+  -p 127.0.0.1:8765:8765 -v "$PWD:$PWD:ro" -w "$PWD" \
+  -v /usr/bin/docker:/usr/bin/docker:ro \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e ABG_TOKEN \
+  python@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 \
+  python3 -m gateway.httpapi
+scripts/abg-fetch https://example.org markdown
+```
+
+`abg-fetch URL [text|html|markdown|links|meta]` defaults to text. Docker client:
+UID1002, host network, RO file, symlinks supported; image override `ABG_CLIENT_IMAGE`.
+`ABG_TOKEN` precedes `ABG_TOKEN_FILE`. CLI mounts the file (default host
+`$HOME/.config/abg/client-token`); server needs a RO mount readable by UID1002.
+Missing/invalid token fails closed. No token values in argv/repo.
+
+Env defaults (all names prefixed `ABG_`): server `BIND=0.0.0.0`, `PORT=8765`,
+`BROWSER_LIMIT=1`; client `URL=http://127.0.0.1:8765/v1/fetch`, `BUDGET_MS=30000`
+(cap 180000), `MAX_AGE_HOURS=0`, `ALLOW_BROWSER=1` (only 0/1), `EXPECTED_TEXT` unset/null.
+
+`GET /health` needs no auth. `POST /v1/fetch` requires Bearer, Content-Length,
+application/json: `url`, optional `format`, `budget_ms`, `max_age_hours`,
+`allow_browser`, `expected_text`. Invalid input: 400; product outcomes: 200,
+even `ok:false` (empty content). CLI prints selected strings or JSON links/meta.
+HTTP/network/schema/okfalse: nonzero rc, empty stdout, static JSON stderr; no redirects.
+Trace `attempts`: provider/profile names, status/challenge, timing, decisions;
+no proxy credentials/intermediate pages. Total budget includes shared browser-slot
+waiting; HTTP/RSS/Wayback/health bypass slots. M10 owns policy.
+Live JS/Docker assertions: `python3 tests/live_m11_api.py`.

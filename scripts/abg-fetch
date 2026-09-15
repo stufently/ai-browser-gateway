@@ -1,0 +1,23 @@
+#!/bin/bash
+# Resolve service/bin symlinks before locating the standalone bind mount.
+fail() { printf '%s\n' '{"error":"client_error"}' >&2; exit 1; }
+source_path=$(readlink -f -- "${BASH_SOURCE[0]}") || fail
+client=$(dirname -- "$source_path")/../gateway/client.py
+client=$(readlink -f -- "$client") || fail
+args=(run --rm --user 1002:1002 --network host
+      --mount "type=bind,source=$client,target=/client.py,readonly"
+      -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1)
+for key in ABG_URL ABG_BUDGET_MS ABG_MAX_AGE_HOURS ABG_ALLOW_BROWSER ABG_EXPECTED_TEXT; do
+    if [[ -v $key ]]; then args+=(-e "$key"); fi
+done
+if [[ -v ABG_TOKEN ]]; then
+    args+=(-e ABG_TOKEN)
+else
+    token_file=${ABG_TOKEN_FILE:-$HOME/.config/abg/client-token}
+    case "$token_file" in '~/'*) token_file="$HOME/${token_file:2}" ;; esac
+    [[ -f $token_file && -r $token_file ]] || fail
+    token_file=$(readlink -f -- "$token_file") || fail
+    args+=(--mount "type=bind,source=$token_file,target=/client-token,readonly" -e ABG_TOKEN_FILE=/client-token)
+fi
+image=${ABG_CLIENT_IMAGE:-python@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6}
+docker "${args[@]}" "$image" python3 /client.py "$@" 2>/dev/null || fail
