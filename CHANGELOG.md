@@ -4,6 +4,10 @@
 
 ### Добавлено
 
+- **HTTP API и CLI (M11):** аутентификация токеном, проверка URL и параметров,
+  ответ с содержимым и trace, общий лимит браузеров с ожиданием внутри бюджета.
+  `scripts/abg-fetch` поддерживает text/html/markdown/links/meta; API работает
+  в Docker. Существующие `cf-fetch` и потребители не переключены.
 - **Продуктовый вход M10:** `ProductRequest`, `ProductFetcher`, `run_product` и
   явный `fetch_content` доставляют страницу без обязательного sentinel.
   Лестница использует входы по свежести, curl, patchright, Scrapling и одну
