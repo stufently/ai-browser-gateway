@@ -227,7 +227,9 @@
   URL/свежесть/budget/expected_text, content+trace, пять режимов cf-fetch,
   общий лимит браузеров с ожиданием внутри бюджета. Runtime в Docker1002.
   Контракт `docs/specs/m11-api-cli-contract.md` зафиксирован; execution-спека
-  `docs/specs/m11-api-cli.md` пока DRAFT с placeholders, не запускать автора.
+  `docs/specs/m11-api-cli.md` заморожена после принятого probe, preflight pass.
+  SHA256 execution-спеки
+  0cdcd0feda30c6d90ce0b5abe662c59b51098ef9718c156b83a3ddd1def50f58.
   **Возобновлено по решению владельца 15.09: «Второй Codex на подготовку».**
   Подготовка probe + два эталона — отдельная новая cx-панель в указанном
   ниже клоне probes, без контекста и чтения клона автора. Автор — другая
@@ -252,19 +254,28 @@
   Задание `cache/m11-probe-preparation.md`, пакет `cache/m11/probe/`,
   watcher `cache/m11-probes-watch.log`. Клон автора заранее создан:
   `/home/user/exec-clones/abg-m11-api-cli-20260915`, ветка m11-api-cli;
-  автор пока НЕ запущен. В обоих клонах origin push отключён.
+  подготовка принята, запуск отдельного автора разрешён.
+  В обоих клонах origin push отключён.
   Окончательный контракт SHA256
   80248e5768bd165f0e8ea4e0686e704f0c381b74030e4008b87569e3ec2a59ce.
   Старое Grok-задание сохранено как история; новое задание подготовки:
   `cache/m11-probe-preparation-cx.md`. Запущена новая панель
-  `cx-abg-m11-probes-20260915`, attempt t-4106a3e48244-a01 running,
-  watcher `cache/m11-probes-cx-watch.log`. Отдельный cx пишет только probe
-  и два эталона, без доступа к авторским артефактам. После reset Grok — одна
+  `cx-abg-m11-probes-20260915`, attempt t-4106a3e48244-a01 accepted.
+  Панель закрыта после готового пакета; watcher `cache/m11-probes-cx-watch.log`.
+  Принятый probe commit f2ef5633bf9f574772fca9d4ee44d2ff010971bf,
+  SHA509d765167bd322d0b2f5c40127a95ed977760af8bd4a35c03a830267dc10997,
+  40049bytes,18methods. Координатор прочитал весьprobe/обаэталона/скрипты;
+  319hashes проверены, BASEred и обаcorrectrefgreen обоимиentrypoints,
+  16/16 assertionkills на одномSHA. Пакет `cache/m11/probe/preparation-result.md`,
+  SHAa93c5ff6a18231d14269e50207f92353053078f390bea0ce698e0e1456b280b5.
+  Обе серии замечаний закрыты: APIoptions/N2, header/default overspec,
+  MarkdownURLs, nav/headerlinks/meta, URLvalidationB. История сохранена.
+  Автору передан byte-identical probe и короткий `cache/m11/author/probe-baseline.md`,
+  без временных эталонов/обходов/контекста подготовительной панели. После reset Grok — одна
   обычная попытка независимых мутаций, quotaerror не циклировать.
-  Финализировать execution-спеку из
-  `cache/m11-execution-draft.md` после принятия probe, заменить все placeholders,
-  убрать DRAFT, доставить в клон автора и повторить preflight. Его нынешний
-  структурный pass не проверяет placeholders и не разрешает реализацию.
+  Окончательная копия execution-спеки `cache/m11-api-cli-frozen.md`;
+  placeholders удалены, в клон автора доставлена, preflight pass6критериев.
+  Ранние draft-файлы больше не являются заданиями.
   BASE и контракт задним числом не менять. После принятой M11 продолжить M12.
   Транспорт M10 не переписывать; `cf-fetch` и потребителей не переключать.
 

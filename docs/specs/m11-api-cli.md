@@ -1,7 +1,7 @@
 # M11 — HTTP API и CLI: execution-спека
 
-DRAFT: НЕ ЗАПУСКАТЬ реализацию до принятого независимого probe и замены
-всех placeholders координатором. Контракт уже окончательный.
+Спецификация заморожена после приёмки отдельной cx-подготовки15.09.2026.
+Решение владельца об одной модели учтено; Grok-мутации обязательны до M12.
 
 ## Шапка и где работать
 
@@ -83,10 +83,11 @@ host только orchestration. Run-scoped ресурсы/cleanup, loopback pub
 До запуска координатор доставляет точные файлы:
 - эту окончательную execution-спеку: закоммитить docs/specs/m11-api-cli.md
   без изменений; docs/specs/m11-api-cli-contract.md уже закоммичен в BASE;
-- tests/probe_m11_api_cli.py, SHA256 PROBE_PENDING, размер SIZE_PENDING;
+- tests/probe_m11_api_cli.py, SHA256 509d765167bd322d0b2f5c40127a95ed977760af8bd4a35c03a830267dc10997, размер 40049;
   коммитить byte-identical, не исправлять;
 - контракт уже в BASE; старые frozen probes уже там и неизменны.
-Probe preparation: /home/user/.cache/abg-coord-20260914/m11/probe/preparation-result.md.
+Краткая принятая baseline-сводка (без эталонов/контекста подготовки):
+/home/user/.cache/abg-coord-20260914/m11/author/probe-baseline.md.
 Эталоны/обходы не переносить в продукт. Зависимости только уже доступные Docker
 images; новых установок нет. Если чего-то нет — безопасный blocked report.
 
@@ -103,7 +104,7 @@ cf-fetch/skill/потребители/конфиги/профили/сервис
 - **AC-201.** Полный unittest:
   `bash -c 'docker run --rm --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest discover -q -s tests -t .'`
 - **AC-202.** Контракт и независимые probes:
-  `bash -c 'echo "80248e5768bd165f0e8ea4e0686e704f0c381b74030e4008b87569e3ec2a59ce  docs/specs/m11-api-cli-contract.md" | sha256sum -c - && echo "PROBE_PENDING  tests/probe_m11_api_cli.py" | sha256sum -c - && echo "699d66eb29233728518d176c3dcc01bd1fb5c6fc29cc4860e80f56fdbf7fc013  tests/probe_m10_product.py" | sha256sum -c - && echo "4391024b03139e508978d86244cc27a81d386d5fbeea9d3c543fb1e424719190  tests/probe_m9_transport.py" | sha256sum -c - && docker run --rm --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli'`
+  `bash -c 'echo "80248e5768bd165f0e8ea4e0686e704f0c381b74030e4008b87569e3ec2a59ce  docs/specs/m11-api-cli-contract.md" | sha256sum -c - && echo "509d765167bd322d0b2f5c40127a95ed977760af8bd4a35c03a830267dc10997  tests/probe_m11_api_cli.py" | sha256sum -c - && echo "699d66eb29233728518d176c3dcc01bd1fb5c6fc29cc4860e80f56fdbf7fc013  tests/probe_m10_product.py" | sha256sum -c - && echo "4391024b03139e508978d86244cc27a81d386d5fbeea9d3c543fb1e424719190  tests/probe_m9_transport.py" | sha256sum -c - && docker run --rm --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli'`
 - **AC-203.** Живой сквозной API/CLI:
   `bash -c 'python3 tests/live_m11_api.py'`
 - **AC-204.** Принятое ядро и прежние проверки неизменны:
@@ -128,9 +129,14 @@ handoff_status=blocked и честным report-blocked.md о незавершё
 Реализацию это заранее не блокирует. Не выдумывать квитанции, не менять
 executor.backend на grok ради gate. Финальный cross-review и accept_run после
 доступности обязательной пары; код/дифф сохранить, не объявлять принятой вехой.
-Обычные Codex+Gemini read-only проверки допустимы на готовом пакете; если
-машинный gate требует также Grok, сохранить это отдельным пунктом очереди.
-Валидные ревью неизменного диапазона не повторять после reset.
+Доступные обязательные Codex+Gemini read-only ревью запустить параллельно
+на готовом REVIEW_SHA, сохранить agy машинную квитанцию и Codex raw/rc/hash,
+подтверждённые находки исправить. Если нужен verify delta, сохранить его
+полную квитанцию agy и отдельный Codex verify. Grok-квитанции отсутствуют
+честно до reset; это отдельный pending пункт, не причина прятать findings.
+В будущий Grok context включить точный REVIEW/FINAL snapshot и git show SHA
+для чтения исходников диапазона, даже если текущий HEAD уже FINAL.
+Валидные Codex/Gemini ревью неизменного диапазона после reset не повторять.
 Параллельно read-only Grok+agy через абсолютный
 /home/user/gitlab/9qw/tg-claude-userbot/scripts/review_run.sh initial,
 backend grok/agy, --clone свой клон --base BASE_SHA --range BASE_SHA..REVIEW_SHA.
@@ -160,7 +166,7 @@ command посимвольно из спеки; blocked rc=null с безопа�
 {"schema_version":2,"policy_id":"cross-review-v1",
  "spec_sha256":"<SHA256 этой окончательной execution-спеки>",
  "base_sha":"f336f266e22b5b5c6a31b3c30806c617f6fd3276","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
- "executor":{"backend":"codex","model":"<точная модель и reasoning в улике>"},
+ "executor":{"backend":"codex","model":"<точная модель; reasoning отдельно в улике>"},
  "review":{"initial_receipts":[],"verification_receipts":[],"resolutions":[]},
  "handoff_status":"ready",
  "criteria":[{"id":"AC-201","status":"pass|fail|blocked","command":"<из спеки>","rc":0,"note":"<улика>"}]}
