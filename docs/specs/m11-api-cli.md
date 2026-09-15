@@ -6,7 +6,7 @@ DRAFT: НЕ ЗАПУСКАТЬ реализацию до принятого не
 ## Шапка и где работать
 
 Репозиторий /home/user/github/ai-browser-gateway, 15.09.2026.
-BASE_SHA `BASE_PENDING` (Preserve M11 API contract and probe preparation).
+BASE_SHA `f336f266e22b5b5c6a31b3c30806c617f6fd3276` (Preserve M11 API contract and probe preparation).
 Клон /home/user/exec-clones/abg-m11-api-cli-20260915, ветка m11-api-cli.
 Исполнитель явный cx по разрешению постановщика; Spark исчерпан до
 20.09.2026 15:59, timezone неизвестен; Spark/auto запрещены. Последний факт
@@ -74,7 +74,8 @@ host только orchestration. Run-scoped ресурсы/cleanup, loopback pub
 Нельзя заменять ProductFetcher фиктивным в live; network factory разрешена.
 
 До запуска координатор доставляет точные файлы:
-- эту окончательную execution-спеку, commit без изменений;
+- эту окончательную execution-спеку: закоммитить docs/specs/m11-api-cli.md
+  без изменений; docs/specs/m11-api-cli-contract.md уже закоммичен в BASE;
 - tests/probe_m11_api_cli.py, SHA256 PROBE_PENDING, размер SIZE_PENDING;
   коммитить byte-identical, не исправлять;
 - контракт уже в BASE; старые frozen probes уже там и неизменны.
@@ -99,7 +100,7 @@ cf-fetch/skill/потребители/конфиги/профили/сервис
 - **AC-203.** Живой сквозной API/CLI:
   `bash -c 'python3 tests/live_m11_api.py'`
 - **AC-204.** Принятое ядро и прежние проверки неизменны:
-  `bash -c 'git diff --exit-code BASE_PENDING HEAD -- bench gateway tests docs/research TASKS.md CHANGELOG.md ":(exclude)gateway/httpapi.py" ":(exclude)gateway/format.py" ":(exclude)gateway/client.py" ":(exclude)gateway/api_*.py" ":(exclude)gateway/format_*.py" ":(exclude)gateway/client_*.py" ":(exclude)tests/test_gateway_api.py" ":(exclude)tests/test_gateway_format.py" ":(exclude)tests/test_gateway_client.py" ":(exclude)tests/live_m11_api.py" ":(exclude)tests/m11_helpers.py" ":(exclude)tests/probe_m11_api_cli.py"'`
+  `bash -c 'git diff --exit-code f336f266e22b5b5c6a31b3c30806c617f6fd3276 HEAD -- bench gateway tests docs/research TASKS.md CHANGELOG.md ":(exclude)gateway/httpapi.py" ":(exclude)gateway/format.py" ":(exclude)gateway/client.py" ":(exclude)gateway/api_*.py" ":(exclude)gateway/format_*.py" ":(exclude)gateway/client_*.py" ":(exclude)tests/test_gateway_api.py" ":(exclude)tests/test_gateway_format.py" ":(exclude)tests/test_gateway_client.py" ":(exclude)tests/live_m11_api.py" ":(exclude)tests/m11_helpers.py" ":(exclude)tests/probe_m11_api_cli.py"'`
 - **AC-205.** Состав и чистота:
   `bash -c 'git ls-files --error-unmatch gateway/httpapi.py gateway/format.py gateway/client.py scripts/abg-fetch tests/test_gateway_api.py tests/test_gateway_format.py tests/test_gateway_client.py tests/live_m11_api.py tests/probe_m11_api_cli.py docs/specs/m11-api-cli.md docs/specs/m11-api-cli-contract.md >/dev/null && test -x scripts/abg-fetch && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md" ":(exclude)review/")"'`
 - **AC-206.** Существующий cf-fetch неизменен:
@@ -141,7 +142,7 @@ command посимвольно из спеки; blocked rc=null с безопа�
 ```json
 {"schema_version":2,"policy_id":"cross-review-v1",
  "spec_sha256":"<SHA256 этой окончательной execution-спеки>",
- "base_sha":"BASE_PENDING","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
+ "base_sha":"f336f266e22b5b5c6a31b3c30806c617f6fd3276","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
  "executor":{"backend":"codex","model":"<точная модель и reasoning в улике>"},
  "review":{"initial_receipts":[],"verification_receipts":[],"resolutions":[]},
  "handoff_status":"ready",
