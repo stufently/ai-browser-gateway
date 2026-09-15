@@ -268,6 +268,16 @@
   Codex+Gemini reviews. Первыйпакет сохранён `cache/m11/initial-blocked-3685/`.
   Коммит дополнительно сохранён локально в m11-author-work-20260915;
   НЕ принят, не слит/не отправлен вorigin. Grok gate/мутации всёещё pending.
+  Исправления первого возврата закоммичены в909ed88c7aacfaeae489968d022d86831dff6df9;
+  полный initial diff99844bytes, SHAd1ac722a8a6c783cc3083d4b9f0c24180eb9e77b358fb23b9d4e62409316ba9c.
+  Координатор прочитал весь delta; сокращённый live сохраняет assertions и
+  использует существующий JS-стенд M10. Gemini initial rc0/no findings;
+  Codex initial нашёл три дефекта Markdown, автор воспроизвёл их в Docker.
+  Исправления db83793c8415e5e267bfe2f3d784ea34b1919115: глубокий HTML,
+  implicit head и экранирование видимого текста. Полный delta прочитан;
+  доступные Codex/Gemini verify запущены, пакет и итоговая приёмка ожидаются.
+  Заметки `cache/m11-review-progress.md`; отложенный mutation task подготовлен
+  в `cache/m11-mutations-draft.md` (DRAFT, без launch до reset/final SHA).
   В обоих клонах origin push отключён.
   Окончательный контракт SHA256
   80248e5768bd165f0e8ea4e0686e704f0c381b74030e4008b87569e3ec2a59ce.
