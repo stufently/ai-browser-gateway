@@ -6,6 +6,8 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
+import time
 import tomllib
 from urllib.parse import urlsplit
 
@@ -161,7 +163,7 @@ def main():
     sweep_providers(instance)
 
     def stop(*_args):
-        server.shutdown()
+        threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, stop)
     signal.signal(signal.SIGINT, stop)
@@ -169,6 +171,8 @@ def main():
         server.serve_forever()
     finally:
         server.server_close()
+        sweep_providers(instance)
+        time.sleep(0.2)
         sweep_providers(instance)
     return 0
 

@@ -51,11 +51,13 @@ def check_once(health_url, ping_url, *, timeout=5):
             healthy = isinstance(data, dict) and data.get('ok') is True
     except Exception as exc:
         print(type(exc).__name__, file=sys.stderr)
+    allow = os.environ.get('ABG_MONITOR_ALLOW_LOCAL_HTTP') == '1'
     target = ping_url if healthy else ping_url + '/fail'
-    try:
-        _fetch(target, timeout)
-    except Exception as exc:
-        print(type(exc).__name__, file=sys.stderr)
+    if _url(ping_url, ping=True, allow_local=allow):
+        try:
+            _fetch(target, timeout)
+        except Exception as exc:
+            print(type(exc).__name__, file=sys.stderr)
     return healthy
 
 
@@ -64,11 +66,12 @@ def _url(value, *, ping, allow_local):
         return False
     try:
         parsed = urlsplit(value.strip())
+        port = parsed.port
     except ValueError:
         return False
     if (parsed.username is not None or parsed.password is not None
             or parsed.query or parsed.fragment or not parsed.hostname
-            or not parsed.path):
+            or not parsed.path or (port is not None and not 1 <= port <= 65535)):
         return False
     if parsed.scheme == 'https':
         return True

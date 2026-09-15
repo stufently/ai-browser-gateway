@@ -49,10 +49,17 @@ def members(raw):
 
 def snapshot(release: Path):
     found = {}
-    for path in release.rglob('*'):
-        if path.is_file():
-            found[str(path.relative_to(release))] = (
-                path.read_bytes(), stat.S_IMODE(path.stat().st_mode))
+    for path in (release, *release.rglob('*')):
+        if path.is_symlink():
+            raise ValueError
+        mode = stat.S_IMODE(path.stat().st_mode)
+        rel = '.' if path == release else str(path.relative_to(release))
+        if path.is_dir():
+            found[rel + '/'] = (b'', mode)
+        elif path.is_file():
+            found[rel] = (path.read_bytes(), mode)
+        else:
+            raise ValueError
     return found
 
 
@@ -62,7 +69,12 @@ def write_tree(root: Path, files):
         dest.parent.mkdir(parents=True, exist_ok=True)
         fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, mode)
         try:
-            os.write(fd, data)
+            view = memoryview(data)
+            while view:
+                written = os.write(fd, view)
+                if written <= 0:
+                    raise OSError
+                view = view[written:]
             os.fchmod(fd, mode)
         finally:
             os.close(fd)
@@ -74,6 +86,8 @@ def write_tree(root: Path, files):
 
 def manifest(root: Path, sha, files):
     folder = root / 'manifests'
+    if folder.is_symlink():
+        raise ValueError
     folder.mkdir(parents=True, exist_ok=True)
     os.chmod(folder, 0o755)
     lines = [
@@ -104,12 +118,23 @@ def prepare(repo, sha, root):
     if archived.returncode:
         raise ValueError
     files = members(archived.stdout)
+    expected = {name: (data, mode) for name, (data, mode) in files.items()}
+    for name in files:
+        cursor = Path(name).parent
+        while True:
+            key = './' if str(cursor) == '.' else str(cursor) + '/'
+            expected.setdefault(key, (b'', 0o755))
+            if str(cursor) == '.':
+                break
+            cursor = cursor.parent
+    if root.is_symlink():
+        raise ValueError
     releases = root / 'releases'
     final = releases / sha
-    if final.is_symlink():
+    if releases.is_symlink() or final.is_symlink():
         raise ValueError
     if final.exists():
-        if snapshot(final) != {name: (data, mode) for name, (data, mode) in files.items()}:
+        if snapshot(final) != expected:
             raise ValueError
         manifest(root, sha, files)
         return

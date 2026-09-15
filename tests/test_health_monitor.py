@@ -14,3 +14,4 @@ class HealthMonitorTests(unittest.TestCase):
         self.assertFalse(_url('https://u:p@h.invalid/x', ping=True, allow_local=False))
         self.assertFalse(_url('https://h.invalid/x?q=1', ping=True, allow_local=False))
         self.assertFalse(_url('https://h.invalid', ping=True, allow_local=False))
+        self.assertFalse(_url('https://host.invalid:bad/ping', ping=True, allow_local=False))

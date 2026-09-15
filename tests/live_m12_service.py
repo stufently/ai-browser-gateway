@@ -42,18 +42,28 @@ def _http(handler, addr):
 
 def proxy():
     from http.server import BaseHTTPRequestHandler
+    from threading import Lock
     from urllib.request import Request, urlopen
+    hits, lock = [], Lock()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
 
         def do_GET(self):
-            try:
-                with urlopen(Request(self.path), timeout=20) as resp:
-                    body, status = resp.read(), resp.status
-            except Exception:
-                body, status = b'', 502
+            path = self.path.split('?', 1)[0]
+            if path == '/__counts':
+                with lock:
+                    body = json.dumps(hits).encode()
+                status = 200
+            else:
+                with lock:
+                    hits.append(path)
+                try:
+                    with urlopen(Request(self.path), timeout=20) as resp:
+                        body, status = resp.read(), resp.status
+                except Exception:
+                    body, status = b'', 502
             self.send_response(status)
             self.send_header('Content-Length', str(len(body)))
             self.end_headers()
@@ -87,7 +97,7 @@ def receiver(port):
     _http(Handler, ('127.0.0.1', int(port)))
 
 
-def inner(run, api_port, stand_port, recv_port):
+def inner(run, api_port, stand_port, recv_port, proxy_port):
     from concurrent.futures import ThreadPoolExecutor
     from urllib.request import Request, urlopen
     token = os.environ['ABG_TOKEN']
@@ -140,6 +150,9 @@ def inner(run, api_port, stand_port, recv_port):
         assert len(egress) == 1, value['attempts']
         names.append(egress[0])
     assert names[0] != names[1] and set(names) <= {'alpha', 'beta'}
+    with urlopen('http://127.0.0.1:' + proxy_port + '/__counts', timeout=2) as resp:
+        seen = json.load(resp)
+    assert any('/forbidden/' in item for item in seen), seen
     mon = subprocess.Popen(
         [sys.executable, '-m', 'gateway.health_monitor'], cwd=str(ROOT),
         env={**env, 'ABG_HEALTH_URL': endpoint + '/health',
@@ -233,13 +246,21 @@ def main():
         docker('run', '-d', '--name', run + '-stand', '--network', network,
                '-p', '127.0.0.1::8080', *common, PY,
                'python3', 'tests/live_m12_service.py', '--stand')
-        docker('run', '-d', '--name', run + '-proxy', '--network', network, *common, PY,
+        docker('run', '-d', '--name', run + '-proxy', '--network', network,
+               '-p', '127.0.0.1::8126', *common, PY,
                'python3', 'tests/live_m12_service.py', '--proxy')
         docker('run', '-d', '--name', run + '-receiver', '--network', 'host', *common, PY,
                'python3', 'tests/live_m12_service.py', '--receiver', recv_port)
         stand_port = docker('port', run + '-stand', '8080/tcp').stdout.strip().rsplit(':', 1)[-1]
+        proxy_port = docker('port', run + '-proxy', '8126/tcp').stdout.strip().rsplit(':', 1)[-1]
         api = subprocess.check_output(
             compose + ['ps', '-q', 'api'], env=env, text=True).strip()
+        monitor = subprocess.check_output(
+            compose + ['ps', '-q', 'monitor'], env=env, text=True).strip()
+        docker('exec', monitor, 'python3', '-c',
+               'from gateway.health_monitor import check_once; import sys; '
+               'sys.exit(0 if check_once("http://api:8765/health",'
+               '"https://example.invalid/m12-ping", timeout=3) else 1)')
         data = json.loads(docker('inspect', api).stdout)[0]
         assert data['Config']['User'] == '1002:1002'
         binds = ' '.join(data['HostConfig'].get('Binds') or [])
@@ -254,14 +275,19 @@ def main():
             '-v', f'{ping_live}:{ping_live}:ro',
             '-e', 'ABG_PING_FILE', '-e', 'ABG_API_CONTAINER', '-e', 'ABG_TOKEN',
             image, 'python3', 'tests/live_m12_service.py',
-            '--inner', run, host_port, stand_port, recv_port, check=False)
+            '--inner', run, host_port, stand_port, recv_port, proxy_port, check=False)
         sys.stdout.write(proc.stdout)
         sys.stderr.write(proc.stderr)
         if proc.returncode:
             raise RuntimeError('live assertions failed rc=' + str(proc.returncode))
         subprocess.run(compose + ['restart', 'api'], env=env, check=True,
                        capture_output=True, text=True)
-        subprocess.run(compose + ['stop'], env=env, capture_output=True, text=True)
+        docker('run', '-d', '--name', run + '-owned', *labeled,
+               '--label', 'abg.owner=ai-browser-gateway',
+               '--label', 'abg.instance=' + instance,
+               '--label', 'abg.role=provider', PY, 'sleep', '3600')
+        subprocess.run(compose + ['stop', 'api'], env=env, capture_output=True, text=True)
+        time.sleep(1)
         leftover = docker(
             'ps', '-aq', '--filter', 'label=abg.owner=ai-browser-gateway',
             '--filter', 'label=abg.instance=' + instance,
