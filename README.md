@@ -185,16 +185,18 @@ shutdown removes running providers while draining and finishes sooner.
 
 ## M12b deployed service
 
-Stand-host runs the accepted release `929bded313e371808b0747fd9a400696a36638aa`
+Stand-host runs the accepted release `4409f8a5197f7a9f464263e15b362c00548399e2`
 under `/home/user/services/ai-browser-gateway`, with the API published at
 `127.0.0.1:8765`. Measured outcomes and image identity:
-[deployed service report](docs/research/07-deployed-service.md).
+[M13c bizprofile results](docs/research/08-bizprofile-scrapling.md#после-выкладки-m13c).
+The [M12b report](docs/research/07-deployed-service.md) retains the original
+profile-pool and target measurements.
 
 Start or stop the service using its explicit configuration:
 
 ```bash
 service_root=/home/user/services/ai-browser-gateway
-release_sha=929bded313e371808b0747fd9a400696a36638aa
+release_sha=4409f8a5197f7a9f464263e15b362c00548399e2
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
@@ -215,13 +217,24 @@ The client reads `~/.config/abg/client-token`, a symlink to `secrets/token`:
 scripts/abg-fetch https://example.com/ text
 ```
 
-To roll back, select an already prepared `releases/<sha>` and its corresponding
-runtime image. Set `ABG_RELEASE` and `ABG_RUNTIME_IMAGE` in `compose.env`, then
-run the same `env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose … up -d`
-command with `-f` pointing to that release's Compose file. Clearing these two
-variables prevents earlier shell exports from overriding `compose.env`.
-Keep the secret paths, project name and instance unchanged. A new release is
-prepared with host Python and Git, never by editing an existing release:
+The retained rollback release is `929bded313e371808b0747fd9a400696a36638aa`,
+with image `abg-runtime:929bded313e3`. M13c preserves its release, manifest,
+and image, and saves the original configuration as `compose.env.pre-m13c`
+(mode `0600`, never overwritten). Restore that file byte for byte to roll back:
+
+```bash
+cp "$service_root/compose.env.pre-m13c" "$service_root/compose.env"
+rollback_sha=929bded313e371808b0747fd9a400696a36638aa
+env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
+  -f "$service_root/releases/$rollback_sha/deploy/compose.yaml" \
+  -p ai-browser-gateway up -d
+python3 tests/deployed_m12b.py --check-deploy --release "$rollback_sha" \
+  --evidence /home/user/.cache/abg-coord-20260917/m13c-rollback
+```
+
+Clearing these two variables prevents earlier shell exports from overriding
+`compose.env`. Keep the secret paths, project name and instance unchanged.
+Prepare a release with host Python and Git, then build its runtime image:
 
 ```bash
 python3 scripts/abg-release prepare --repo "$PWD" --sha "$release_sha" --root "$service_root"
@@ -229,11 +242,31 @@ docker build -t "abg-runtime:${release_sha:0:12}" \
   -f "$service_root/releases/$release_sha/deploy/Dockerfile" "$service_root/releases/$release_sha"
 ```
 
-Deployment checks: `python3 tests/deployed_m12b.py --check-deploy`,
-`--check-profiles`, `--check-api-egress`, and `--run-targets` (in this order).
-Network checks run inside Docker and write sanitized JSON to
-`/home/user/.cache/abg-coord-20260917/m12b/`. Profile checks take at least
-eight minutes to respect the 30-second hostname interval. Run the API rotation
-and target checks with no other API clients. Target refusals are recorded as
-outcomes; Docker/API transport failures fail the check. Healthchecks history
-and automatic failure/recovery verification remain the coordinator's checks.
+For M13c, run these checks sequentially from the clone:
+
+```bash
+evidence=/home/user/.cache/abg-coord-20260917/m13c
+python3 tests/deployed_m12b.py --check-deploy --release "$release_sha" --evidence "$evidence"
+python3 tests/deployed_m12b.py --check-bizprofile --release "$release_sha" --evidence "$evidence"
+python3 tests/deployed_m12b.py --run-targets --release "$release_sha" --evidence "$evidence"
+```
+
+`--release` requires 40 lowercase hex characters; `--evidence` requires an
+absolute path. Omitting them preserves the M12b defaults: release
+`929bded313e371808b0747fd9a400696a36638aa` and evidence directory
+`/home/user/.cache/abg-coord-20260917/m12b/`. The existing `--check-profiles`
+and `--check-api-egress` modes accept the same options; run profiles first
+when measuring rotation. Profile checks take at least eight minutes.
+
+Network checks run inside Docker and write sanitized JSON. Bizprofile checks
+request the homepage and Elevate Electric LLC card without `expected_text`,
+then check their content markers locally. Both pages must succeed through
+Scrapling with `challenge=none`. Each run preserves `bizprofile-<UTC>.json`
+exclusively and updates `bizprofile.json`; failed pages are recorded without
+retrying. Page content and URLs are omitted from this evidence. Requests to
+the same hostname are spaced by at least 30 seconds across runner launches.
+
+Run the API rotation and target checks with no other API clients. Refusals in
+the six-target matrix are recorded as outcomes; Docker/API transport failures
+fail the check. Healthchecks history and automatic failure/recovery verification
+remain the coordinator's checks.

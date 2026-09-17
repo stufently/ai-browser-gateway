@@ -86,3 +86,39 @@ HTTP 200 и `challenge=none` у успешной попытки.
 с `probe.py` из клона. Запросы не задают `expected_text` и egress-профили,
 разрешают браузер, имеют budget 120000 мс. Между страницами пауза 30 с;
 не более шести запусков провайдеров, без повторного прогона при отказе.
+
+## После выкладки M13c
+
+17.09.2026 на stand-host развёрнут release
+`4409f8a5197f7a9f464263e15b362c00548399e2`.
+Runtime image `abg-runtime:4409f8a5197f`, image ID:
+`sha256:c7a84ef4061f3d2d6ae7f763718ea96c070f99092751f44dbe96f2a58acd032b`.
+
+Источник таблицы — неперезаписываемый файл
+`bizprofile-20260917T091502Z.json` в
+`/home/user/.cache/abg-coord-20260917/m13c/`.
+Проверка выполнена через deployed API на `127.0.0.1:8765`:
+`allow_browser=true`, `budget_ms=120000`, `format=text`,
+`max_age_hours=0`; ключ `expected_text` отсутствовал. Маркеры проверял
+runner после `parse_api`, без передачи маркера в API.
+
+| Страница | Provider | Попытки лестницы (HTTP / challenge / elapsed) | Последний challenge | Всего, мс | Маркер |
+| --- | --- | --- | --- | --- | --- |
+| Главная bizprofile.net | scrapling | curl 403 / suspected / 170 мс → patchright 403 / suspected / 1164 мс → scrapling 200 / none / 6403 мс | none | 11245 | найден |
+| Карточка Elevate Electric LLC | scrapling | curl 403 / suspected / 138 мс → patchright 403 / suspected / 1054 мс → scrapling 200 / none / 17550 мс | none | 22047 | найден |
+
+Обе страницы: `ok=true`; последняя попытка — `scrapling`, `success=true`,
+`challenge=none`, `error_type=none`. Все попытки использовали `direct`.
+Найдены «Comprehensive Directory of Registered Businesses» и
+«Elevate Electric LLC». Запросы шли последовательно, с интервалом между
+началами не менее 30 с, без повторов. Улики содержат только `api_evidence`
+и `marker_found` для каждой страницы с идентификатором; content и URL
+страниц в них отсутствуют. Повтор приёмки создаёт отдельный архив, поэтому
+этот замер остаётся доступен независимо от нового `bizprofile.json`.
+
+AC-893 подтвердил release/manifest, image ID, healthy API и отсутствие
+ошибок в последних логах монитора после 130 с работы. Старый release
+`929bded313e371808b0747fd9a400696a36638aa`, его manifest и образ
+`abg-runtime:929bded313e3` сохранены для отката. Исходный `compose.env`
+сохранён байт-в-байт в `compose.env.pre-m13c` (`0600`); в рабочем файле
+изменены только `ABG_RELEASE` и `ABG_RUNTIME_IMAGE`.
