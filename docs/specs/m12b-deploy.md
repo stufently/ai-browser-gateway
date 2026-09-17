@@ -3,7 +3,7 @@
 ## Шапка и где работать
 
 Репозиторий /home/user/github/ai-browser-gateway, 17.09.2026.
-BASE_SHA `RELEASE_SHA` — main после слияния принятой M12a (+ M12a-tests).
+BASE_SHA `929bded313e371808b0747fd9a400696a36638aa` — main после слияния принятой M12a (+ M12a-tests).
 Клон /home/user/exec-clones/abg-m12b-deploy-20260917, ветка m12b-deploy,
 origin push DISABLED. Исполнитель — cx (директива владельца 17.09.2026:
 «доделывай всё, используя кодекс»). План координатора, на котором стоит эта
@@ -12,7 +12,7 @@ origin push DISABLED. Исполнитель — cx (директива влад
 Это production-выкладка на ЭТОМ хосте в ТВОЙ каталог
 `/home/user/services/ai-browser-gateway/`. Разрешено создавать и менять
 только его содержимое (кроме `secrets/hc-ping`, см. ниже), свой Compose-проект
-`ai-browser-gateway`, свой образ `abg-runtime:<первые 12 символов RELEASE_SHA>`,
+`ai-browser-gateway`, свой образ `abg-runtime:<первые 12 символов 929bded313e371808b0747fd9a400696a36638aa>`,
 `~/.config/abg/client-token` (ссылка на свой token) и файлы клона. Чужие
 сервисы, compose-проекты, контейнеры, сети и `.env` не трогать и не читать.
 Единственное исключение — `/home/user/services/3proxy/.env`: его читает
@@ -22,11 +22,11 @@ Push/merge в репозиторий запрещены: работу забер
 
 ## Задача
 
-1. **Release.** `scripts/abg-release prepare --repo <клон> --sha RELEASE_SHA
+1. **Release.** `scripts/abg-release prepare --repo <клон> --sha 929bded313e371808b0747fd9a400696a36638aa
    --root /home/user/services/ai-browser-gateway` хостовым python3, как это
    делает `tests/live_m12_service.py` (скрипту нужен host git; в slim-образе
    git нет). Образ собрать из
-   `releases/RELEASE_SHA/deploy/Dockerfile`; записать image ID.
+   `releases/929bded313e371808b0747fd9a400696a36638aa/deploy/Dockerfile`; записать image ID.
 2. **Секреты** в `/home/user/services/ai-browser-gateway/secrets/` (каталог
    0700): `token` — 32 случайных байта hex, сгенерировать программно в Docker,
    0600, НИКОГДА не печатать; `proxies.toml` — `scripts/abg-provision --source
@@ -43,12 +43,12 @@ Push/merge в репозиторий запрещены: работу забер
    ABG_COMPOSE_PROJECT=ai-browser-gateway. ABG_PROVIDER_NETWORK НЕ задавать:
    по контракту он только для собственного стенда, провайдеры в production
    идут в сеть Docker по умолчанию. Запуск только так:
-   `docker compose --env-file /home/user/services/ai-browser-gateway/compose.env -f /home/user/services/ai-browser-gateway/releases/RELEASE_SHA/deploy/compose.yaml -p ai-browser-gateway up -d`.
+   `docker compose --env-file /home/user/services/ai-browser-gateway/compose.env -f /home/user/services/ai-browser-gateway/releases/929bded313e371808b0747fd9a400696a36638aa/deploy/compose.yaml -p ai-browser-gateway up -d`.
    ДО запуска проверить: порт 8765 свободен; Compose-проекта
    `ai-browser-gateway` нет (`docker compose ls -a`); нет контейнеров с label
    `abg.instance=stand-host` и контейнеров с именем на `ai-browser-gateway-`. Любое
    из этого занято ЧУЖИМ — blocker, ничего не пересоздавать. Если это твой
-   проект `ai-browser-gateway` из того же `releases/RELEASE_SHA` (повторный
+   проект `ai-browser-gateway` из того же `releases/929bded313e371808b0747fd9a400696a36638aa` (повторный
    прогон) — не пересоздавать, продолжить проверки.
 4. **Runner** `tests/deployed_m12b.py` (новый файл, stdlib, Docker-only для
    сетевых проверок, как `tests/live_m12_service.py`). Режимы — ровно команды
@@ -136,7 +136,7 @@ policy/expected_text/budget, не ретраить цель ради зелён�
 - **AC-606.** Документы есть, без userinfo-URL:
   `bash -c 'test -s docs/research/07-deployed-service.md && grep -q "M12b deployed service" README.md && ! git grep -nE "://[^/[:space:]]+:[^/[:space:]]+@" -- docs/research README.md'`
 - **AC-607.** Вне разрешённых путей ничего не изменено:
-  `bash -c 'git diff --exit-code RELEASE_SHA HEAD -- . ":(exclude)tests/deployed_m12b.py" ":(exclude)tests/test_deployed_m12b.py" ":(exclude)docs/research/07-deployed-service.md" ":(exclude)README.md" ":(exclude)docs/specs/m12b-deploy.md"'`
+  `bash -c 'git diff --exit-code 929bded313e371808b0747fd9a400696a36638aa HEAD -- . ":(exclude)tests/deployed_m12b.py" ":(exclude)tests/test_deployed_m12b.py" ":(exclude)docs/research/07-deployed-service.md" ":(exclude)README.md" ":(exclude)docs/specs/m12b-deploy.md"'`
 - **AC-608.** Чистое дерево:
   `bash -c 'git ls-files --error-unmatch tests/deployed_m12b.py tests/test_deployed_m12b.py docs/specs/m12b-deploy.md docs/research/07-deployed-service.md >/dev/null && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
 
@@ -151,7 +151,7 @@ success. Исполнитель ping вручную не делает и `/fail`
 
 Политика cross-review-v1. Исполнитель Codex, ревьюеры **agy + grok**. После
 commit REVIEW_SHA параллельно:
-`bash /home/user/.claude/skills/executor-milestone/scripts/review_run.sh initial agy --clone <клон> --base RELEASE_SHA --range RELEASE_SHA..<REVIEW_SHA> --context "<эта спека и план m12b; только чтение>"`
+`bash /home/user/.claude/skills/executor-milestone/scripts/review_run.sh initial agy --clone <клон> --base 929bded313e371808b0747fd9a400696a36638aa --range 929bded313e371808b0747fd9a400696a36638aa..<REVIEW_SHA> --context "<эта спека и план m12b; только чтение>"`
 и тот же wrapper `initial grok`. Разобрать ВСЕ finding_id: fixed с
 proof/commit, disproved с proof, иначе needs_owner. Один FIX_ONCE, затем verify
 теми же на REVIEW..FINAL. Неполный ответ/таймаут — не принятие; один
@@ -163,7 +163,7 @@ report.json v2 в корне клона, untracked, ровно 8 записей 
 command посимвольно из спеки; blocked — rc=null и безопасный текст ошибки.
 ```json
 {"schema_version":2,"policy_id":"cross-review-v1","spec_sha256":"<SHA этой спеки>",
- "base_sha":"RELEASE_SHA","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
+ "base_sha":"929bded313e371808b0747fd9a400696a36638aa","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
  "executor":{"backend":"codex","model":"<фактическая модель>"},
  "review":{"initial_receipts":[],"verification_receipts":[],"resolutions":[]},
  "handoff_status":"ready","criteria":[{"id":"AC-601","status":"pass|fail|blocked",
