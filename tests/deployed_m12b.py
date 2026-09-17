@@ -8,11 +8,14 @@ import argparse
 from collections import Counter
 from datetime import datetime, timezone
 import fcntl
+import hashlib
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -30,6 +33,14 @@ ECHO = 'http://api.ipify.org'
 API = 'http://127.0.0.1:8765'
 ATTEMPT_KEYS = ('provider', 'egress_profile', 'status', 'success', 'challenge',
                 'error_type', 'elapsed_ms', 'age_hours', 'next_step')
+# Kept standalone for the single-file Docker mount; tests check enum parity.
+FAILURE_REASONS = ('none', 'dns_error', 'timeout', 'connection_error', 'tls_error',
+                   'http_403', 'http_429', 'http_5xx', 'javascript_required',
+                   'challenge_suspected', 'interactive_challenge', 'content_missing',
+                   'content_mismatch', 'provider_error', 'not_measured', 'environment_error')
+CHALLENGE_TYPES = ('none', 'suspected', 'javascript_required', 'interactive',
+                   'captcha', 'rate_limited', 'access_denied')
+STEPS = ('stop', 'browser', 'change_egress', 'retry_later', 'give_up', 'human', 'investigate')
 
 
 class CheckError(Exception):
@@ -75,17 +86,25 @@ def parse_api(status, body):
     require(isinstance(value, dict) and type(value.get('ok')) is bool
             and isinstance(value.get('content'), str)
             and type(value.get('elapsed_ms')) is int
-            and isinstance(value.get('error_type'), str)
-            and isinstance(value.get('step'), str), 'api_invalid_schema')
+            and value['elapsed_ms'] >= 0
+            and value.get('error_type') in FAILURE_REASONS
+            and value.get('step') in STEPS
+            and 'provider' in value
+            and (value['provider'] is None or isinstance(value['provider'], str)),
+            'api_invalid_schema')
     attempts = value.get('attempts')
     require(isinstance(attempts, list), 'api_invalid_attempts')
     for a in attempts:
         require(isinstance(a, dict) and all(k in a for k in ATTEMPT_KEYS), 'api_invalid_attempts')
         require(a['egress_profile'] in ('direct', *NAMES)
                 and isinstance(a['provider'], str) and type(a['success']) is bool
-                and (a['status'] is None or type(a['status']) is int)
+                and (a['status'] is None or (type(a['status']) is int and 100 <= a['status'] <= 599))
                 and type(a['elapsed_ms']) is int and a['elapsed_ms'] >= 0
-                and isinstance(a['challenge'], str) and isinstance(a['error_type'], str),
+                and a['challenge'] in CHALLENGE_TYPES and a['error_type'] in FAILURE_REASONS
+                and a['next_step'] in STEPS
+                and (a['age_hours'] is None or (
+                    type(a['age_hours']) in (int, float) and a['age_hours'] >= 0
+                    and (type(a['age_hours']) is int or math.isfinite(a['age_hours'])))),
                 'api_invalid_attempts')
     require(not {'provider_error', 'environment_error'} & {
         value['error_type'], *(a['error_type'] for a in attempts)}, 'api_provider_infrastructure_error')
@@ -357,7 +376,41 @@ def inspect(ident):
     return json.loads(docker('inspect', ident))[0]
 
 
+def verify_release(release, manifest):
+    """Compare an existing release to its manifest using only file reads and metadata."""
+    code = 'release_integrity_failed'
+    try:
+        require(stat.S_ISDIR(release.lstat().st_mode), code)
+        require(stat.S_ISREG(manifest.lstat().st_mode), code)
+        expected = {}
+        for line in manifest.read_text().splitlines():
+            match = re.fullmatch(r'([0-9a-f]{64})  (.+)', line)
+            require(match is not None, code)
+            digest, name = match.groups()
+            relative = Path(name)
+            require(not relative.is_absolute() and '..' not in relative.parts
+                    and relative.as_posix() == name and name != '.' and name not in expected, code)
+            expected[name] = digest
+        require(bool(expected), code)
+        found, pending = {}, [release]
+        while pending:
+            path = pending.pop()
+            info = path.lstat()
+            mode = stat.S_IMODE(info.st_mode)
+            if stat.S_ISDIR(info.st_mode):
+                require(mode == 0o755, code)
+                pending.extend(path.iterdir())
+            else:
+                require(stat.S_ISREG(info.st_mode), code)
+                require(mode == (0o755 if mode & 0o111 else 0o644), code)
+                found[path.relative_to(release).as_posix()] = hashlib.sha256(path.read_bytes()).hexdigest()
+        require(found == expected, code)
+    except (OSError, ValueError):
+        raise CheckError(code) from None
+
+
 def check_deploy():
+    verify_release(RELEASE, SERVICE / 'manifests' / (SHA + '.sha256'))
     config = {}
     for line in (SERVICE / 'compose.env').read_text().splitlines():
         if line and not line.startswith('#'):
@@ -377,11 +430,6 @@ def check_deploy():
         require(info.st_mode & 0o777 == 0o600 and info.st_uid == 1002, 'secret_mode_owner')
     link = Path.home() / '.config/abg/client-token'
     require(link.is_symlink() and link.resolve() == SERVICE / 'secrets/token', 'client_token_link')
-    # The accepted script verifies the immutable release byte-for-byte on reuse.
-    result = subprocess.run([sys.executable, str(ROOT / 'scripts/abg-release'), 'prepare',
-                             '--repo', str(ROOT), '--sha', SHA, '--root', str(SERVICE)],
-                            capture_output=True, timeout=60)
-    require(result.returncode == 0, 'release_integrity_failed')
     data, metadata = {}, []
     ids = docker('ps', '-aq', '--filter', 'label=com.docker.compose.project=ai-browser-gateway').split()
     require(len(ids) == 2, 'compose_container_count')

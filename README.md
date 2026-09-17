@@ -195,10 +195,10 @@ Start or stop the service using its explicit configuration:
 ```bash
 service_root=/home/user/services/ai-browser-gateway
 release_sha=929bded313e371808b0747fd9a400696a36638aa
-docker compose --env-file "$service_root/compose.env" \
+env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
-docker compose --env-file "$service_root/compose.env" \
+env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway stop
 ```
@@ -217,7 +217,9 @@ scripts/abg-fetch https://example.com/ text
 
 To roll back, select an already prepared `releases/<sha>` and its corresponding
 runtime image. Set `ABG_RELEASE` and `ABG_RUNTIME_IMAGE` in `compose.env`, then
-run the same `up -d` command with `-f` pointing to that release's Compose file.
+run the same `env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose … up -d`
+command with `-f` pointing to that release's Compose file. Clearing these two
+variables prevents earlier shell exports from overriding `compose.env`.
 Keep the secret paths, project name and instance unchanged. A new release is
 prepared with host Python and Git, never by editing an existing release:
 
