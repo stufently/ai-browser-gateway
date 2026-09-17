@@ -1,18 +1,19 @@
-# M13b — независимые мутации тестов уборки позднего контейнера
+# M13b — независимые мутации тестов уборки позднего контейнера (после fix2)
 
 17.09.2026. Проверочная задача cx, не реализация. Директива владельца 17.09:
 «доделывай всё до конца». Правку и тесты писала другая cx-панель.
 
-Клон /home/user/exec-clones/abg-m13b-mutations-20260917, ветка
-m13b-mutations, origin push DISABLED. SOURCE_SHA `858fd85` (FINAL M13b-fix,
-полный SHA — `git rev-parse 858fd85` в клоне).
-Выход: /home/user/.cache/abg-coord-20260917/m13b-mutations/.
+Клон /home/user/exec-clones/abg-m13b-mutations2-20260917, ветка
+m13b-mutations2, origin push DISABLED. SOURCE_SHA `498c4d3` (FINAL M13b-fix2,
+полный SHA — `git rev-parse 498c4d3` в клоне).
+Выход: /home/user/.cache/abg-coord-20260917/m13b-mutations2/. Прогон по
+`858fd85` остановлен координатором: код переделывался.
 
 ## Что мутировать
 
 Продукт мутаций — `DockerLauncher.run` и `DockerLauncher._cleanup` в
-`bench/runner/execute.py`. Прочитать целиком `docs/specs/m13b-fix.md`,
-`docs/specs/m13b-late-container-probe.md` и `git diff 5a508e4 858fd85`.
+`bench/runner/execute.py`. Прочитать целиком `docs/specs/m13b-fix.md`, `docs/specs/m13b-fix2.md`,
+`docs/specs/m13b-late-container-probe.md` и `git diff 5a508e4 498c4d3`.
 
 Авторский набор — `tests.test_execute.DockerLauncherTests` и отдельно frozen
 probe `tests.probe_m13_late_container`. Команды (сначала green на SOURCE):
@@ -34,7 +35,11 @@ probe — справочно.
 cidfile, cidfile без fallback на метку при OSError); ошибки (не ловить
 `OSError`/`SubprocessError`, поднять исключение уборки вместо исходного
 `TimeoutExpired`); env (не передавать `env` в уборку); `stdin=DEVNULL`
-убрать в уборке.
+убрать в уборке; «увиденный» контейнер (`seen = False` изначально при
+заполненном cidfile, не обновлять `seen` после непустого `ps`, возврат на
+пустом `ps` без проверки `seen`, возврат на пустом `ps` при `returncode != 0`,
+не сбрасывать `cid` — повторять `rm` по cidfile вслепую, убрать `continue`
+после неуспешного `rm`).
 
 Для каждого: id, ось, diff, SHA256 исходника/мутанта/восстановления,
 доказательство активации изменённой строки авторским набором, команда/cwd/rc,
