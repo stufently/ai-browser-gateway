@@ -4,6 +4,11 @@
 
 ### Добавлено
 
+- **curl_cffi в лестнице продукта (M14a, решение владельца 17.09):** HTTP- и
+  egress-ступени идут через `curl_cffi` (impersonate chrome) вместо голого
+  `curl`; таймаут `curl_cffi` классифицируется как `timeout`, а не
+  `provider_error`. Frozen probes M10/M11 обновлены только в имени провайдера.
+
 - **Выкладка M13c на stand-host:** сервис обновлён до release `4409f8a` (Scrapling
   без устаревшего `cf-mitigated`, уборка позднего контейнера); release
   `929bded`, его образ и `compose.env.pre-m13c` сохранены для отката.
