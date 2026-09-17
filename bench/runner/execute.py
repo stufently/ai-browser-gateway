@@ -54,6 +54,7 @@ class DockerLauncher:
             cid = cidfile.read_text().strip()
         except OSError:
             cid = ''
+        seen = bool(cid)
         kwargs = dict(capture_output=True, text=True, errors='replace',
                       stdin=subprocess.DEVNULL)
         if env is not None:
@@ -61,18 +62,26 @@ class DockerLauncher:
         while (remaining := deadline - time.monotonic()) > 0:
             try:
                 ids = [cid] if cid else []
+                # Use cidfile only once; after any failed removal rediscover by label.
+                cid = ''
                 if not ids:
                     found = subprocess.run(
                         ['docker', 'ps', '--all', '--quiet', '--filter', 'label=' + identity],
                         timeout=remaining, **kwargs)
                     if found.returncode == 0:
                         ids = found.stdout.split()
+                        if not ids and seen:
+                            return
+                        seen = seen or bool(ids)
                 remaining = deadline - time.monotonic()
                 if ids and remaining > 0:
                     removed = subprocess.run(['docker', 'rm', '--force', *ids],
                                              timeout=remaining, **kwargs)
                     if removed.returncode == 0:
                         return
+                    # It may already be gone (--rm or a concurrent sweep).
+                    # Check the label immediately before waiting or retrying rm.
+                    continue
             except (OSError, subprocess.SubprocessError):
                 # Cleanup failure must not replace the original TimeoutExpired.
                 pass

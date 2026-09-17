@@ -378,6 +378,83 @@ class DockerLauncherTests(unittest.TestCase):
                     self.assertAlmostEqual(self.now, 130.0)
                     self.assertLess(len(calls), 20, 'cleanup must have a bounded horizon')
 
+    def cleanup_after_failed_removal(self, *, cidfile, listings):
+        calls = []
+        sleeps = []
+        expired = subprocess.TimeoutExpired('docker', 1, output=b'out', stderr=b'err')
+        env = {'DOCKER_HOST': 'unix:///fake.sock'}
+        listings = iter(listings)
+
+        def run(command, **kwargs):
+            calls.append(list(command))
+            if command[:2] == ['docker', 'run']:
+                if cidfile:
+                    Path(command[command.index('--cidfile') + 1]).write_text('known-id\n')
+                raise expired
+            self.assertEqual(kwargs['env'], env)
+            self.assertEqual(kwargs['stdin'], subprocess.DEVNULL)
+            self.assertFalse(kwargs.get('shell'))
+            self.assertGreater(kwargs['timeout'], 0)
+            self.assertAlmostEqual(kwargs['timeout'], 130.0 - self.now)
+            self.advance(min(0.25, kwargs['timeout']))
+            if command[1] == 'rm':
+                self.assertEqual(command, ['docker', 'rm', '--force', 'known-id'])
+                return subprocess.CompletedProcess(command, 1, '', 'No such container')
+            self.assertEqual(command, ['docker', 'ps', '--all', '--quiet', '--filter',
+                                       'label=' + self.identity(calls[0])])
+            response = next(listings, (0, ''))
+            if isinstance(response, Exception):
+                raise response
+            rc, stdout = response
+            return subprocess.CompletedProcess(command, rc, stdout, '')
+
+        def sleep(seconds):
+            sleeps.append(seconds)
+            self.advance(seconds)
+
+        with patch('bench.runner.execute.subprocess.run', side_effect=run), \
+                patch('bench.runner.execute.time.sleep', side_effect=sleep):
+            with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                DockerLauncher().run(['docker', 'run', '--rm', 'abg-curl:m2'], 1, env=env)
+        self.assertIs(raised.exception, expired)
+        self.assertEqual((expired.output, expired.stderr), (b'out', b'err'))
+        self.assertLessEqual(self.now, 130.0)
+        return [command[1] for command in calls], sleeps
+
+    def test_removed_cidfile_container_returns_after_empty_successful_listing(self):
+        calls, sleeps = self.cleanup_after_failed_removal(cidfile=True, listings=[(0, '')])
+        self.assertEqual(self.now, 100.5, 'only the two cleanup calls may advance time')
+        self.assertEqual(calls, ['run', 'rm', 'ps'])
+        self.assertEqual(sleeps, [])
+
+    def test_container_disappearing_after_discovery_returns_without_waiting(self):
+        calls, sleeps = self.cleanup_after_failed_removal(
+            cidfile=False, listings=[(0, 'known-id\n'), (0, '')])
+        self.assertEqual(self.now, 100.75, 'only the three cleanup calls may advance time')
+        self.assertEqual(calls, ['run', 'ps', 'rm', 'ps'])
+        self.assertEqual(sleeps, [])
+
+    def test_failed_removal_rechecks_identity_and_retries_existing_container(self):
+        calls, _ = self.cleanup_after_failed_removal(
+            cidfile=True, listings=[(0, 'known-id\n'), (0, '')])
+        self.assertEqual(calls, ['run', 'rm', 'ps', 'rm', 'ps'])
+        self.assertLess(self.now, 130.0)
+
+    def test_failed_empty_listing_does_not_prove_seen_container_was_removed(self):
+        for cidfile in (True, False):
+            for failure in ((1, ''), OSError('unavailable'),
+                            subprocess.TimeoutExpired('cleanup', 1)):
+                with self.subTest(cidfile=cidfile, failure=failure):
+                    self.now = 100.0
+                    listings = [] if cidfile else [(0, 'known-id\n')]
+                    listings.extend([failure, (0, 'known-id\n'), (0, '')])
+                    calls, sleeps = self.cleanup_after_failed_removal(
+                        cidfile=cidfile, listings=listings)
+                    prefix = ['run'] if cidfile else ['run', 'ps']
+                    self.assertEqual(calls, prefix + ['rm', 'ps', 'ps', 'rm', 'ps'])
+                    self.assertTrue(sleeps, 'a failed listing must keep polling')
+                    self.assertLess(self.now, 130.0)
+
     def test_absent_container_waits_only_until_cleanup_deadline(self):
         calls = []
         expired = subprocess.TimeoutExpired('docker', 7)
