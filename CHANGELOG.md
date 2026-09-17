@@ -4,6 +4,15 @@
 
 ### Добавлено
 
+- **Выкладка M13c на stand-host:** сервис обновлён до release `4409f8a` (Scrapling
+  без устаревшего `cf-mitigated`, уборка позднего контейнера); release
+  `929bded`, его образ и `compose.env.pre-m13c` сохранены для отката.
+  bizprofile.net (главная и карточка) проходит через deployed API без
+  `expected_text`: scrapling, `challenge=none`, 11–24 с.
+- **`tests/deployed_m12b.py`:** параметры `--release`/`--evidence` вместо
+  зашитого релиза и режим `--check-bizprofile` с неперезаписываемым архивом
+  улик.
+
 - **Выкладка M12b на stand-host:** сервис работает в
   `/home/user/services/ai-browser-gateway` (Compose-проект
   `ai-browser-gateway`, `127.0.0.1:8765`, release `929bded`), 15 прокси-профилей
