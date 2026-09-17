@@ -476,6 +476,18 @@
   `0851322f147deb88ca5ed38fcf78436eb0d41714e6cfcf051516ac2cec5e6d81`;
   запущена панель `cx-abg-m12a-shutdown-probes-20260915`.
 
+  **17.09 02:15 UTC — подготовка принята, исправление запущено.** Пакет
+  `~/.cache/abg-coord-20260915/m12/shutdown-probe/`: probe
+  `tests/probe_m12_service_regressions.py` SHA256 `f7ab236f…ecad` (коммит
+  `06c2a3f`, ветка `m12a-shutdown-probes` забрана в репо). Координатор
+  перепроверил в Docker: BASE assertion-red 5/5, reference-1/2 green, эталоны
+  меняют только `service.py` и `abg-release`. Мутации авторских tests:
+  8 kills / 15 survivors / 1 equivalent; live с пассивным monitor прошёл rc=0
+  (дыра F006 подтверждена). Спека `docs/specs/m12a-fix.md` (`fffee6b`):
+  plan-review Codex — 2 находки по AC-404, обе приняты; agy — «находок нет».
+  Клон `abg-m12a-fix-20260917` (ветка m12a-fix, push DISABLED), панель
+  `cx-abg-m12a-fix-20260917` busy.
+
   **История — остановка финишной директивой владельца 15.09.2026.**
   **Актуальный handoff, 11:54 UTC:** завершить сессию; новых исполнителей,
   вех и разведок НЕ запускать. Это отменяет прежнее «форсируй все задачи»,
