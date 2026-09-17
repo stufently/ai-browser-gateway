@@ -814,15 +814,11 @@ class ScraplingAdapterTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["sentinel"])
 
-    def test_scrapling_passes_response_headers(self):
-        captured = {}
-
-        class Page:
-            status = 200
-            url = "https://final.invalid/"
-            body = b"<html>marker</html>"
-            headers = {"cf-mitigated": "challenge"}
-            history = ()
+    def _probe_response(self, status, body, headers):
+        page = types.SimpleNamespace(
+            status=status, url="https://final.invalid/", body=body,
+            headers=headers, history=(),
+        )
 
         class Session:
             def __init__(self, **kwargs):
@@ -835,15 +831,57 @@ class ScraplingAdapterTests(unittest.TestCase):
                 pass
 
             def fetch(self, url, **kwargs):
-                captured["url"] = url
-                return Page()
+                return page
 
         with patch.dict(sys.modules, self._fake_modules(Session)):
-            adapter = self.probe.ScraplingAdapter()
-            adapter.start()
-            result = adapter.navigate("https://target.invalid/")
-            adapter.close()
-        self.assertEqual(result["headers"]["cf-mitigated"], "challenge")
+            return self.probe.run_probe(
+                "scrapling", "https://target.invalid/", mode="cold",
+                content_only=True, clock=Clock(), metrics=lambda: (0, 0),
+            )
+
+    def test_scrapling_drops_stale_cf_header_on_clean_2xx(self):
+        body = (b"<html><title>Directory</title><body>Real content"
+                b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">'
+                b"</script></body></html>")
+        for status in (200, 204, 299):
+            with self.subTest(status=status):
+                headers = {"CF-Mitigated": "challenge", "Content-Type": "text/html",
+                           "X-Keep": "present"}
+                result = self._probe_response(status, body, headers)
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"],
+                                 {"content-type": "text/html", "x-keep": "present"})
+                self.assertEqual(result["challenge"], "none")
+                self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+                self.assertEqual(headers["CF-Mitigated"], "challenge")
+
+    def test_scrapling_preserves_cf_header_outside_2xx(self):
+        for status in (None, 199, 300, 403, 429, 500):
+            with self.subTest(status=status):
+                result = self._probe_response(
+                    status, b"<html>Real content</html>", {"cf-mitigated": "challenge"})
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                self.assertEqual(result["challenge"], "suspected")
+                self.assertIn("header_cf_mitigated", result["challenge_markers"])
+
+    def test_scrapling_preserves_cf_header_on_2xx_interstitial(self):
+        body = (ROOT / "tests/fixtures/cf_interstitial_200body_403.html").read_bytes()
+        for value, verdict in (("challenge", "suspected"), ("interactive", "interactive")):
+            with self.subTest(value=value):
+                result = self._probe_response(200, body, {"cf-mitigated": value})
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], {"cf-mitigated": value})
+                self.assertEqual(result["challenge"], verdict)
+                self.assertIn("header_cf_mitigated", result["challenge_markers"])
+
+    def test_scrapling_keeps_missing_and_empty_headers_distinct(self):
+        for headers, expected in ((None, None), ({}, {}), ({"cf-mitigated": "challenge"}, {})):
+            with self.subTest(headers=headers):
+                result = self._probe_response(200, b"<html>Real content</html>", headers)
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], expected)
+                self.assertEqual(result["challenge"], "none")
 
     def test_scrapling_engine_failure_is_normalized_not_raised(self):
         class Boom:

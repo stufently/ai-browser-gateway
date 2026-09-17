@@ -650,6 +650,12 @@ class ScraplingAdapter:
         headers = _normalize_headers(getattr(response, "headers", None))
         history = getattr(response, "history", None) or ()
         status = getattr(response, "status", None)
+        if (status is not None and 200 <= status < 300
+                and headers is not None and "cf-mitigated" in headers
+                and detect_challenge(status, None, body)[0] not in ("suspected", "interactive")):
+            # Scrapling can retain challenge headers after its solver reaches
+            # the real page. Trust the body only for this successful response.
+            headers.pop("cf-mitigated")
         final_url = str(getattr(response, "url", url) or url)
         return _result(status, final_url, body, len(history), headers=headers)
 
