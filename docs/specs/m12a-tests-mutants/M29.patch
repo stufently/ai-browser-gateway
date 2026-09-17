@@ -1,0 +1,11 @@
+--- a/gateway/service.py
++++ b/gateway/service.py
+@@ -227,7 +227,7 @@
+     stopping = threading.Event()
+ 
+     def stop(*_args):
+-        server.launches.stop()
++        pass  # synchronous admission stop removed
+         if stopping.is_set():
+             return
+         stopping.set()
