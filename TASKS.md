@@ -476,10 +476,19 @@
   настоящее тело, но заголовки challenge-ответа с `cf-mitigated: challenge` →
   детектор `suspected`. Правка в адаптере, не в policy M10 (frozen probe M10
   требует отвергать suspected без подтверждения).
-  - M13a `docs/specs/m13a-scrapling-headers.md` — панель
-    `cx-abg-m13a-scrapling-20260917`, BASE `6934004`.
-  - M13b подготовка probe `docs/specs/m13b-late-container-probe.md` — панель
-    `cx-abg-m13b-probe-20260917`; затем веха исправления DockerLauncher.
+  - M13a `docs/specs/m13a-scrapling-headers.md`: FINAL `c0a6f17`, machine_pass
+    (live bizprofile без expected_text: scrapling 200/none, 21–24 с). Codex
+    result review: НЕ ПРИНИМАТЬ — 200 + cf-mitigated + captcha-атрибут в теле
+    после удаления заголовка → `none` (подтверждено вызовом детектора);
+    `tests/mutation_gate_scrapling.py` ссылается на удалённый тест. agy — без
+    находок. Мутации по `c0a6f17` остановлены (abandoned).
+  - M13a-fix `docs/specs/m13a-fix.md` — панель `cx-abg-m13a-fix-20260917`,
+    BASE `c0a6f17`; после приёмки — мутации `docs/specs/m13a-mutations.md`
+    (SOURCE заменить на FINAL fix).
+  - M13b probe принят и влит (`3a55167`): BASE red 2/6 на позднем контейнере,
+    эталоны name/label green с frozen M9/M12 (перепроверено координатором).
+  - M13b-fix `docs/specs/m13b-fix.md` — панель `cx-abg-m13b-fix-20260917`,
+    BASE `5a508e4`.
   - M13c — выкладка нового release после M13a+M13b.
 
 - [x] **M12 — COMPLETED 17.09.2026 (M12a и M12b влиты в main, сервис выкачен).**
