@@ -503,6 +503,15 @@
   веха только тестов `docs/specs/m12a-tests.md` от `aaf5ca7`, панель
   `cx-abg-m12a-tests-20260917`.
 
+  **17.09 03:15 UTC — M12a ПРИНЯТА и влита в main merge `929bded`.** Веха
+  тестов `m12a-tests` FINAL `b51a7ae`: M03/M29/M30 убиты assertion, accept_run
+  координатора machine_pass (agy+grok receipts), 455 unit OK на main. Продукт
+  с `aaf5ca7` не менялся — live координатора rc=0 на нём остаётся в силе.
+  Healthchecks-чек `ai-browser-gateway-health` (timeout 120/grace 60) создан
+  координатором, ping URL только в `services/ai-browser-gateway/secrets/hc-ping`
+  (0600). Спека M12b `docs/specs/m12b-deploy.md`: plan-review Codex 6 и agy 5
+  находок — все приняты и внесены.
+
   **Бэклог M12:** DockerLauncher — уборка контейнера, созданного демоном после
   таймаута клиента без cidfile (поиск по `abg.request`-label).
 
