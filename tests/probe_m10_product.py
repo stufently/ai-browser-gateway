@@ -1175,7 +1175,7 @@ class ProductRunTests(unittest.TestCase):
     def test_terminal_timeout_clears_body_and_keeps_original_url(self):
         fetcher = ScriptedFetcher(_reply(reason=FailureReason.timeout, html="<p>interstitial</p>",
                                         text="interstitial"))
-        out = _run(_request(egress_profiles=("gold",)), fetcher)
+        out = _run(_request(allow_browser=False), fetcher)
         self.assertFalse(out.ok)
         self.assertEqual(out.error_type, FailureReason.timeout)
         self.assertEqual(out.step, Step.retry_later)

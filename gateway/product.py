@@ -9,6 +9,9 @@ from bench.runner.fetch import validate_url
 from gateway.models import Attempt, GatewayOutcome, PlanStep
 
 
+HTTP_STEP_BUDGET_MS = 15_000
+
+
 @dataclass(frozen=True)
 class ProductRequest:
     url: str
@@ -124,7 +127,8 @@ def run_product(request, fetcher, *, clock=_clock_ms) -> GatewayOutcome:
         remaining = request.budget_ms - (clock() - start)
         if remaining <= 0:
             return finish(F.timeout, Step.retry_later)
-        reply = fetcher(step, remaining)
+        budget = min(remaining, HTTP_STEP_BUDGET_MS) if step.purpose in ('http', 'egress') else remaining
+        reply = fetcher(step, budget)
         late = clock() - start >= request.budget_ms
         ok, reason = accept_page(reply.result, request.expected_text)
         entrance = step.purpose == 'entrance'
@@ -143,6 +147,12 @@ def run_product(request, fetcher, *, clock=_clock_ms) -> GatewayOutcome:
         elif reason == F.not_measured:
             decision = None
             following = cursor + 1
+        elif reason == F.timeout and step.purpose in ('http', 'egress'):
+            purposes = ('egress',) if step.purpose == 'egress' else ('browser', 'egress')
+            following = next((i for i in range(cursor + 1, len(plan))
+                              if plan[i].purpose in purposes), None)
+            decision = (Step.retry_later if following is None else
+                        Step.browser if plan[following].purpose == 'browser' else Step.change_egress)
         elif reason in (F.timeout, F.connection_error, F.dns_error, F.tls_error, F.http_5xx):
             decision = Step.retry_later
         elif reason in (F.provider_error, F.environment_error):
