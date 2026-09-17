@@ -1,21 +1,21 @@
-# M13a — независимые мутации тестов Scrapling-заголовков (после M13a-fix)
+# M13a — независимые мутации тестов Scrapling-заголовков (после M13a-fix2)
 
 17.09.2026. Проверочная задача cx, не реализация. Директива владельца 17.09:
 «доделывай всё до конца». Правку и тесты писала другая cx-панель.
 
-Клон /home/user/exec-clones/abg-m13a-mutations2-20260917, ветка
-m13a-mutations2, origin push DISABLED. SOURCE_SHA
-`c32da3c` (FINAL M13a-fix, полный SHA — `git rev-parse c32da3c` в клоне).
-Выход: /home/user/.cache/abg-coord-20260917/m13a-mutations2/. Первый прогон
-по `c0a6f17` остановлен координатором: код переделывался.
+Клон /home/user/exec-clones/abg-m13a-mutations3-20260917, ветка
+m13a-mutations3, origin push DISABLED. SOURCE_SHA
+`375bdbf` (FINAL M13a-fix2, полный SHA — `git rev-parse 375bdbf` в клоне).
+Выход: /home/user/.cache/abg-coord-20260917/m13a-mutations3/. Прогоны по
+`c0a6f17` и `c32da3c` остановлены координатором: код переделывался.
 
 ## Что мутировать
 
 Продукт мутаций — условие удаления устаревшего `cf-mitigated` в
 `ScraplingAdapter.navigate` (`bench/providers/docker/probe.py`) и его соседство:
 `_normalize_headers`, передача `headers` в `_result`, путь `run_probe` →
-`detect_challenge`. Прочитать целиком `docs/specs/m13a-scrapling-headers.md`, `docs/specs/m13a-fix.md`,
-`docs/research/08-bizprofile-scrapling.md` и `git diff 7e1bf3a c32da3c`.
+`detect_challenge`. Прочитать целиком `docs/specs/m13a-scrapling-headers.md`, `docs/specs/m13a-fix.md`, `docs/specs/m13a-fix2.md`,
+`docs/research/08-bizprofile-scrapling.md` и `git diff 7e1bf3a 375bdbf`.
 `detect_challenge` и его правила НЕ мутировать (заморожены отдельно).
 
 Авторский набор — ТОЛЬКО `tests.test_probe.ScraplingAdapterTests`. Команда
@@ -30,9 +30,11 @@ m13a-mutations2, origin push DISABLED. SOURCE_SHA
 `status` вместо тела); удаление (удалять все заголовки / очищать словарь,
 удалять всегда при 2xx, превращать `{}` в `None`, мутировать исходный словарь
 ответа вместо нормализованной копии); удалить весь блок (регресс исходного
-дефекта); captcha-условие (убрать `"body_captcha" not in`, `== "none"` заменить на
-`not in ("suspected", "interactive")`, проверять `body_captcha` в
-`body_challenge[0]` вместо `[1]`). Отдельно: `tests/mutation_gate_scrapling.py`
+дефекта); условие по правилам тела (убрать проверку `<=` множества, `<=` заменить на
+`>=` или на пересечение, добавить в `_SCRAPLING_STALE_CF_HEADER_RULES`
+по одному `body_cf_chl_opt` / `body_cf_chl` / `body_cf_challenges_host` /
+`body_captcha`, убрать из него `body_cf_challenge_platform`, `== "none"`
+заменить на `not in ("suspected", "interactive")`). Отдельно: `tests/mutation_gate_scrapling.py`
 запустить на SOURCE (он сам мутирует дерево — только в копии, RW-mount копии,
 не клона) и подтвердить, что все его мутанты убиты и тест мутанта 3 существует.
 
