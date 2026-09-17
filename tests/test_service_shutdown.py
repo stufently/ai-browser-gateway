@@ -170,7 +170,7 @@ class ShutdownTests(unittest.TestCase):
             server.launches.stop()
             sem.release()
             future.result(timeout=3)
-        self.assertEqual(observed, ['curl'], 'queued browser fetched after stop')
+        self.assertEqual(observed, ['curl_cffi'], 'queued browser fetched after stop')
 
     def test_admitted_launch_is_drained_before_final_sweep(self):
         entered, release, removed, done = (Event() for _ in range(4))

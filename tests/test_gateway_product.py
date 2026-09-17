@@ -4,12 +4,12 @@ from dataclasses import replace
 
 from bench.escalate import Step
 from bench.models import ChallengeType as C, FailureReason as F, FetchResult
-from gateway.models import ProviderReply
-from gateway.product import ProductRequest, accept_page, run_product
+from gateway.models import PlanStep, ProviderReply
+from gateway.product import ProductRequest, accept_page, plan_product, run_product
 
 
 def page(**changes):
-    values = dict(provider='curl', provider_version='test', requested_url='https://a.test',
+    values = dict(provider='curl_cffi', provider_version='test', requested_url='https://a.test',
                   final_url='https://a.test/final', status=200, html='<p>actual</p>',
                   text='actual', elapsed_ms=1, startup_ms=0, cpu_ms=0,
                   peak_rss_mb=0.0, bytes_received=13, redirects=0,
@@ -19,6 +19,27 @@ def page(**changes):
 
 
 class ProductTests(unittest.TestCase):
+    def test_http_only_plan_preserves_egress_order_and_deduplicates(self):
+        request = ProductRequest('https://a.test', allow_browser=False,
+                                 egress_profiles=('silver', 'gold', 'silver'))
+        self.assertEqual(plan_product(request), (
+            PlanStep('curl_cffi', 'direct', 'http'),
+            PlanStep('curl_cffi', 'silver', 'egress'),
+            PlanStep('curl_cffi', 'gold', 'egress'),
+        ))
+
+    def test_product_plan_never_uses_curl(self):
+        for allow_browser in (False, True):
+            for max_age_hours in (0, 1):
+                for profiles in ((), ('p', 'q')):
+                    with self.subTest(browser=allow_browser, age=max_age_hours,
+                                      profiles=profiles):
+                        request = ProductRequest('https://a.test',
+                                                 allow_browser=allow_browser,
+                                                 max_age_hours=max_age_hours,
+                                                 egress_profiles=profiles)
+                        self.assertNotIn('curl', [step.provider for step in plan_product(request)])
+
     def test_status_and_challenge_precede_body_match(self):
         cases = [(dict(error_type=F.timeout, status=403), F.timeout),
                  (dict(status=403, challenge=C.interactive), F.http_403),
@@ -48,7 +69,7 @@ class ProductTests(unittest.TestCase):
             return ProviderReply(replies[len(calls) - 1])
         result = run_product(ProductRequest('https://a.test', expected_text='actual'), fetch)
         self.assertTrue(result.ok)
-        self.assertEqual(calls, ['curl', 'patchright', 'scrapling'])
+        self.assertEqual(calls, ['curl_cffi', 'patchright', 'scrapling'])
         self.assertEqual([a.error_type for a in result.attempts],
                          [F.http_403, F.content_missing, F.none])
         self.assertEqual([a.next_step for a in result.attempts], [Step.browser, Step.browser, Step.stop])
@@ -61,7 +82,7 @@ class ProductTests(unittest.TestCase):
             reason = F.not_measured if step.egress_profile == 'absent' else F.none
             return ProviderReply(page(status=429, error_type=reason))
         result = run_product(ProductRequest('https://a.test', egress_profiles=('absent', 'absent', 'p', 'q')), fetch)
-        self.assertEqual(calls, [('curl', 'direct'), ('curl', 'absent'), ('curl', 'p')])
+        self.assertEqual(calls, [('curl_cffi', 'direct'), ('curl_cffi', 'absent'), ('curl_cffi', 'p')])
         self.assertEqual((result.ok, result.step, result.error_type), (False, Step.human, F.http_429))
         self.assertIsNone(result.attempts[1].next_step)
         self.assertEqual((result.html, result.text), ('', ''))
@@ -73,7 +94,7 @@ class ProductTests(unittest.TestCase):
                 calls.append(step.provider)
                 return ProviderReply(page(provider=step.provider), age)
             result = run_product(ProductRequest('https://a.test', max_age_hours=2), fetch)
-            self.assertEqual(calls, ['rss', 'wayback', 'curl'])
+            self.assertEqual(calls, ['rss', 'wayback', 'curl_cffi'])
             self.assertEqual(result.attempts[0].error_type, F.content_mismatch)
             self.assertIsNone(result.attempts[0].next_step)
 

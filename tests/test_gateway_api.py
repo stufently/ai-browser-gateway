@@ -72,7 +72,7 @@ class APITests(unittest.TestCase):
         active, maximum, lock = [0], [0], threading.Lock()
         def factory(url, **kw):
             def fetch(step, budget):
-                if step.provider == 'curl':
+                if step.provider == 'curl_cffi':
                     if url.endswith('/second'):
                         second_http.set()
                     return reply(status=200 if url.endswith('/http') else 403)
@@ -137,7 +137,7 @@ class APITests(unittest.TestCase):
         lock = threading.Lock()
         def factory(url, **kw):
             def fetch(step, budget):
-                if step.provider == 'curl':
+                if step.provider == 'curl_cffi':
                     if url.endswith('/queued'):
                         queued_http.set()
                     return reply(status=403)

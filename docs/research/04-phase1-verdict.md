@@ -96,3 +96,20 @@ Playwright, patchright с настоящим Chrome, camoufox и pydoll — эт
   граф фреймов и Shadow DOM и держать сессию между запросами.
   **`iframe` закрыт в M2** (пробник обходит `page.frames`, стало 8/12);
   `shadow` и `session` остаются за следующими вехами.
+
+## Пересмотр 17.09.2026
+
+По решению владельца «Сразу curl_cffi в лестницу» в M14a HTTP-ступень direct
+и все egress-ступени `plan_product` переведены с `curl` на `curl_cffi`.
+Порядок ступеней, входы RSS/Wayback и браузеры patchright/scrapling сохранены.
+Это пересмотр прежнего исключения решением владельца, а не новый замер
+incremental coverage; исторический результат 0 на пяти целях остаётся в силе.
+
+Координатор 17.09.2026 проверил образ `abg-curl_cffi:m2` с текущим `probe.py`
+через bind и `--content-only`: example.com — HTTP 200, `challenge=none`,
+106 мс; lowendtalk.com/categories/offers — HTTP 200, настоящая страница
+«Offers — LowEndTalk», 271 мс, но детектор возвращает `captcha` по признакам
+`body_captcha` и `body_cf_challenge_platform`; bizprofile.net — HTTP 403,
+«Just a moment...». Эти наблюдения переданы координатором, новых live-запросов
+в M14a не выполнялось. Детектор и policy не менялись: успешный HTTP-ответ
+LowEndTalk сам по себе не означает принятия страницы продуктом.

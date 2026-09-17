@@ -47,7 +47,7 @@ PAGE = '''<html lang="ru"><head><title>A &amp; B</title>
 <noscript>HIDDEN_NOSCRIPT</noscript><iframe>HIDDEN_IFRAME</iframe><svg>HIDDEN_SVG</svg></body></html>'''
 
 
-def reply(provider='curl', **kw):
+def reply(provider='curl_cffi', **kw):
     values = dict(provider=provider, provider_version='probe', requested_url=URL,
                   final_url=FINAL, status=200, html=PAGE, text='Visible русский',
                   elapsed_ms=7, startup_ms=0, cpu_ms=0, peak_rss_mb=0,
@@ -57,14 +57,14 @@ def reply(provider='curl', **kw):
 
 
 def outcome(ok=True):
-    return GatewayOutcome(ok, URL, FINAL, PAGE, 'Visible русский', 'curl', 1.5,
+    return GatewayOutcome(ok, URL, FINAL, PAGE, 'Visible русский', 'curl_cffi', 1.5,
                           F.none if ok else F.http_403, Step.stop if ok else Step.human,
-                          (Attempt('curl', 'edge', ok, F.none, C.none, 200, 7, 1.5, Step.stop),), 9)
+                          (Attempt('curl_cffi', 'edge', ok, F.none, C.none, 200, 7, 1.5, Step.stop),), 9)
 
 
 def envelope(mode='text', content='selected', ok=True):
     return dict(ok=ok, url=URL, final_url=FINAL, format=mode, content=content,
-                provider='curl', age_hours=None, error_type='none' if ok else 'http_403',
+                provider='curl_cffi', age_hours=None, error_type='none' if ok else 'http_403',
                 step='stop' if ok else 'human', elapsed_ms=9, attempts=[])
 
 
@@ -229,18 +229,18 @@ class API(Public):
             result = self.json_response(request(addr), 200)
         self.assertEqual(seen[0], (URL, {'rss': 'https://feed.invalid/rss'},
                                   {'first': 'http://u:' + SECRET + '@proxy.invalid', 'second': ''}))
-        self.assertEqual(seen[1:], [('curl', 'direct'), ('curl', 'first'), ('curl', 'second')])
+        self.assertEqual(seen[1:], [('curl_cffi', 'direct'), ('curl_cffi', 'first'), ('curl_cffi', 'second')])
         wanted = envelope(content='Visible русский')
         wanted.update(age_hours=1.5)
         for key in wanted.keys() - {'attempts', 'elapsed_ms'}:
             self.assertEqual(result[key], wanted[key], key)
         self.assertIs(type(result['elapsed_ms']), int)
         self.assertGreaterEqual(result['elapsed_ms'], 0)
-        expected = [dict(provider='curl', egress_profile='direct', success=False, error_type='http_429',
+        expected = [dict(provider='curl_cffi', egress_profile='direct', success=False, error_type='http_429',
                          challenge='none', status=429, elapsed_ms=7, age_hours=1.5, next_step='change_egress'),
-                    dict(provider='curl', egress_profile='first', success=False, error_type='not_measured',
+                    dict(provider='curl_cffi', egress_profile='first', success=False, error_type='not_measured',
                          challenge='none', status=200, elapsed_ms=7, age_hours=1.5, next_step=None),
-                    dict(provider='curl', egress_profile='second', success=True, error_type='none',
+                    dict(provider='curl_cffi', egress_profile='second', success=True, error_type='none',
                          challenge='none', status=200, elapsed_ms=7, age_hours=1.5, next_step='stop')]
         self.assertEqual(result['attempts'], expected)
         self.assertNotIn(SECRET, json.dumps(result))
@@ -266,17 +266,17 @@ class API(Public):
                             self.assertEqual(value['attempts'][0]['error_type'], 'interactive_challenge')
 
     def test_options_reach_m10_policy(self):
-        cases = [({'budget_ms': 321}, True, ['curl']),
-                 ({'expected_text': 'absent', 'allow_browser': False}, False, ['curl']),
+        cases = [({'budget_ms': 321}, True, ['curl_cffi']),
+                 ({'expected_text': 'absent', 'allow_browser': False}, False, ['curl_cffi']),
                  ({'max_age_hours': 2}, True, ['rss']),
-                 ({'allow_browser': False}, False, ['curl']),
-                 ({'allow_browser': True}, True, ['curl', 'patchright'])]
+                 ({'allow_browser': False}, False, ['curl_cffi']),
+                 ({'allow_browser': True}, True, ['curl_cffi', 'patchright'])]
         for index, (options, ok, providers) in enumerate(cases):
             calls = []
             def factory(*a, **k):
                 def fetch(step, budget):
                     calls.append((step.provider, budget))
-                    return reply(step.provider, status=403 if index >= 3 and step.provider == 'curl' else 200)
+                    return reply(step.provider, status=403 if index >= 3 and step.provider == 'curl_cffi' else 200)
                 return fetch
             with self.subTest(options=options), serving(self.server(factory)) as addr:
                 value = self.json_response(request(addr, {'url': URL, **options}), 200)
@@ -293,8 +293,8 @@ class API(Public):
         results, calls, errors = {}, [], []
         def factory(url, **kw):
             def fetch(step, budget):
-                if step.provider == 'curl':
-                    return reply('curl', status=403)
+                if step.provider == 'curl_cffi':
+                    return reply('curl_cffi', status=403)
                 calls.append(url)
                 if url.endswith('/0') or url.endswith('/1'):
                     entered[int(url[-1])].set()
@@ -348,7 +348,7 @@ class API(Public):
                 calls.append((url, step.provider))
                 if url.endswith('/http'):
                     return reply(step.provider)
-                if step.provider == 'curl' or (url.endswith('/hold') and step.provider == 'patchright'):
+                if step.provider == 'curl_cffi' or (url.endswith('/hold') and step.provider == 'patchright'):
                     return reply(step.provider, status=403)
                 if url.endswith('/hold'):
                     entered.set()
@@ -435,9 +435,9 @@ class Limiter(Public):
                 return True
             def release(self):
                 actions.append('release')
-        for provider in ('curl', 'rss', 'wayback'):
+        for provider in ('curl_cffi', 'rss', 'wayback'):
             calls = []
-            step = PlanStep(provider, 'direct', 'entrance' if provider != 'curl' else 'http')
+            step = PlanStep(provider, 'direct', 'entrance' if provider != 'curl_cffi' else 'http')
             limit(lambda s, b: calls.append((s, b)) or reply(s.provider), NoGate(), url=URL)(step, 123)
             self.assertEqual(calls, [(step, 123)])
         self.assertEqual(actions, [], 'HTTP/entrances acquired browser slot')

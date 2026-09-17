@@ -238,7 +238,7 @@ def _result(provider="curl", *, status=200, html=None, text=None,
     )
 
 
-def _reply(provider="curl", *, age=None, **kwargs):
+def _reply(provider="curl_cffi", *, age=None, **kwargs):
     return ProviderReply(_result(provider, **kwargs), age_hours=age)
 
 
@@ -596,14 +596,14 @@ class ProductFetcherTests(unittest.TestCase):
             "--network=host" in argv
             or ("--network" in argv and argv[argv.index("--network") + 1] == "host")
         )
-        missing = other(PlanStep("curl", "gold", "egress"), 200)
+        missing = other(PlanStep("curl_cffi", "gold", "egress"), 200)
         self.assertEqual(missing.result.error_type, FailureReason.not_measured)
         self.assertEqual(len(launcher.calls), 1)
 
     def test_unknown_profile_does_not_become_direct(self):
         launcher = ProbeLauncher((0, json.dumps(_probe_payload()), ""))
         fetcher = ProductFetcher(URL, profiles={"gold": "http://gold.invalid"}, launcher=launcher)
-        reply = fetcher(PlanStep("curl", "silver", "egress"), 200)
+        reply = fetcher(PlanStep("curl_cffi", "silver", "egress"), 200)
         self.assertEqual(reply.result.error_type, FailureReason.not_measured)
         self.assertEqual(launcher.calls, [])
 
@@ -648,7 +648,7 @@ class ProductFetcherTests(unittest.TestCase):
             def run_named(name):
                 try:
                     thread_results.append(
-                        (name, fetcher(PlanStep("curl", name, "egress" if name != "direct" else "http"), 500)
+                        (name, fetcher(PlanStep("curl_cffi", name, "egress" if name != "direct" else "http"), 500)
                          .result.error_type)
                     )
                 except Exception as exc:
@@ -870,7 +870,7 @@ class ProductPlanTests(unittest.TestCase):
 
     def test_default_menu_is_http_then_two_browsers(self):
         self.assertEqual(plan_product(_request(allow_browser=True)), (
-            PlanStep("curl", "direct", "http"),
+            PlanStep("curl_cffi", "direct", "http"),
             PlanStep("patchright", "direct", "browser"),
             PlanStep("scrapling", "direct", "browser"),
         ))
@@ -881,11 +881,11 @@ class ProductPlanTests(unittest.TestCase):
             (
                 PlanStep("rss", "direct", "entrance"),
                 PlanStep("wayback", "direct", "entrance"),
-                PlanStep("curl", "direct", "http"),
+                PlanStep("curl_cffi", "direct", "http"),
                 PlanStep("patchright", "direct", "browser"),
                 PlanStep("scrapling", "direct", "browser"),
-                PlanStep("curl", "gold", "egress"),
-                PlanStep("curl", "silver", "egress"),
+                PlanStep("curl_cffi", "gold", "egress"),
+                PlanStep("curl_cffi", "silver", "egress"),
             ),
         )
 
@@ -893,8 +893,8 @@ class ProductPlanTests(unittest.TestCase):
         self.assertEqual(
             plan_product(_request(allow_browser=False, egress_profiles=("gold",))),
             (
-                PlanStep("curl", "direct", "http"),
-                PlanStep("curl", "gold", "egress"),
+                PlanStep("curl_cffi", "direct", "http"),
+                PlanStep("curl_cffi", "gold", "egress"),
             ),
         )
 
@@ -908,12 +908,12 @@ class ProductRunTests(unittest.TestCase):
         out = _run(_request(), fetcher)
         self.assertTrue(out.ok)
         self.assertIsInstance(out, GatewayOutcome)
-        self.assertEqual(fetcher.routes, [("curl", "direct", "http")])
+        self.assertEqual(fetcher.routes, [("curl_cffi", "direct", "http")])
         self.assertEqual(out.url, URL)
         self.assertEqual(out.final_url, URL + "/final")
         self.assertEqual(out.html, f"<p>{VISIBLE}</p>")
         self.assertEqual(out.text, VISIBLE)
-        self.assertEqual(out.provider, "curl")
+        self.assertEqual(out.provider, "curl_cffi")
         self.assertEqual(out.error_type, FailureReason.none)
         self.assertEqual(out.step, Step.stop)
         self.assertEqual(out.attempts[0].next_step, Step.stop)
@@ -925,16 +925,16 @@ class ProductRunTests(unittest.TestCase):
             _reply(status=403, html="no", text="no"),
             _reply("patchright", status=403, html="no", text="no"),
             _reply("scrapling", status=403, html="no", text="no"),
-            _reply("curl", html=f"<p>{VISIBLE}</p>", text=VISIBLE),
+            _reply("curl_cffi", html=f"<p>{VISIBLE}</p>", text=VISIBLE),
         )
         out = _run(_request(egress_profiles=("gold", "silver")), fetcher)
         self.assertTrue(out.ok)
-        self.assertEqual(out.provider, "curl")
+        self.assertEqual(out.provider, "curl_cffi")
         self.assertEqual(fetcher.routes, [
-            ("curl", "direct", "http"),
+            ("curl_cffi", "direct", "http"),
             ("patchright", "direct", "browser"),
             ("scrapling", "direct", "browser"),
-            ("curl", "gold", "egress"),
+            ("curl_cffi", "gold", "egress"),
         ])
         self.assertEqual(out.attempts[0].next_step, Step.browser)
         self.assertEqual(out.attempts[-1].next_step, Step.stop)
@@ -942,14 +942,14 @@ class ProductRunTests(unittest.TestCase):
     def test_allow_browser_false_skips_browsers_to_egress(self):
         fetcher = ScriptedFetcher(
             _reply(status=403, html="no", text="no"),
-            _reply("curl", html=VISIBLE, text=VISIBLE),
-            _reply("curl"),
+            _reply("curl_cffi", html=VISIBLE, text=VISIBLE),
+            _reply("curl_cffi"),
         )
         out = _run(_request(allow_browser=False, egress_profiles=("gold", "silver")), fetcher)
         self.assertTrue(out.ok)
         self.assertEqual(fetcher.routes, [
-            ("curl", "direct", "http"),
-            ("curl", "gold", "egress"),
+            ("curl_cffi", "direct", "http"),
+            ("curl_cffi", "gold", "egress"),
         ])
         self.assertNotIn("patchright", [route[0] for route in fetcher.routes])
         self.assertNotIn("scrapling", [route[0] for route in fetcher.routes])
@@ -959,8 +959,8 @@ class ProductRunTests(unittest.TestCase):
             _reply(status=403, html="no", text="no"),
             _reply("patchright", status=403, html="no", text="no"),
             _reply("scrapling", status=403, html="no", text="no"),
-            _reply("curl", status=403, html="no", text="no"),
-            _reply("curl", html=VISIBLE, text=VISIBLE),
+            _reply("curl_cffi", status=403, html="no", text="no"),
+            _reply("curl_cffi", html=VISIBLE, text=VISIBLE),
         )
         out = _run(_request(egress_profiles=("gold", "silver")), fetcher)
         self.assertFalse(out.ok)
@@ -973,24 +973,24 @@ class ProductRunTests(unittest.TestCase):
     def test_not_measured_profile_is_skipped_and_not_an_ip_change(self):
         fetcher = ScriptedFetcher(
             _reply(status=403, html="no", text="no"),
-            _reply("curl", reason=FailureReason.not_measured, html="", text=""),
-            _reply("curl", html=VISIBLE, text=VISIBLE),
+            _reply("curl_cffi", reason=FailureReason.not_measured, html="", text=""),
+            _reply("curl_cffi", html=VISIBLE, text=VISIBLE),
         )
         out = _run(_request(allow_browser=False, egress_profiles=("missing", "gold")), fetcher)
         self.assertTrue(out.ok)
         self.assertEqual(fetcher.routes, [
-            ("curl", "direct", "http"),
-            ("curl", "missing", "egress"),
-            ("curl", "gold", "egress"),
+            ("curl_cffi", "direct", "http"),
+            ("curl_cffi", "missing", "egress"),
+            ("curl_cffi", "gold", "egress"),
         ])
         self.assertIsNone(out.attempts[1].next_step)
         self.assertEqual(out.attempts[1].error_type, FailureReason.not_measured)
-        self.assertEqual(out.provider, "curl")
+        self.assertEqual(out.provider, "curl_cffi")
 
     def test_only_not_measured_profiles_end_human_not_measured(self):
         fetcher = ScriptedFetcher(
             _reply(status=403, html="no", text="no"),
-            _reply("curl", reason=FailureReason.not_measured, html="", text=""),
+            _reply("curl_cffi", reason=FailureReason.not_measured, html="", text=""),
         )
         out = _run(_request(allow_browser=False, egress_profiles=("missing",)), fetcher)
         self.assertFalse(out.ok)
@@ -1011,10 +1011,10 @@ class ProductRunTests(unittest.TestCase):
         fetcher = ScriptedFetcher(
             _reply("rss", age=math.nan, html=VISIBLE, text=VISIBLE),
             _reply("wayback", age=math.inf, html=VISIBLE, text=VISIBLE),
-            _reply("curl", html=VISIBLE, text=VISIBLE),
+            _reply("curl_cffi", html=VISIBLE, text=VISIBLE),
         )
         out = _run(_request(max_age_hours=1, allow_browser=False), fetcher)
-        self.assertEqual(out.provider, "curl")
+        self.assertEqual(out.provider, "curl_cffi")
         self.assertEqual([attempt.error_type for attempt in out.attempts[:2]],
                          [FailureReason.content_mismatch, FailureReason.content_mismatch])
         self.assertEqual([attempt.next_step for attempt in out.attempts[:2]], [None, None])
@@ -1022,10 +1022,10 @@ class ProductRunTests(unittest.TestCase):
         fetcher = ScriptedFetcher(
             _reply("rss", age=None, html=VISIBLE, text=VISIBLE),
             _reply("wayback", age=-0.1, html=VISIBLE, text=VISIBLE),
-            _reply("curl", html=VISIBLE, text=VISIBLE),
+            _reply("curl_cffi", html=VISIBLE, text=VISIBLE),
         )
         out = _run(_request(max_age_hours=1, allow_browser=False), fetcher)
-        self.assertEqual(out.provider, "curl")
+        self.assertEqual(out.provider, "curl_cffi")
         self.assertEqual(len(fetcher.routes), 3)
 
         fetcher = ScriptedFetcher(
@@ -1075,16 +1075,16 @@ class ProductRunTests(unittest.TestCase):
     def test_http_429_skips_browsers_then_human_after_measured_change(self):
         fetcher = ScriptedFetcher(
             _reply(status=429, html="no", text="no"),
-            _reply("curl", status=429, html="no", text="no"),
-            _reply("curl", html=VISIBLE, text=VISIBLE),
+            _reply("curl_cffi", status=429, html="no", text="no"),
+            _reply("curl_cffi", html=VISIBLE, text=VISIBLE),
         )
         out = _run(_request(egress_profiles=("gold", "silver")), fetcher)
         self.assertFalse(out.ok)
         self.assertEqual(out.error_type, FailureReason.http_429)
         self.assertEqual(out.step, Step.human)
         self.assertEqual(fetcher.routes, [
-            ("curl", "direct", "http"),
-            ("curl", "gold", "egress"),
+            ("curl_cffi", "direct", "http"),
+            ("curl_cffi", "gold", "egress"),
         ])
 
     def test_interactive_challenge_is_human_even_with_expected_text(self):
@@ -1157,12 +1157,12 @@ class ProductRunTests(unittest.TestCase):
         self.assertTrue(out.ok)
         self.assertEqual(
             [route for route in fetcher.routes if route[1] == "missing"],
-            [("curl", "missing", "egress")],
+            [("curl_cffi", "missing", "egress")],
         )
         self.assertEqual(fetcher.routes, [
-            ("curl", "direct", "http"),
-            ("curl", "missing", "egress"),
-            ("curl", "gold", "egress"),
+            ("curl_cffi", "direct", "http"),
+            ("curl_cffi", "missing", "egress"),
+            ("curl_cffi", "gold", "egress"),
         ])
 
     def test_fetcher_exception_is_not_masked_as_success(self):
