@@ -5,7 +5,7 @@
 Репозиторий /home/user/github/ai-browser-gateway, 17.09.2026.
 BASE_SHA `58d3b738a808af71ebed84df261e87754747ee0a` — main после слияния принятой M15a (http/egress-ступень
 ограничена 15 с, её `timeout` передаёт ход браузеру или следующему egress).
-Клон /home/user/exec-clones/abg-m15b-deploy-20260917, ветка m15b-deploy,
+Клон /home/user/exec-clones/abg-m15b-deploy2-20260917, ветка m15b-deploy,
 origin push DISABLED. Исполнитель — cx (директива владельца 17.09.2026:
 «доделывай все до конца кодексом»). Образец — `docs/specs/m14b-deploy.md`,
 `docs/specs/m13c-deploy.md` и раздел README «M12b deployed service» (прочитать
@@ -40,8 +40,9 @@ compose-проекты, контейнеры, сети и `.env` не трога
 2. **Живые проверки** runner'ом `tests/deployed_m12b.py` с `--release 58d3b738a808af71ebed84df261e87754747ee0a
    --evidence /home/user/.cache/abg-coord-20260917/m15b` (код runner НЕ
    менять), строго в этом порядке и без других клиентов API:
-   `--check-deploy`, `--check-api-egress`, `--check-bizprofile`,
-   `--run-targets`. Из улик дополнительно: ни одна попытка `curl_cffi`
+   `--check-deploy`, `--check-profiles`, `--check-api-egress`,
+   `--check-bizprofile`, `--run-targets` (`--check-api-egress` читает
+   `profiles.json`, который пишет `--check-profiles`). Из улик дополнительно: ни одна попытка `curl_cffi`
    (ступени http и egress) в `api-egress.json`, `targets.json` и новом архиве
    `bizprofile-<UTC>.json` не длится дольше 20000 мс (лимит 15 с плюс запас
    на запуск контейнера); лестница по-прежнему начинается с `curl_cffi`
@@ -58,6 +59,14 @@ compose-проекты, контейнеры, сети и `.env` не трога
    `58d3b738a808af71ebed84df261e87754747ee0a`, откат на `b31a36b…`, путь улик m15b.
 
 ## Что проверено вживую, а что предположение
+
+Первая попытка (клон `abg-m15b-deploy-20260917`) остановилась на дефекте
+спеки: не было `--check-profiles`. Прод она не переключала, но успела
+выполнить `abg-release prepare` (release `58d3b73…` и manifest уже есть;
+prepare идемпотентен — повтор сверяет содержимое) и собрать
+`abg-runtime:58d3b738a808`
+(`sha256:3b4508dbd87f90c04c496e693555596e057460f5412acc7ed6199d2d018f1b8e`).
+Это не blocker: повторить шаги процедуры поверх них.
 
 Проверено координатором 17.09.2026: сервис на `b31a36b…` (compose ls и
 `compose.env`); отпечатки отката — sha256 manifest `b31a36b….sha256`
@@ -98,8 +107,8 @@ policy/budget, не ретраить цель ради зелёного исхо
   `bash -c 'printf "%s  %s\n" f0d44ed737b2bf82e46e69f27534bc9e8e9164965c321230b10ec6b47ce2d558 /home/user/services/ai-browser-gateway/manifests/b31a36b10f57a21e4d2703e9de770e731d06950e.sha256 c263d4c65c95e4e0aefb433d58d7eb9207dfc700823f46c6ee91454ab0c983e4 /home/user/services/ai-browser-gateway/manifests/4409f8a5197f7a9f464263e15b362c00548399e2.sha256 | sha256sum -c --quiet - && python3 -c "import sys; sys.path.insert(0, \"tests\"); import deployed_m12b as d; from pathlib import Path; r=\"/home/user/services/ai-browser-gateway\"; [d.verify_release(Path(r, \"releases\", s), Path(r, \"manifests\", s + \".sha256\")) for s in (\"b31a36b10f57a21e4d2703e9de770e731d06950e\", \"4409f8a5197f7a9f464263e15b362c00548399e2\")]" && test "$(docker image inspect abg-runtime:b31a36b10f57 --format "{{.Id}}")" = sha256:c0ee2abf4c14dc906092056d832983106ead0518fe3f054dff75565e30669bd0 && test "$(docker image inspect abg-curl_cffi:m2 --format "{{.Id}}")" = sha256:a5dbc883dc6fb672cf36d80fc3c87c02afbc9085e0c14812328cf8d225bbd7dc && test -s /home/user/services/ai-browser-gateway/compose.env.pre-m15b && test -s /home/user/services/ai-browser-gateway/compose.env.pre-m14b && test -s /home/user/services/ai-browser-gateway/compose.env.pre-m13c'`
 - **AC-934.** Сервис развёрнут на новом release:
   `bash -c 'python3 tests/deployed_m12b.py --check-deploy --release 58d3b738a808af71ebed84df261e87754747ee0a --evidence /home/user/.cache/abg-coord-20260917/m15b'`
-- **AC-935.** Ротация egress через API, egress-попытки в лимите:
-  `bash -c 'python3 tests/deployed_m12b.py --check-api-egress --release 58d3b738a808af71ebed84df261e87754747ee0a --evidence /home/user/.cache/abg-coord-20260917/m15b && python3 -c "import json; r=json.load(open(\"/home/user/.cache/abg-coord-20260917/m15b/api-egress.json\")); a=[x for q in r[\"requests\"] for x in q[\"attempts\"] if x[\"egress_profile\"]!=\"direct\"]; assert r.get(\"rotation_proven\") is True and a and all(x[\"provider\"]==\"curl_cffi\" and x[\"elapsed_ms\"]<=20000 for x in a), a"'`
+- **AC-935.** Профили заново, ротация egress через API, egress-попытки в лимите:
+  `bash -c 'python3 tests/deployed_m12b.py --check-profiles --release 58d3b738a808af71ebed84df261e87754747ee0a --evidence /home/user/.cache/abg-coord-20260917/m15b && python3 tests/deployed_m12b.py --check-api-egress --release 58d3b738a808af71ebed84df261e87754747ee0a --evidence /home/user/.cache/abg-coord-20260917/m15b && python3 -c "import json; r=json.load(open(\"/home/user/.cache/abg-coord-20260917/m15b/api-egress.json\")); a=[x for q in r[\"requests\"] for x in q[\"attempts\"] if x[\"egress_profile\"]!=\"direct\"]; assert r.get(\"rotation_proven\") is True and a and all(x[\"provider\"]==\"curl_cffi\" and x[\"elapsed_ms\"]<=20000 for x in a), a"'`
 - **AC-936.** Bizprofile без expected_text через deployed API:
   `bash -c 'python3 tests/deployed_m12b.py --check-bizprofile --release 58d3b738a808af71ebed84df261e87754747ee0a --evidence /home/user/.cache/abg-coord-20260917/m15b'`
 - **AC-937.** Шесть целей и CLI; лестница с curl_cffi, HTTP-попытки не дольше лимита:
@@ -134,7 +143,7 @@ command посимвольно из спеки; blocked — rc=null и безо�
  "command":"<из спеки>","rc":0,"note":"<улика>"}]}
 ```
 Перед сдачей автор сам гоняет
-`python3 /home/user/.claude/skills/executor-milestone/scripts/accept_run.py /home/user/exec-clones/abg-m15b-deploy-20260917 --spec /home/user/exec-clones/abg-m15b-deploy-20260917/docs/specs/m15b-deploy.md --timeout 3600`.
+`python3 /home/user/.claude/skills/executor-milestone/scripts/accept_run.py /home/user/exec-clones/abg-m15b-deploy2-20260917 --spec /home/user/exec-clones/abg-m15b-deploy2-20260917/docs/specs/m15b-deploy.md --timeout 3600`.
 Сервис после сдачи ОСТАЁТСЯ запущенным на новом release (или на `b31a36b…`
 после отката).
 
