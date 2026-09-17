@@ -67,7 +67,7 @@ class DockerLauncher:
                 cid = ''
                 if not ids:
                     found = subprocess.run(
-                        ['docker', 'ps', '--all', '--quiet', '--filter', 'label=' + identity],
+                        ['docker', 'ps', '--all', '--quiet', '--no-trunc', '--filter', 'label=' + identity],
                         timeout=remaining, **kwargs)
                     if found.returncode == 0:
                         ids = found.stdout.split()
