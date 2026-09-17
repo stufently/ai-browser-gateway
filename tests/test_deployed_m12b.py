@@ -18,6 +18,11 @@ from bench.models import ChallengeType, FailureReason
 from tests import deployed_m12b as d
 
 
+def run_main(args):
+    with patch.object(d.sys, 'argv', ['deployed_m12b.py', *args]):
+        return d.main()
+
+
 def outcome(ok=False):
     return dict(ok=ok, provider='curl' if ok else None, content='203.0.113.2' if ok else '',
                 elapsed_ms=42, error_type='none' if ok else 'http_403',
@@ -468,6 +473,49 @@ class MonitorLogTests(unittest.TestCase):
                 (d.time, 'sleep', {'side_effect': self.sleep})):
             self.stack.enter_context(patch.object(target, name, **kwargs))
         self.evidence = root / 'deploy.json'
+        self.service = service
+        self.root = root
+
+    def test_custom_release_controls_config_manifest_image_workdir_and_mounts(self):
+        sha = '1234567890abcdef1234567890abcdef12345678'
+        release = self.service / 'releases' / sha
+        evidence = self.root / 'custom-evidence'
+        config_path = self.service / 'compose.env'
+        config_path.write_text(config_path.read_text().replace(
+            str(d.RELEASE), str(release)).replace(d.IMAGE, 'abg-runtime:1234567890ab'))
+        for entry in self.entries.values():
+            entry['Config']['WorkingDir'] = str(release)
+            entry['Mounts'][0].update(Source=str(release), Destination=str(release))
+        real_check = d.check_deploy
+        def check():
+            self.assertEqual(d.SHA, sha)
+            self.assertEqual(d.RELEASE, release)
+            self.assertEqual(d.IMAGE, 'abg-runtime:1234567890ab')
+            self.assertEqual(d.EVIDENCE, evidence)
+            real_check()
+            d.verify_release.assert_called_with(
+                release, self.service / 'manifests' / (sha + '.sha256'))
+            for role in ('api', 'monitor'):
+                entry = self.entries[role]
+                entry['Config']['WorkingDir'] = '/old-release'
+                with self.assertRaisesRegex(d.CheckError, '^container_identity$'):
+                    real_check()
+                entry['Config']['WorkingDir'] = str(release)
+                entry['Mounts'][0]['Source'] = '/old-release'
+                with self.assertRaisesRegex(d.CheckError, '^container_mounts$'):
+                    real_check()
+                entry['Mounts'][0]['Source'] = str(release)
+            config_path.write_text(config_path.read_text().replace(
+                'abg-runtime:1234567890ab', 'abg-runtime:old'))
+            with self.assertRaisesRegex(d.CheckError, '^compose_env_mismatch$'):
+                real_check()
+        with patch.object(d, 'SHA'), patch.object(d, 'IMAGE'), patch.object(d, 'EVIDENCE'), \
+             patch.object(d, 'check_deploy', side_effect=check), \
+             patch.object(d.sys, 'stdout', io.StringIO()):
+            self.assertEqual(run_main(['--check-deploy', '--release', sha,
+                                     '--evidence', str(evidence)]), 0)
+        self.assertTrue((evidence / 'runner.lock').exists())
+        self.assertEqual(json.loads(self.evidence.read_text())['release_sha'], sha)
 
     def sleep(self, seconds):
         self.slept += seconds
@@ -580,6 +628,189 @@ class WorkerTests(unittest.TestCase):
         self.assertFalse(result['ok'])
         self.assertEqual(result['attempts'][1]['status'], 403)
         self.assertNotIn('content', result)
+
+
+class ArgumentTests(unittest.TestCase):
+    def test_defaults_remain_compatible_without_creating_default_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            folder = Path(tmp)
+            for name in ('SHA', 'RELEASE', 'IMAGE', 'EVIDENCE'):
+                stack.enter_context(patch.object(d, name, getattr(d, name)))
+            stack.enter_context(patch.object(d.sys, 'stdout', io.StringIO()))
+            def check():
+                self.assertEqual(d.SHA, '929bded313e371808b0747fd9a400696a36638aa')
+                self.assertEqual(d.IMAGE, 'abg-runtime:929bded313e3')
+                self.assertEqual(d.RELEASE, d.SERVICE / 'releases' / d.SHA)
+                self.assertEqual(d.EVIDENCE, Path('/home/user/.cache/abg-coord-20260917/m12b'))
+            stack.enter_context(patch.object(d, 'check_deploy', side_effect=check))
+            stack.enter_context(patch.object(Path, 'mkdir'))
+            stack.enter_context(patch.object(d.os, 'chmod'))
+            stack.enter_context(patch.object(d, 'save'))
+            real_open = Path.open
+            stack.enter_context(patch.object(Path, 'open', lambda path, *a, **kw:
+                real_open(folder / path.name, *a, **kw)))
+            self.assertEqual(run_main(['--check-deploy']), 0)
+
+    def test_invalid_arguments_fail_before_any_disk_or_external_action(self):
+        for option, value in [('--release', '123'), ('--release', 'A' * 40),
+                              ('--release', 'g' * 40), ('--evidence', 'relative/path')]:
+            with self.subTest(option=option, value=value), ExitStack() as stack:
+                output = io.StringIO()
+                stack.enter_context(patch.object(d.sys, 'stderr', output))
+                for target, names in ((Path, ('mkdir', 'open', 'write_text', 'write_bytes')),
+                                      (os, ('open', 'chmod', 'mkdir')),
+                                      (d.subprocess, ('run',)), (d, ('worker_call',))):
+                    for name in names:
+                        stack.enter_context(patch.object(target, name,
+                            side_effect=AssertionError('side effect before validation')))
+                with self.assertRaises(SystemExit) as raised:
+                    run_main(['--check-deploy', option, value])
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn(option, output.getvalue())
+                self.assertNotIn('unrecognized', output.getvalue())
+
+
+class BizprofileTests(unittest.TestCase):
+    urls = ('https://bizprofile.net/',
+            'https://bizprofile.net/ny/albany/elevate-electric-llc')
+    markers = ('Comprehensive Directory of Registered Businesses', 'Elevate Electric LLC')
+
+    def setUp(self):
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        self.folder = Path(self.stack.enter_context(tempfile.TemporaryDirectory())) / 'evidence'
+        for name in ('SHA', 'RELEASE', 'IMAGE', 'EVIDENCE'):
+            self.stack.enter_context(patch.object(d, name, getattr(d, name)))
+        self.clock = 100.0
+        self.calls = []
+        self.values = []
+        for marker in self.markers:
+            value = outcome(True)
+            value.update(provider='scrapling', content=marker + ' private page body')
+            value['attempts'][-1]['provider'] = 'scrapling'
+            self.values.append(value)
+        self.stack.enter_context(patch.object(d.time, 'time', side_effect=lambda: self.clock))
+        self.stack.enter_context(patch.object(d.time, 'sleep', side_effect=self.sleep))
+        self.stack.enter_context(patch.object(d, 'docker', side_effect=self.fake_docker))
+        self.stdout, self.stderr = io.StringIO(), io.StringIO()
+        self.stack.enter_context(patch.object(d.sys, 'stdout', self.stdout))
+        self.stack.enter_context(patch.object(d.sys, 'stderr', self.stderr))
+
+    def sleep(self, seconds):
+        self.clock += seconds
+
+    def fake_docker(self, *args, input=None, **kwargs):
+        self.assertIn('/runner.py', ' '.join(args))
+        self.assertEqual(args[args.index('--network') + 1], 'host')
+        output = io.StringIO()
+        with patch.object(d.sys, 'stdin', io.StringIO(input)), \
+             patch.object(d.sys, 'stdout', output), \
+             patch.object(Path, 'read_text', return_value='fake-token'), \
+             patch('urllib.request.OpenerDirector.open', side_effect=self.fake_http):
+            d.worker()
+        raw = output.getvalue()
+        for secret in ('fake-token', 'private page body', *self.urls):
+            self.assertNotIn(secret, raw)
+        return raw
+
+    def fake_http(self, request, **kwargs):
+        self.assertEqual(request.full_url, 'http://127.0.0.1:8765/v1/fetch')
+        body = json.loads(request.data)
+        self.calls.append((body, self.clock))
+        value = self.values[len(self.calls) - 1]
+        class Response:
+            status = 200
+            def __enter__(self): return self
+            def __exit__(self, *args): pass
+            def read(self): return json.dumps(value).encode()
+        return Response()
+
+    def run_check(self):
+        return run_main(['--check-bizprofile', '--release', 'a' * 40,
+                       '--evidence', str(self.folder)])
+
+    def evidence(self):
+        latest = self.folder / 'bizprofile.json'
+        evidence = json.loads(latest.read_text())
+        self.assertEqual(evidence['release_sha'], 'a' * 40)
+        self.assertEqual(len(evidence['pages']), 2)
+        for row in evidence['pages']:
+            self.assertIn('api_evidence', row)
+            self.assertIs(type(row['marker_found']), bool)
+        safe = json.dumps(evidence)
+        for forbidden in ('"content":', '"url":', 'private page body', *self.urls):
+            self.assertNotIn(forbidden, safe)
+        archives = list(self.folder.glob('bizprofile-*.json'))
+        self.assertEqual(len(archives), 1)
+        self.assertRegex(archives[0].name, r'^bizprofile-\d{8}T\d{6}Z\.json$')
+        self.assertEqual(archives[0].read_bytes(), latest.read_bytes())
+        return evidence
+
+    def test_green_requests_are_sequential_spaced_and_without_expected_text(self):
+        self.assertEqual(self.run_check(), 0, self.stderr.getvalue())
+        self.assertEqual(len(self.calls), 2)
+        for (body, stamp), url in zip(self.calls, self.urls):
+            self.assertEqual(body, dict(url=url, allow_browser=True, budget_ms=120000,
+                                        format='text', max_age_hours=0))
+        self.assertGreaterEqual(self.calls[1][1] - self.calls[0][1], 30)
+        self.assertEqual(json.loads((self.folder / 'request-times.json').read_text()),
+                         {'bizprofile.net': self.calls[1][1]})
+        self.assertTrue((self.folder / 'runner.lock').exists())
+        evidence = self.evidence()
+        self.assertTrue(all(row['marker_found'] for row in evidence['pages']))
+        self.assertEqual(evidence['pages'][0]['api_evidence']['attempts'], self.values[0]['attempts'])
+
+    def test_each_failure_records_both_pages_without_retry(self):
+        mutations = [lambda v: v.update(ok=False), lambda v: v.update(provider='curl'),
+                     lambda v: v['attempts'][-1].update(provider='curl'),
+                     lambda v: v['attempts'][-1].update(challenge='suspected'),
+                     lambda v: v['attempts'][-1].update(success=False),
+                     lambda v: v['attempts'][-1].update(error_type='http_403'),
+                     lambda v: v.update(content='missing marker'),
+                     lambda v: v.update(attempts=[])]
+        for index, mutate in enumerate(mutations):
+            for page in (0, 1):
+                with self.subTest(mutation=index, page=page):
+                    original = copy.deepcopy(self.values)
+                    mutate(self.values[page])
+                    self.folder = self.folder.parent / f'failure-{index}-{page}'
+                    self.calls.clear()
+                    self.stderr.seek(0)
+                    self.stderr.truncate()
+                    self.assertEqual(self.run_check(), 1)
+                    self.assertIn('bizprofile_not_passed', self.stderr.getvalue())
+                    self.assertEqual([body['url'] for body, stamp in self.calls], list(self.urls))
+                    self.evidence()
+                    self.values = original
+
+    def test_malformed_api_response_is_parsed_and_second_page_still_measured(self):
+        self.values[0]['ok'] = 'true'
+        self.assertEqual(self.run_check(), 1)
+        self.assertIn('bizprofile_not_passed', self.stderr.getvalue())
+        self.assertEqual(len(self.calls), 2)
+        evidence = self.evidence()
+        self.assertFalse(evidence['pages'][0]['marker_found'])
+        self.assertTrue(evidence['pages'][1]['marker_found'])
+
+    def test_archive_collision_never_overwrites_previous_measurement(self):
+        self.folder.mkdir()
+        archive = self.folder / 'bizprofile-20260917T120000Z.json'
+        archive.write_text('previous measurement\n')
+        real_open = os.open
+        flags_seen = []
+        def open_file(path, flags, *args, **kwargs):
+            if Path(path).name.startswith('bizprofile-'):
+                flags_seen.append(flags)
+            return real_open(path, flags, *args, **kwargs)
+        with patch.object(d, 'datetime') as dates, patch.object(os, 'open', side_effect=open_file):
+            dates.now.side_effect = [datetime(2026, 9, 17, 12, tzinfo=timezone.utc),
+                                     datetime(2026, 9, 17, 12, 0, 1, tzinfo=timezone.utc)]
+            self.assertEqual(self.run_check(), 0, self.stderr.getvalue())
+        self.assertEqual(archive.read_text(), 'previous measurement\n')
+        self.assertEqual(len(flags_seen), 2)
+        self.assertTrue(all(flags & os.O_EXCL for flags in flags_seen))
+        self.assertEqual((self.folder / 'bizprofile-20260917T120001Z.json').read_bytes(),
+                         (self.folder / 'bizprofile.json').read_bytes())
 
 
 if __name__ == '__main__':

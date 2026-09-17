@@ -22,10 +22,12 @@ import time
 from urllib.parse import urlsplit
 
 SHA = '929bded313e371808b0747fd9a400696a36638aa'
+DEFAULT_SHA = SHA
 ROOT = Path(__file__).resolve().parent.parent
 SERVICE = Path('/home/user/services/ai-browser-gateway')
 RELEASE = SERVICE / 'releases' / SHA
 EVIDENCE = Path('/home/user/.cache/abg-coord-20260917/m12b')
+DEFAULT_EVIDENCE = EVIDENCE
 PY = 'sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6'
 IMAGE = 'abg-runtime:' + SHA[:12]
 NAMES = tuple('ms' + str(i) for i in range(1, 16))
@@ -170,17 +172,19 @@ def assert_egress(value, name, ip):
             'rotation_success_not_proven')
 
 
-def save(name, value, folder=EVIDENCE):
+def save(name, value, folder=None, exclusive=False):
+    folder = EVIDENCE if folder is None else folder
     folder.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(folder, 0o700)
     path = folder / (name + '.json')
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | (os.O_EXCL if exclusive else os.O_TRUNC), 0o600)
     with os.fdopen(fd, 'w') as handle:
         json.dump(value, handle, ensure_ascii=False, indent=2)
         handle.write('\n')
 
 
-def wait_gap(url, folder=EVIDENCE):
+def wait_gap(url, folder=None):
+    folder = EVIDENCE if folder is None else folder
     path = folder / 'request-times.json'
     stamps = json.loads(path.read_text()) if path.exists() else {}
     host = urlsplit(url).hostname
@@ -251,10 +255,11 @@ def worker():
             finally:
                 conn.close()
             value['elapsed_ms'] = int((time.monotonic() - start) * 1000)
-        elif action in ('api', 'health', 'unauthorized'):
-            body = json.dumps(data['request']).encode() if action == 'api' else (b'{}' if action == 'unauthorized' else None)
+        elif action in ('api', 'bizprofile', 'health', 'unauthorized'):
+            is_api = action in ('api', 'bizprofile')
+            body = json.dumps(data['request']).encode() if is_api else (b'{}' if action == 'unauthorized' else None)
             headers = {'Content-Type': 'application/json'}
-            if action == 'api':
+            if is_api:
                 headers['Authorization'] = 'Bearer ' + Path('/run/token').read_text().strip()
             endpoint = API + ('/health' if action == 'health' else '/v1/fetch')
             opener = build_opener(ProxyHandler({}), NoRedirect)
@@ -264,13 +269,17 @@ def worker():
             except HTTPError as exc:
                 status, raw = exc.code, exc.read().decode()
                 exc.close()
-            if action == 'api':
+            if is_api:
                 parsed = parse_api(status, raw)
-                value = api_evidence(parsed)
-                value['expected_found'] = data['request']['expected_text'] in parsed['content']
-                # Rotation code consumes only the requested public IP, not page content.
-                if data.get('echo'):
-                    value['content'] = data['request']['expected_text'] if value['expected_found'] else ''
+                if action == 'bizprofile':
+                    value = {'api_evidence': api_evidence(parsed),
+                             'marker_found': data['marker'] in parsed['content']}
+                else:
+                    value = api_evidence(parsed)
+                    value['expected_found'] = data['request']['expected_text'] in parsed['content']
+                    # Rotation code consumes only the requested public IP, not page content.
+                    if data.get('echo'):
+                        value['content'] = data['request']['expected_text'] if value['expected_found'] else ''
             else:
                 value = {'status': status, 'body': json.loads(raw)}
         elif action == 'scan':
@@ -298,6 +307,41 @@ def fetch(url, expected, browser=True):
     return worker_call('api', request=dict(url=url, expected_text=expected,
                        allow_browser=browser, budget_ms=120000, format='text', max_age_hours=0),
                        echo=url == ECHO)
+
+
+def check_bizprofile():
+    pages = (
+        ('home', 'https://bizprofile.net/', 'Comprehensive Directory of Registered Businesses'),
+        ('card', 'https://bizprofile.net/ny/albany/elevate-electric-llc', 'Elevate Electric LLC'),
+    )
+    evidence = {'release_sha': SHA, 'pages': []}
+    passed = True
+    for name, url, marker in pages:
+        try:
+            wait_gap(url)
+            row = worker_call('bizprofile', marker=marker, request=dict(
+                url=url, allow_browser=True, budget_ms=120000, format='text', max_age_hours=0))
+            value = row['api_evidence']
+            last = value['attempts'][-1] if value['attempts'] else {}
+            passed = all((passed, value['ok'] is True, value['provider'] == 'scrapling',
+                          last.get('provider') == 'scrapling', last.get('success') is True,
+                          last.get('challenge') == 'none', last.get('error_type') == 'none',
+                          row['marker_found'] is True))
+        except Exception as exc:
+            # A failed first measurement must not suppress the second page.
+            error = str(exc) if isinstance(exc, CheckError) else type(exc).__name__
+            row = {'api_evidence': None, 'marker_found': False, 'internal_error': redact(error)}
+            passed = False
+        evidence['pages'].append({'id': name, **row})
+    while True:
+        archive = 'bizprofile-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+        try:
+            save(archive, evidence, exclusive=True)
+            break
+        except FileExistsError:
+            time.sleep(1)
+    save('bizprofile', evidence)
+    require(passed, 'bizprofile_not_passed')
 
 
 def check_profiles():
@@ -495,14 +539,26 @@ def check_deploy():
 
 
 def main():
+    global SHA, RELEASE, IMAGE, EVIDENCE
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
-    for flag in ('check-deploy', 'check-profiles', 'check-api-egress', 'run-targets'):
+    modes = ('check-deploy', 'check-profiles', 'check-api-egress', 'run-targets', 'check-bizprofile')
+    for flag in modes:
         group.add_argument('--' + flag, action='store_true')
+    parser.add_argument('--release', default=DEFAULT_SHA, help='release SHA (40 lowercase hex characters)')
+    parser.add_argument('--evidence', default=str(DEFAULT_EVIDENCE), help='absolute evidence directory')
     args = parser.parse_args()
+    if not re.fullmatch(r'[0-9a-f]{40}', args.release):
+        parser.error('--release must be 40 lowercase hex characters')
+    if not Path(args.evidence).is_absolute():
+        parser.error('--evidence must be an absolute path')
+    SHA = args.release
+    RELEASE = SERVICE / 'releases' / SHA
+    IMAGE = 'abg-runtime:' + SHA[:12]
+    EVIDENCE = Path(args.evidence)
     EVIDENCE.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(EVIDENCE, 0o700)
-    mode = next(k for k, v in vars(args).items() if v)
+    mode = next(flag.replace('-', '_') for flag in modes if getattr(args, flag.replace('-', '_')))
     with (EVIDENCE / 'runner.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
