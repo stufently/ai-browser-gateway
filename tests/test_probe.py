@@ -911,6 +911,17 @@ class ScraplingAdapterTests(unittest.TestCase):
                 self.assertEqual(result["challenge"], "none")
                 self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
 
+    def test_scrapling_drops_stale_cf_header_with_mixed_case_jsd_paths(self):
+        for suffix in ("/SCRIPTS/JSD/main.js", "/Scripts/Jsd/main.js"):
+            html = f'<script src="/cdn-cgi/challenge-platform{suffix}"></script>'
+            for body in (html, html.encode()):
+                with self.subTest(suffix=suffix, body_type=type(body).__name__):
+                    result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+                    self.assertEqual(result["err"], "")
+                    self.assertEqual(result["headers"], {})
+                    self.assertEqual(result["challenge"], "none")
+                    self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+
     def test_scrapling_preserves_cf_header_with_jsd_and_challenge_strings(self):
         jsd = '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
         widgets = (
