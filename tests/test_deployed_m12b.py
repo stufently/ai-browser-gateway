@@ -1,6 +1,7 @@
 """Offline contract checks: no Docker daemon, network or real credentials."""
 import copy
 from contextlib import ExitStack
+from datetime import datetime, timezone
 import hashlib
 import io
 import json
@@ -394,6 +395,145 @@ class ReleaseTests(unittest.TestCase):
             with self.assertRaisesRegex(d.CheckError, '^release_integrity_failed$'):
                 d.check_deploy()
         self.assertFalse(self.manifest.exists())
+
+
+class MonitorLogTests(unittest.TestCase):
+    def setUp(self):
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        service, release = root / 'service', root / 'release'
+        secrets = service / 'secrets'
+        secrets.mkdir(parents=True, mode=0o700)
+        for name in ('token', 'proxies.toml', 'hc-ping'):
+            path = secrets / name
+            path.touch(mode=0o600)
+        link = root / '.config/abg/client-token'
+        link.parent.mkdir(parents=True)
+        link.symlink_to(secrets / 'token')
+        config = dict(ABG_RELEASE=release, ABG_TOKEN_FILE=secrets / 'token',
+                      ABG_PROFILES_FILE=secrets / 'proxies.toml',
+                      ABG_PING_FILE=secrets / 'hc-ping', ABG_INSTANCE='stand-host',
+                      ABG_RUNTIME_IMAGE=d.IMAGE, ABG_DOCKER_GID='983',
+                      ABG_HOST_PORT='8765', ABG_COMPOSE_PROJECT='ai-browser-gateway')
+        (service / 'compose.env').write_text(''.join(f'{k}={v}\n' for k, v in config.items()))
+        self.entries = {}
+        for role in ('api', 'monitor'):
+            mounts = {str(release): (str(release), False)}
+            if role == 'api':
+                mounts.update({'/var/run/docker.sock': ('/var/run/docker.sock', True),
+                               '/run/abg/token': (str(secrets / 'token'), False),
+                               '/run/abg/proxies.toml': (str(secrets / 'proxies.toml'), False)})
+            else:
+                mounts['/run/abg/ping'] = (str(secrets / 'hc-ping'), False)
+            self.entries[role] = dict(
+                Id=role, Image='image-id', RestartCount=0,
+                State=dict(Running=True, StartedAt=datetime.now(timezone.utc).isoformat(),
+                           Health={'Status': 'healthy'}),
+                Config=dict(Labels={'com.docker.compose.service': role}, User='1002:1002',
+                            WorkingDir=str(release),
+                            Cmd=['python3', '-m', 'gateway.service' if role == 'api'
+                                 else 'gateway.health_monitor'],
+                            Env=['ABG_INSTANCE=stand-host'] if role == 'api'
+                            else ['ABG_HEALTH_INTERVAL_SECONDS=60']),
+                HostConfig=dict(GroupAdd=['983'] if role == 'api' else [],
+                                ReadonlyRootfs=True, Tmpfs={'/tmp': ''}, Privileged=False,
+                                RestartPolicy={'Name': 'unless-stopped'}),
+                Mounts=[dict(Destination=dest, Source=src, RW=rw, Type='bind')
+                        for dest, (src, rw) in mounts.items()],
+                NetworkSettings=dict(Ports={'8765/tcp': [{'HostIp': '127.0.0.1',
+                                                         'HostPort': '8765'}]}
+                                     if role == 'api' else {}))
+        self.full_logs = {'api': ('api stdout\n', 'api stderr\n'),
+                          'monitor': ('', 'old URLError\n')}
+        self.recent_logs = ('', '')
+        self.recent_rc = 0
+        self.scanned = None
+        self.slept = 0
+        self.log_commands = []
+        original_stat = os.stat
+        original_save = d.save
+        def fake_stat(path, *args, **kwargs):
+            if str(path) == '/var/run/docker.sock':
+                return os.stat_result((0, 0, 0, 0, 0, 983, 0, 0, 0, 0))
+            return original_stat(path, *args, **kwargs)
+        for target, name, kwargs in (
+                (d, 'SERVICE', {'new': service}), (d, 'RELEASE', {'new': release}),
+                (d, 'save', {'side_effect': lambda name, value: original_save(name, value, root)}),
+                (d, 'verify_release', {'return_value': None}),
+                (Path, 'home', {'return_value': root}),
+                (os, 'stat', {'side_effect': fake_stat}),
+                (d.subprocess, 'run', {'side_effect': self.run_docker}),
+                (d, 'worker_call', {'side_effect': self.worker_call}),
+                (d.time, 'sleep', {'side_effect': self.sleep})):
+            self.stack.enter_context(patch.object(target, name, **kwargs))
+        self.evidence = root / 'deploy.json'
+
+    def sleep(self, seconds):
+        self.slept += seconds
+
+    def run_docker(self, args, **kwargs):
+        self.assertEqual(args[0], 'docker')
+        command = args[1:]
+        stdout, stderr, rc = '', '', 0
+        if command == ['ps', '-aq', '--filter', 'label=com.docker.compose.project=ai-browser-gateway']:
+            stdout = 'api\nmonitor\n'
+        elif command[0] == 'inspect':
+            stdout = json.dumps([self.entries[command[1]]])
+        elif command == ['image', 'inspect', d.IMAGE]:
+            stdout = json.dumps([{'Id': 'image-id'}])
+        elif command[0] == 'logs':
+            self.log_commands.append(command)
+            if command == ['logs', '--since', '150s', 'monitor']:
+                self.assertGreaterEqual(self.slept, 130)
+                stdout, stderr = self.recent_logs
+                rc = self.recent_rc
+            else:
+                self.assertIn(command, (['logs', 'api'], ['logs', 'monitor']))
+                stdout, stderr = self.full_logs[command[1]]
+        elif command in (['--version'], ['compose', 'version'],
+                         ['exec', 'api', 'python3', '--version']):
+            stdout = 'test-version\n'
+        else:
+            self.fail(f'unexpected Docker command: {command}')
+        return subprocess.CompletedProcess(args, rc, stdout, stderr)
+
+    def worker_call(self, action, **payload):
+        if action == 'scan':
+            self.scanned = payload['metadata']
+            return {'ok': True}
+        if action == 'health':
+            return {'status': 200, 'body': {'ok': True}}
+        if action == 'unauthorized':
+            return {'status': 401}
+        self.fail(f'unexpected worker action: {action}')
+
+    def test_old_error_outside_window_passes_and_full_logs_are_scanned(self):
+        d.check_deploy()
+        self.assertEqual([row['logs'] for row in self.scanned],
+                         ['api stdout\napi stderr\n', 'old URLError\n'])
+        self.assertIn(['logs', '--since', '150s', 'monitor'], self.log_commands)
+        evidence = json.loads(self.evidence.read_text())
+        self.assertIs(evidence['monitor_recent_logs_empty'], True)
+        self.assertEqual(evidence['monitor_log_window_seconds'], 150)
+        self.assertNotIn('monitor_logs_empty', evidence)
+
+    def test_recent_error_in_either_stream_rejects_deployment(self):
+        # The error arrives between the full-log read and the window read.
+        self.full_logs['monitor'] = ('', '')
+        for streams in (('URLError\n', ''), ('', 'URLError\n')):
+            self.recent_logs = streams
+            with self.subTest(streams=streams), self.assertRaisesRegex(
+                    d.CheckError, '^monitor_delivery_errors$'):
+                d.check_deploy()
+        self.assertFalse(self.evidence.exists())
+
+    def test_recent_log_command_failure_is_not_an_empty_window(self):
+        self.full_logs['monitor'] = ('', '')
+        self.recent_rc = 1
+        with self.assertRaisesRegex(d.CheckError, '^docker_logs_failed$'):
+            d.check_deploy()
+        self.assertFalse(self.evidence.exists())
 
 
 class WorkerTests(unittest.TestCase):

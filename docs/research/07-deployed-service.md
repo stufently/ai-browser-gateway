@@ -27,6 +27,7 @@ uptime 174.5 seconds with empty logs. This confirms
 local execution and absence of logged delivery errors; the coordinator separately
 verifies actual success-ping history and automatic failure/recovery through the
 healthchecks management API. The executor did not access that API.
+Deployment checks now require empty monitor logs only for the last 150 seconds after waiting for uptime ≥130 seconds; secret scanning still receives the full lifetime logs of both containers.
 
 ## Measurement method
 

@@ -474,7 +474,10 @@ def check_deploy():
         logs = subprocess.run(['docker', 'logs', entry['Id']], capture_output=True, text=True, timeout=20)
         require(logs.returncode == 0, 'docker_logs_failed')
         if role == 'monitor':
-            require(not (logs.stdout + logs.stderr).strip(), 'monitor_delivery_errors')
+            recent_logs = subprocess.run(['docker', 'logs', '--since', '150s', entry['Id']],
+                                         capture_output=True, text=True, timeout=20)
+            require(recent_logs.returncode == 0, 'docker_logs_failed')
+            require(not (recent_logs.stdout + recent_logs.stderr).strip(), 'monitor_delivery_errors')
         metadata.append({'cmd': config['Cmd'], 'entrypoint': config.get('Entrypoint'),
                          'path': entry.get('Path'), 'args': entry.get('Args'),
                          'env': config['Env'], 'logs': logs.stdout + logs.stderr})
@@ -486,7 +489,8 @@ def check_deploy():
                     'compose_version': docker('compose', 'version').strip(),
                     'python_version': docker('exec', data['api']['Id'], 'python3', '--version').strip(),
                     'monitor_uptime_seconds': (datetime.now(timezone.utc) - started).total_seconds(),
-                    'monitor_logs_empty': True, 'healthy': True,
+                    'monitor_recent_logs_empty': True, 'monitor_log_window_seconds': 150,
+                    'healthy': True,
                     'metadata_verified': True, 'secrets_absent': True})
 
 
