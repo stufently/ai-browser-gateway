@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from bench.escalate import Step
 from bench.models import ChallengeType, FailureReason
@@ -615,6 +615,37 @@ class WorkerTests(unittest.TestCase):
             result = self.invoke({'action': 'api', 'request': {'expected_text': 'expected'}})
         self.assertIn('internal_error', result)
         self.assertNotIn('fake-token', json.dumps(result))
+
+    def test_http_actions_send_authorization_only_for_api_requests(self):
+        for action, endpoint, authorization, status, body in (
+                ('bizprofile', '/v1/fetch', 'Bearer worker-token', 200, outcome(True)),
+                ('api', '/v1/fetch', 'Bearer worker-token', 200, outcome(True)),
+                ('health', '/health', None, 200, {'ok': True}),
+                ('unauthorized', '/v1/fetch', None, 401, {'detail': 'Unauthorized'})):
+            with self.subTest(action=action):
+                response = MagicMock()
+                response.__enter__.return_value = response
+                response.status = status
+                response.read.return_value = json.dumps(body).encode()
+                with patch.object(Path, 'read_text', autospec=True,
+                                  return_value=' \tworker-token\r\n') as read_token, \
+                     patch('urllib.request.OpenerDirector.open',
+                           return_value=response) as http:
+                    result = self.invoke({'action': action,
+                                          'request': {'expected_text': '203.0.113.2'},
+                                          'marker': '203.0.113.2'})
+                http.assert_called_once()
+                request = http.call_args.args[0]
+                self.assertEqual(request.full_url, 'http://127.0.0.1:8765' + endpoint)
+                # Assert outside worker(), which catches AssertionError as worker_failure.
+                self.assertEqual(request.get_header('Authorization'), authorization)
+                if authorization is None:
+                    read_token.assert_not_called()
+                    self.assertEqual(result['status'], status)
+                else:
+                    read_token.assert_called_once_with(Path('/run/token'))
+                self.assertNotIn('internal_error', result)
+                self.assertNotIn('worker-token', json.dumps(result))
 
     def test_fake_http_refusal_preserves_attempts_but_drops_body(self):
         class Response:
