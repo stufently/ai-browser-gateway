@@ -613,6 +613,11 @@ class PatchrightAdapter(PlaywrightAdapter):
     package = "patchright"
 
 
+_SCRAPLING_STALE_CF_HEADER_RULES = frozenset({
+    "body_cf_challenge_platform", "body_noindex_nofollow",
+})
+
+
 class ScraplingAdapter:
     version = "unknown"
     solve_cloudflare = True
@@ -653,7 +658,7 @@ class ScraplingAdapter:
         if (status is not None and 200 <= status < 300
                 and headers is not None and "cf-mitigated" in headers
                 and (body_challenge := detect_challenge(status, None, body))[0] == "none"
-                and "body_captcha" not in body_challenge[1]):
+                and set(body_challenge[1]) <= _SCRAPLING_STALE_CF_HEADER_RULES):
             # Scrapling can retain challenge headers after its solver reaches
             # the real page. Trust the body only for this successful response.
             headers.pop("cf-mitigated")

@@ -855,6 +855,33 @@ class ScraplingAdapterTests(unittest.TestCase):
                 self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
                 self.assertEqual(headers["CF-Mitigated"], "challenge")
 
+    def test_scrapling_drops_stale_cf_header_with_platform_and_noindex(self):
+        body = (b'<html><meta name="robots" content="noindex,nofollow">'
+                b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">'
+                b'</script></html>')
+        headers = {"cf-mitigated": "challenge"}
+        result = self._probe_response(200, body, headers)
+        self.assertEqual(result["err"], "")
+        self.assertEqual(result["headers"], {})
+        self.assertEqual(result["challenge"], "none")
+        self.assertEqual(result["challenge_markers"],
+                         ["body_cf_challenge_platform", "body_noindex_nofollow"])
+        self.assertEqual(headers, {"cf-mitigated": "challenge"})
+
+    def test_scrapling_preserves_cf_header_on_single_cf_body_marker(self):
+        for marker, rule in (("cf_chl_opt", "body_cf_chl_opt"),
+                             ("__cf_chl", "body_cf_chl"),
+                             ("challenges.cloudflare.com", "body_cf_challenges_host")):
+            with self.subTest(marker=marker):
+                body = f"<html>{marker}</html>".encode()
+                headers = {"cf-mitigated": "challenge"}
+                result = self._probe_response(200, body, headers)
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                self.assertEqual(result["challenge"], "suspected")
+                self.assertEqual(result["challenge_markers"], ["header_cf_mitigated", rule])
+                self.assertEqual(headers, {"cf-mitigated": "challenge"})
+
     def test_scrapling_preserves_cf_header_outside_2xx(self):
         for status in (None, 199, 300, 403, 429, 500):
             with self.subTest(status=status):
