@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Protocol
 from urllib.parse import urlsplit
+from uuid import uuid4
 
 from bench.models import ChallengeType, FailureReason, FetchResult, evaluate
 from bench.providers.registry import build_argv, by_name, parse_output
@@ -28,7 +29,9 @@ class DockerLauncher:
         with tempfile.TemporaryDirectory(prefix='abg-run-') as directory:
             cidfile = Path(directory) / 'container.id'
             is_container = argv[:2] == ['docker', 'run']
-            command = argv[:2] + ['--cidfile', str(cidfile)] + argv[2:] if is_container else argv
+            identity = 'abg.launch=' + uuid4().hex if is_container else None
+            command = (argv[:2] + ['--cidfile', str(cidfile), '--label', identity] + argv[2:]
+                       if is_container else argv)
             kwargs = dict(timeout=timeout, capture_output=True, text=True, errors='replace',
                           stdin=subprocess.DEVNULL)
             if env is not None:
@@ -38,16 +41,44 @@ class DockerLauncher:
                 return result.returncode, result.stdout, result.stderr
             except subprocess.TimeoutExpired:
                 # Killing the Docker client alone does not stop its daemon's container.
-                if is_container and cidfile.exists():
-                    cid = cidfile.read_text().strip()
-                    if cid:
-                        try:
-                            subprocess.run(['docker', 'rm', '--force', cid], timeout=30,
-                                           capture_output=True, stdin=subprocess.DEVNULL)
-                        except (OSError, subprocess.SubprocessError):
-                            # Preserve the original timeout classification.
-                            pass
+                if is_container:
+                    self._cleanup(cidfile, identity, env=env)
                 raise
+
+    @staticmethod
+    def _cleanup(cidfile, identity, *, env):
+        # Create can finish after the client dies, without ever writing cidfile.
+        # All discovery/removal attempts share the existing 30-second budget.
+        deadline = time.monotonic() + 30
+        try:
+            cid = cidfile.read_text().strip()
+        except OSError:
+            cid = ''
+        kwargs = dict(capture_output=True, text=True, errors='replace',
+                      stdin=subprocess.DEVNULL)
+        if env is not None:
+            kwargs['env'] = env
+        while (remaining := deadline - time.monotonic()) > 0:
+            try:
+                ids = [cid] if cid else []
+                if not ids:
+                    found = subprocess.run(
+                        ['docker', 'ps', '--all', '--quiet', '--filter', 'label=' + identity],
+                        timeout=remaining, **kwargs)
+                    if found.returncode == 0:
+                        ids = found.stdout.split()
+                remaining = deadline - time.monotonic()
+                if ids and remaining > 0:
+                    removed = subprocess.run(['docker', 'rm', '--force', *ids],
+                                             timeout=remaining, **kwargs)
+                    if removed.returncode == 0:
+                        return
+            except (OSError, subprocess.SubprocessError):
+                # Cleanup failure must not replace the original TimeoutExpired.
+                pass
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                time.sleep(min(0.1, remaining))
 
 
 def _number(value, field, *, integer=False):
