@@ -616,6 +616,11 @@ class PatchrightAdapter(PlaywrightAdapter):
 _SCRAPLING_STALE_CF_HEADER_RULES = frozenset({
     "body_cf_challenge_platform", "body_noindex_nofollow",
 })
+_SCRAPLING_CHALLENGE_STRINGS = frozenset({
+    "turnstile", "cf-chl", "cf_chl", "challenge-platform",
+    "challenges.cloudflare.com", "cf-challenge", "cf-captcha", "hcaptcha",
+    "recaptcha", "g-recaptcha", "h-captcha", "/cdn-cgi/challenge",
+})
 
 
 def _scrapling_only_jsd_platform_paths(body) -> bool:
@@ -623,6 +628,13 @@ def _scrapling_only_jsd_platform_paths(body) -> bool:
     text = body if isinstance(body, str) else body.decode("utf-8", "replace")
     suffixes = text.lower().split("/cdn-cgi/challenge-platform")[1:]
     return all(suffix.startswith("/scripts/jsd/") for suffix in suffixes)
+
+
+def _scrapling_has_challenge_strings(body) -> bool:
+    """Check for challenge strings outside allowed passive JSD prefixes."""
+    text = body if isinstance(body, str) else body.decode("utf-8", "replace")
+    remainder = text.lower().replace("/cdn-cgi/challenge-platform/scripts/jsd/", "")
+    return any(marker in remainder for marker in _SCRAPLING_CHALLENGE_STRINGS)
 
 
 class ScraplingAdapter:
@@ -667,7 +679,8 @@ class ScraplingAdapter:
                 and (body_challenge := detect_challenge(status, None, body))[0] == "none"
                 and set(body_challenge[1]) <= _SCRAPLING_STALE_CF_HEADER_RULES
                 and ("body_cf_challenge_platform" not in body_challenge[1]
-                     or _scrapling_only_jsd_platform_paths(body))):
+                     or _scrapling_only_jsd_platform_paths(body))
+                and not _scrapling_has_challenge_strings(body)):
             # Scrapling can retain challenge headers after its solver reaches
             # the real page. Trust the body only for this successful response.
             headers.pop("cf-mitigated")

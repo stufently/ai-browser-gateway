@@ -45,6 +45,13 @@ filing information» и один 307 в history. При этом Scrapling со�
 `None`, пустой словарь остаётся словарём. Не-2xx и interstitial сохраняют
 заголовок и прежний вердикт. Общий детектор и политика продукта не менялись.
 
+M13a-fix4 дополнительно сохраняет заголовок, если после удаления всех
+`/cdn-cgi/challenge-platform/scripts/jsd/` (UTF-8 с заменой ошибок, без учёта
+регистра) остаётся любая подстрока: `turnstile`, `cf-chl`, `cf_chl`,
+`challenge-platform`, `challenges.cloudflare.com`, `cf-challenge`, `cf-captcha`,
+`hcaptcha`, `recaptcha`, `g-recaptcha`, `h-captcha`, `/cdn-cgi/challenge`.
+Принятый остаток — только тело без этих строк вне разрешённых JSD-префиксов.
+
 Остаточный риск принят владельцем 17.09.2026: при 2xx и устаревшем
 `cf-mitigated` тело без CF-маркеров и с пустым набором правил, например
 самописная форма captcha без атрибутов, распознаваемых `_CAPTCHA_ATTR`,

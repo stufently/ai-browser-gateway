@@ -911,6 +911,50 @@ class ScraplingAdapterTests(unittest.TestCase):
                 self.assertEqual(result["challenge"], "none")
                 self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
 
+    def test_scrapling_preserves_cf_header_with_jsd_and_challenge_strings(self):
+        jsd = '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+        widgets = (
+            ('turnstile', '<div class="cf-turnstile" data-sitekey="key"></div>'),
+            ('cf-chl', '<div class="cf-chl-container"></div>'),
+            ('cf_chl', '<script>window.cf_chl_state = {};</script>'),
+            ('challenge-platform', '<div class="challenge-platform"></div>'),
+            ('challenges.cloudflare.com',
+             '<script src="https://challenges.cloudflare.com/widget.js"></script>'),
+            ('cf-challenge', '<div class="cf-challenge"></div>'),
+            ('cf-captcha', '<div class="cf-captcha"></div>'),
+            ('hcaptcha', '<script src="https://js.hcaptcha.com/1/api.js"></script>'),
+            ('recaptcha', '<script src="https://www.google.com/recaptcha/api.js"></script>'),
+            ('g-recaptcha', '<div class="g-recaptcha" data-sitekey="key"></div>'),
+            ('h-captcha', '<div class="h-captcha" data-sitekey="key"></div>'),
+            ('/cdn-cgi/challenge', '<form action="/cdn-cgi/challenge" method="post"></form>'),
+            ('CF-TURNSTILE', '<DIV CLASS="CF-TURNSTILE" DATA-SITEKEY="key"></DIV>'),
+        )
+        for marker, widget in widgets:
+            # Unquoted HTML attributes also carry markers, even where the
+            # detector's existing quoted-attribute captcha rule does not match.
+            for markup in (widget, widget.replace('"', '')):
+                html = f'<html><p>Checking your browser</p>{jsd}{markup}</html>'
+                for body in (html, b"\xff" + html.encode()):
+                    with self.subTest(marker=marker, markup=markup,
+                                      body_type=type(body).__name__):
+                        headers = {"cf-mitigated": "challenge"}
+                        result = self._probe_response(200, body, headers)
+                        self.assertEqual(result["err"], "")
+                        self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                        self.assertEqual(result["challenge"], "suspected")
+                        self.assertIn("header_cf_mitigated", result["challenge_markers"])
+                        self.assertEqual(headers, {"cf-mitigated": "challenge"})
+
+    def test_scrapling_drops_stale_cf_header_with_jsd_and_ordinary_words(self):
+        body = (b'<html><p>A business challenge: cloudflare integration.</p>'
+                b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+                b'</html>')
+        result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+        self.assertEqual(result["err"], "")
+        self.assertEqual(result["headers"], {})
+        self.assertEqual(result["challenge"], "none")
+        self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+
     def test_scrapling_preserves_cf_header_on_single_cf_body_marker(self):
         for marker, rule in (("cf_chl_opt", "body_cf_chl_opt"),
                              ("__cf_chl", "body_cf_chl"),
