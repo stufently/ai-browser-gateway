@@ -1,0 +1,11 @@
+--- a/gateway/service.py
++++ b/gateway/service.py
+@@ -175,7 +175,7 @@
+     try:
+         if env.get('ABG_TOKEN'):
+             raise ConfigError
+-        token = read_private(env.get('ABG_TOKEN_FILE', '')).decode('ascii').rstrip('\r\n')
++        token = read_private(env.get('ABG_TOKEN_FILE', '')).decode('ascii').strip()
+         if (not token or any(not 33 <= ord(char) <= 126 for char in token)):
+             raise ConfigError
+         profiles = _profiles(read_private(env.get('ABG_PROFILES_FILE', '')))

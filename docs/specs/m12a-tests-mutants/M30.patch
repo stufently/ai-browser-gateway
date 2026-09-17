@@ -1,0 +1,20 @@
+--- a/gateway/service.py
++++ b/gateway/service.py
+@@ -58,6 +58,7 @@
+ 
+     def drain(self, instance):
+         self.stop()
++        sweep_providers(instance)
+         while True:
+             with self.condition:
+                 if not self.active:
+@@ -66,8 +67,7 @@
+             with self.condition:
+                 if self.active:
+                     self.condition.wait(.05)
+-        # No admitted call can create a late container after this sweep.
+-        sweep_providers(instance)
++        # Final sweep was moved before draining.
+ 
+ 
+ class LabeledLauncher:
