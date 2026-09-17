@@ -4,6 +4,16 @@
 
 ### Добавлено
 
+- **Выкладка M12b на stand-host:** сервис работает в
+  `/home/user/services/ai-browser-gateway` (Compose-проект
+  `ai-browser-gateway`, `127.0.0.1:8765`, release `929bded`), 15 прокси-профилей
+  из 3proxy, sidecar пингует healthchecks-чек `ai-browser-gateway-health`
+  раз в 60 с. README описывает запуск, остановку и откат.
+- **Проверки развёртывания** `tests/deployed_m12b.py`: только чтение (release
+  сверяется с manifest), 15 профилей через echo, egress и ротация через API,
+  6 целей и CLI; строгая схема ответа API, внешний отказ цели отделён от
+  дефекта сервиса. Замеры — `docs/research/07-deployed-service.md`.
+
 - **Сервис M12a (влит в main):** `python3 -m gateway.service` читает token и
   профили прокси из приватных файлов, ротирует стартовый профиль по запросам,
   помечает provider-контейнеры метками установки и убирает только свои.
