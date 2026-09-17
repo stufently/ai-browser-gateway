@@ -455,6 +455,68 @@ class DockerLauncherTests(unittest.TestCase):
                     self.assertTrue(sleeps, 'a failed listing must keep polling')
                     self.assertLess(self.now, 130.0)
 
+    def test_persistent_removal_failure_sleeps_between_attempts_until_deadline(self):
+        for cidfile in (True, False):
+            for recheck_failure in (None, 1, OSError('unavailable'),
+                                    subprocess.TimeoutExpired('cleanup', 1)):
+                with self.subTest(cidfile=cidfile, recheck_failure=recheck_failure):
+                    self.now = 100.0
+                    events = []
+                    launch = []
+                    last_removal = None
+                    expired = subprocess.TimeoutExpired('docker', 1, output=b'out', stderr=b'err')
+                    env = {'DOCKER_HOST': 'unix:///fake.sock'}
+
+                    def run(command, **kwargs):
+                        nonlocal last_removal
+                        if command[:2] == ['docker', 'run']:
+                            launch.extend(command)
+                            if cidfile:
+                                Path(command[command.index('--cidfile') + 1]).write_text('known-id\n')
+                            raise expired
+                        self.assertLess(len(events), 1300, 'cleanup must not busy-loop')
+                        self.assertEqual(kwargs['env'], env)
+                        self.assertEqual(kwargs['stdin'], subprocess.DEVNULL)
+                        self.assertFalse(kwargs.get('shell'))
+                        self.assertGreater(kwargs['timeout'], 0)
+                        self.assertEqual(kwargs['timeout'], 130.0 - self.now)
+                        if command[1] == 'rm':
+                            self.assertEqual(command, ['docker', 'rm', '--force', 'known-id'])
+                            if last_removal is not None:
+                                self.assertTrue(any(kind == 'sleep' and value > 0
+                                                    for kind, value in events[last_removal + 1:]),
+                                                'consecutive removals require a positive sleep')
+                            last_removal = len(events)
+                            events.append(('rm', None))
+                            return subprocess.CompletedProcess(command, 1, '', 'daemon error')
+                        self.assertEqual(command, ['docker', 'ps', '--all', '--quiet', '--filter',
+                                                   'label=' + self.identity(launch)])
+                        after_removal = bool(events) and events[-1][0] == 'rm'
+                        events.append(('ps', None))
+                        if after_removal and recheck_failure is not None:
+                            if isinstance(recheck_failure, Exception):
+                                raise recheck_failure
+                            return subprocess.CompletedProcess(command, 1, 'foreign-id\n', 'failed')
+                        return subprocess.CompletedProcess(command, 0, 'known-id\n', '')
+
+                    def sleep(seconds):
+                        self.assertNotEqual(events[-1][0], 'rm', 'recheck immediately after failed rm')
+                        self.assertGreater(seconds, 0)
+                        self.assertEqual(seconds, min(0.1, 130.0 - self.now))
+                        events.append(('sleep', seconds))
+                        self.advance(seconds)
+
+                    with patch('bench.runner.execute.subprocess.run', side_effect=run), \
+                            patch('bench.runner.execute.time.sleep', side_effect=sleep):
+                        with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                            DockerLauncher().run(['docker', 'run', '--rm', 'abg-curl:m2'], 1, env=env)
+                    self.assertIs(raised.exception, expired)
+                    self.assertEqual((expired.output, expired.stderr), (b'out', b'err'))
+                    self.assertEqual(self.now, 130.0)
+                    self.assertGreater(sum(kind == 'rm' for kind, _ in events), 1)
+                    call_limit = 605 if recheck_failure is None else 905
+                    self.assertLessEqual(sum(kind != 'sleep' for kind, _ in events), call_limit)
+
     def test_absent_container_waits_only_until_cleanup_deadline(self):
         calls = []
         expired = subprocess.TimeoutExpired('docker', 7)

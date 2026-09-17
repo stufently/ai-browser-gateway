@@ -55,6 +55,7 @@ class DockerLauncher:
         except OSError:
             cid = ''
         seen = bool(cid)
+        pause_before_removal = False
         kwargs = dict(capture_output=True, text=True, errors='replace',
                       stdin=subprocess.DEVNULL)
         if env is not None:
@@ -75,12 +76,18 @@ class DockerLauncher:
                         seen = seen or bool(ids)
                 remaining = deadline - time.monotonic()
                 if ids and remaining > 0:
+                    if pause_before_removal:
+                        time.sleep(min(0.1, remaining))
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0:
+                            return
                     removed = subprocess.run(['docker', 'rm', '--force', *ids],
                                              timeout=remaining, **kwargs)
                     if removed.returncode == 0:
                         return
                     # It may already be gone (--rm or a concurrent sweep).
                     # Check the label immediately before waiting or retrying rm.
+                    pause_before_removal = True
                     continue
             except (OSError, subprocess.SubprocessError):
                 # Cleanup failure must not replace the original TimeoutExpired.
@@ -88,6 +95,7 @@ class DockerLauncher:
             remaining = deadline - time.monotonic()
             if remaining > 0:
                 time.sleep(min(0.1, remaining))
+                pause_before_removal = False
 
 
 def _number(value, field, *, integer=False):
