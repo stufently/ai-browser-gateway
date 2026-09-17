@@ -113,3 +113,75 @@ incremental coverage; исторический результат 0 на пят�
 «Just a moment...». Эти наблюдения переданы координатором, новых live-запросов
 в M14a не выполнялось. Детектор и policy не менялись: успешный HTTP-ответ
 LowEndTalk сам по себе не означает принятия страницы продуктом.
+
+### После выкладки M14b
+
+17.09.2026 на stand-host развёрнут release
+`b31a36b10f57a21e4d2703e9de770e731d06950e`, образ `abg-runtime:b31a36b10f57`,
+image ID `sha256:c0ee2abf4c14dc906092056d832983106ead0518fe3f054dff75565e30669bd0`.
+AC-874 подтвердил healthy API и стабильный монитор. Оба прежних release,
+их manifests и образы сохранены; непосредственный откат — `4409f8a…`,
+конфигурация до выкладки — `compose.env.pre-m14b` (0600).
+
+Улики первого прогона: `/home/user/.cache/abg-coord-20260917/m14b/`.
+Таблица взята из `targets.json` (сохранена также точная копия
+`targets-initial.json`) и архива `bizprofile-20260917T112640Z.json`.
+`deploy-initial.json`, `profiles-initial.json`, `api-egress-initial.json`
+сохраняют остальные исходные измерения перед машинной приёмкой.
+Ступени записаны как **provider/status/challenge/elapsed_ms**; все попытки
+в таблице — `egress_profile=direct`. Последний столбец — полное время API,
+включая запуск провайдеров; его нельзя приравнивать к сумме elapsed попыток.
+`null` означает отсутствие HTTP-статуса.
+
+| Цель / страница | Провайдер успеха / исход | Лестница попыток | API elapsed, мс |
+|---|---|---|---|
+| `control-hqd` | `curl_cffi` | `curl_cffi/200/none/323` | 1078 |
+| `control-static` | `curl_cffi` | `curl_cffi/200/none/210` | 926 |
+| `cf-lowendtalk` | `curl_cffi` | `curl_cffi/200/captcha/208` | 939 |
+| `cf-bizprofile` | `scrapling` | `curl_cffi/403/suspected/147` → `patchright/403/suspected/1223` → `scrapling/200/none/18406` | 23381 |
+| `cf-spa-chatgpt-share` | нет: `timeout` | `curl_cffi/null/none/0` | 120385 |
+| `login-instagram` | `patchright` | `curl_cffi/200/none/997` → `patchright/200/none/2273` | 5305 |
+| bizprofile главная (без `expected_text`) | `scrapling` | `curl_cffi/403/suspected/173` → `patchright/403/suspected/1242` → `scrapling/200/none/17458` | 22780 |
+| bizprofile Elevate Electric LLC (без `expected_text`) | `scrapling` | `curl_cffi/403/suspected/159` → `patchright/403/suspected/1352` → `scrapling/200/none/17777` | 22541 |
+
+Итог матрицы — **5/6**, CLI: rc=0, `Example Domain` найден. Обе страницы
+bizprofile без `expected_text` прошли через Scrapling с `challenge=none`,
+`success=true`, `error_type=none`; локальные маркеры найдены. HTTP-ступень
+каждой цели начинается с `curl_cffi/direct`; попыток `provider=curl` нет
+ни в матрице, ни в указанном архиве bizprofile.
+
+Egress измерен заново: все 15 профилей дали уникальные адреса, отличные от
+direct, а запрос без авторизации — HTTP 407. Через deployed API подтверждена
+ротация `ms1 → ms2 → ms3`: все три egress-попытки — `curl_cffi`, HTTP 200,
+`success=true`; `rotation_proven=true` (AC-875 и AC-876).
+
+Сравнение с `/home/user/.cache/abg-coord-20260917/m13c/targets.json`:
+
+| Цель | Успех M13c | Исход M14b | Что изменилось |
+|---|---|---|---|
+| `control-hqd` | `curl` | `curl_cffi` | HTTP сразу успешен в обоих прогонах; браузер не понадобился |
+| `control-static` | `curl` | `curl_cffi` | HTTP сразу успешен в обоих прогонах |
+| `cf-lowendtalk` | `patchright` после `curl/403/suspected` | `curl_cffi/200/captcha` | Цель взята раньше браузера: 1 попытка вместо 2, полное время 939 против 4620 мс |
+| `cf-bizprofile` | `scrapling` | `scrapling` | HTTP и patchright возвращают 403/suspected; curl_cffi браузер не заменил |
+| `cf-spa-chatgpt-share` | `curl/200/none` | `timeout` | curl_cffi не получил HTTP-ответ; policy остановилась с retry_later, браузер не запускался |
+| `login-instagram` | `patchright` | `patchright` | HTTP 200/none не содержит ожидаемого текста: content_missing ведёт в браузер |
+
+LowEndTalk опроверг предположение спеки об обязательной эскалации из-за
+`captcha`: детектор действительно записал этот challenge, однако матрица
+передаёт `expected_text`. В текущем `gateway/product.py:accept_page` после
+проверок транспорта, статуса и решающих challenge проверяется наличие этого
+текста; запрет по `captcha` в этой ветке не применяется. Поэтому HTTP 200
+с найденным текстом принят, несмотря на метку детектора. В прежнем прогоне
+аналогичный `200/captcha` был принят у patchright. Это результат матрицы с
+ожидаемым текстом, а не доказательство успеха LowEndTalk без `expected_text`.
+Детектор и policy в M14b не менялись. Bizprofile остановлен на HTTP именно
+403/suspected, Instagram требует содержимого, а отказ ChatGPT — таймаут,
+не распознанный challenge (`status=null`, `challenge=none`).
+
+У `cf-spa-chatgpt-share` единственная попытка завершилась `timeout`, её
+`elapsed_ms=0` — записанное runner значение при отсутствии завершённого
+измерения провайдера; полное время API — 120385 мс. Из этих улик точную
+сетевую причину установить нельзя. Команда AC-878 вернула 0 (матрица, CLI
+и проверки провайдеров выполнены), но по контракту M14b внешний отказ
+отмечен **AC-878 fail**. Цель не повторяли ради успешного исхода; сервис
+оставлен на новом release, откат не требовался.

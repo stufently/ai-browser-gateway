@@ -185,10 +185,10 @@ shutdown removes running providers while draining and finishes sooner.
 
 ## M12b deployed service
 
-Stand-host runs the accepted release `4409f8a5197f7a9f464263e15b362c00548399e2`
+Stand-host runs release `b31a36b10f57a21e4d2703e9de770e731d06950e`
 under `/home/user/services/ai-browser-gateway`, with the API published at
 `127.0.0.1:8765`. Measured outcomes and image identity:
-[M13c bizprofile results](docs/research/08-bizprofile-scrapling.md#после-выкладки-m13c).
+[M14b deployment results](docs/research/04-phase1-verdict.md#после-выкладки-m14b).
 The [M12b report](docs/research/07-deployed-service.md) retains the original
 profile-pool and target measurements.
 
@@ -196,7 +196,7 @@ Start or stop the service using its explicit configuration:
 
 ```bash
 service_root=/home/user/services/ai-browser-gateway
-release_sha=4409f8a5197f7a9f464263e15b362c00548399e2
+release_sha=b31a36b10f57a21e4d2703e9de770e731d06950e
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
@@ -217,19 +217,20 @@ The client reads `~/.config/abg/client-token`, a symlink to `secrets/token`:
 scripts/abg-fetch https://example.com/ text
 ```
 
-The retained rollback release is `929bded313e371808b0747fd9a400696a36638aa`,
-with image `abg-runtime:929bded313e3`. M13c preserves its release, manifest,
-and image, and saves the original configuration as `compose.env.pre-m13c`
+The retained rollback release is `4409f8a5197f7a9f464263e15b362c00548399e2`,
+with image `abg-runtime:4409f8a5197f`. M14b preserves both earlier releases
+(`4409f8a…` and `929bded…`), their manifests and images, and `compose.env.pre-m13c`.
+The configuration before M14b is saved as `compose.env.pre-m14b`
 (mode `0600`, never overwritten). Restore that file byte for byte to roll back:
 
 ```bash
-cp "$service_root/compose.env.pre-m13c" "$service_root/compose.env"
-rollback_sha=929bded313e371808b0747fd9a400696a36638aa
+cp "$service_root/compose.env.pre-m14b" "$service_root/compose.env"
+rollback_sha=4409f8a5197f7a9f464263e15b362c00548399e2
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$rollback_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
 python3 tests/deployed_m12b.py --check-deploy --release "$rollback_sha" \
-  --evidence /home/user/.cache/abg-coord-20260917/m13c-rollback
+  --evidence /home/user/.cache/abg-coord-20260917/m14b-rollback
 ```
 
 Clearing these two variables prevents earlier shell exports from overriding
@@ -242,11 +243,13 @@ docker build -t "abg-runtime:${release_sha:0:12}" \
   -f "$service_root/releases/$release_sha/deploy/Dockerfile" "$service_root/releases/$release_sha"
 ```
 
-For M13c, run these checks sequentially from the clone:
+For M14b, run these checks sequentially from the clone, with no other API clients:
 
 ```bash
-evidence=/home/user/.cache/abg-coord-20260917/m13c
+evidence=/home/user/.cache/abg-coord-20260917/m14b
 python3 tests/deployed_m12b.py --check-deploy --release "$release_sha" --evidence "$evidence"
+python3 tests/deployed_m12b.py --check-profiles --release "$release_sha" --evidence "$evidence"
+python3 tests/deployed_m12b.py --check-api-egress --release "$release_sha" --evidence "$evidence"
 python3 tests/deployed_m12b.py --check-bizprofile --release "$release_sha" --evidence "$evidence"
 python3 tests/deployed_m12b.py --run-targets --release "$release_sha" --evidence "$evidence"
 ```
