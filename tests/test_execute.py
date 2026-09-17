@@ -301,6 +301,35 @@ class DockerLauncherTests(unittest.TestCase):
         self.assertEqual(argv, ['docker', 'run', '--label', 'abg.request=same',
                                 '--rm', 'abg-curl:m2', 'url'])
 
+    def test_non_run_commands_keep_exact_argv_and_never_cleanup_on_timeout(self):
+        for argv in (['docker', 'ps'], ['docker', 'image', 'inspect', 'abg-curl:m2'],
+                     ['python3', '-c', 'print("hello")']):
+            for timed_out in (False, True):
+                with self.subTest(argv=argv, timed_out=timed_out):
+                    original = list(argv)
+                    calls = []
+                    expired = subprocess.TimeoutExpired(original, 7)
+                    launcher = DockerLauncher()
+
+                    def run(command, **kwargs):
+                        calls.append(list(command))
+                        if timed_out:
+                            raise expired
+                        return subprocess.CompletedProcess(command, 0, 'out', 'err')
+
+                    with patch('bench.runner.execute.subprocess.run', side_effect=run), \
+                            patch.object(launcher, '_cleanup', wraps=launcher._cleanup) as cleanup:
+                        if timed_out:
+                            with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                                launcher.run(argv, 7)
+                            self.assertIs(raised.exception, expired)
+                        else:
+                            self.assertEqual(launcher.run(argv, 7), (0, 'out', 'err'))
+                    self.assertEqual(calls, [original],
+                                     'non-run commands must keep exact argv without launch flags')
+                    self.assertEqual(argv, original)
+                    cleanup.assert_not_called()
+
     def test_late_container_is_polled_and_removed_by_exact_identity(self):
         for cid_contents in (None, ''):
             with self.subTest(cid_contents=cid_contents):
@@ -497,6 +526,46 @@ class DockerLauncherTests(unittest.TestCase):
                     self.assertEqual(calls, prefix + ['rm', 'ps', 'ps', 'rm', 'ps'])
                     self.assertTrue(sleeps, 'a failed listing must keep polling')
                     self.assertLess(self.now, 130.0)
+
+    def test_failed_listing_sleep_is_not_repeated_before_rediscovered_removal(self):
+        events = []
+        launch = []
+        expired = subprocess.TimeoutExpired('docker', 1)
+        listings = iter([(1, ''), (0, 'known-id\n')])
+        removals = iter([1, 0])
+
+        def run(command, **kwargs):
+            events.append(('command', list(command)))
+            if command[:2] == ['docker', 'run']:
+                launch.extend(command)
+                Path(command[command.index('--cidfile') + 1]).write_text('known-id\n')
+                raise expired
+            self.advance(0.25)
+            if command[:2] == ['docker', 'rm']:
+                return subprocess.CompletedProcess(command, next(removals), '', '')
+            self.assertEqual(command[:2], ['docker', 'ps'])
+            rc, stdout = next(listings)
+            return subprocess.CompletedProcess(command, rc, stdout, '')
+
+        def sleep(seconds):
+            events.append(('sleep', seconds))
+            self.advance(seconds)
+
+        with patch('bench.runner.execute.subprocess.run', side_effect=run), \
+                patch('bench.runner.execute.time.sleep', side_effect=sleep):
+            with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                DockerLauncher().run(['docker', 'run', '--rm', 'abg-curl:m2'], 1)
+        self.assertIs(raised.exception, expired)
+        listing = ['docker', 'ps', '--all', '--quiet', '--no-trunc', '--filter',
+                   'label=' + self.identity(launch)]
+        self.assertEqual(events, [
+            ('command', launch),
+            ('command', ['docker', 'rm', '--force', 'known-id']),
+            ('command', listing),
+            ('sleep', 0.1),
+            ('command', listing),
+            ('command', ['docker', 'rm', '--force', 'known-id']),
+        ], 'the failed listing already supplied the pause before the next removal')
 
     def test_persistent_removal_failure_sleeps_between_attempts_until_deadline(self):
         for cidfile in (True, False):
