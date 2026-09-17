@@ -87,6 +87,8 @@ def parse_api(status, body):
                 and type(a['elapsed_ms']) is int and a['elapsed_ms'] >= 0
                 and isinstance(a['challenge'], str) and isinstance(a['error_type'], str),
                 'api_invalid_attempts')
+    require(not {'provider_error', 'environment_error'} & {
+        value['error_type'], *(a['error_type'] for a in attempts)}, 'api_provider_infrastructure_error')
     return value
 
 
@@ -425,7 +427,9 @@ def check_deploy():
         require(logs.returncode == 0, 'docker_logs_failed')
         if role == 'monitor':
             require(not (logs.stdout + logs.stderr).strip(), 'monitor_delivery_errors')
-        metadata.append({'argv': config['Cmd'], 'env': config['Env'], 'logs': logs.stdout + logs.stderr})
+        metadata.append({'cmd': config['Cmd'], 'entrypoint': config.get('Entrypoint'),
+                         'path': entry.get('Path'), 'args': entry.get('Args'),
+                         'env': config['Env'], 'logs': logs.stdout + logs.stderr})
     worker_call('scan', metadata=metadata)
     require(worker_call('health') == {'status': 200, 'body': {'ok': True}}, 'health_failed')
     require(worker_call('unauthorized')['status'] == 401, 'auth_failed')

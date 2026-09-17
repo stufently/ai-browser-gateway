@@ -52,6 +52,14 @@ class ClassificationTests(unittest.TestCase):
             with self.assertRaisesRegex(d.CheckError, '^docker_failed$'):
                 d.docker('version')
 
+    def test_provider_infrastructure_failure_is_not_target_refusal(self):
+        for error in ('provider_error', 'environment_error'):
+            value = outcome()
+            value['attempts'][1]['error_type'] = error
+            value['error_type'] = error
+            with self.subTest(error=error), self.assertRaises(d.CheckError):
+                d.parse_api(200, json.dumps(value))
+
     def test_docker_missing_and_timeout_are_static_errors(self):
         for error in [FileNotFoundError('secret'), subprocess.TimeoutExpired('secret', 1)]:
             with patch.object(d.subprocess, 'run', side_effect=error):
