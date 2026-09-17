@@ -814,15 +814,11 @@ class ScraplingAdapterTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["sentinel"])
 
-    def test_scrapling_passes_response_headers(self):
-        captured = {}
-
-        class Page:
-            status = 200
-            url = "https://final.invalid/"
-            body = b"<html>marker</html>"
-            headers = {"cf-mitigated": "challenge"}
-            history = ()
+    def _probe_response(self, status, body, headers):
+        page = types.SimpleNamespace(
+            status=status, url="https://final.invalid/", body=body,
+            headers=headers, history=(),
+        )
 
         class Session:
             def __init__(self, **kwargs):
@@ -835,15 +831,196 @@ class ScraplingAdapterTests(unittest.TestCase):
                 pass
 
             def fetch(self, url, **kwargs):
-                captured["url"] = url
-                return Page()
+                return page
 
         with patch.dict(sys.modules, self._fake_modules(Session)):
-            adapter = self.probe.ScraplingAdapter()
-            adapter.start()
-            result = adapter.navigate("https://target.invalid/")
-            adapter.close()
-        self.assertEqual(result["headers"]["cf-mitigated"], "challenge")
+            return self.probe.run_probe(
+                "scrapling", "https://target.invalid/", mode="cold",
+                content_only=True, clock=Clock(), metrics=lambda: (0, 0),
+            )
+
+    def test_scrapling_drops_stale_cf_header_on_clean_2xx(self):
+        body = (b"<html><title>Directory</title><body>Real content"
+                b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">'
+                b"</script></body></html>")
+        for status in (200, 204, 299):
+            with self.subTest(status=status):
+                headers = {"CF-Mitigated": "challenge", "Content-Type": "text/html",
+                           "X-Keep": "present"}
+                result = self._probe_response(status, body, headers)
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"],
+                                 {"content-type": "text/html", "x-keep": "present"})
+                self.assertEqual(result["challenge"], "none")
+                self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+                self.assertEqual(headers["CF-Mitigated"], "challenge")
+
+    def test_scrapling_drops_stale_cf_header_with_platform_and_noindex(self):
+        body = (b'<html><meta name="robots" content="noindex,nofollow">'
+                b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">'
+                b'</script></html>')
+        headers = {"cf-mitigated": "challenge"}
+        result = self._probe_response(200, body, headers)
+        self.assertEqual(result["err"], "")
+        self.assertEqual(result["headers"], {})
+        self.assertEqual(result["challenge"], "none")
+        self.assertEqual(result["challenge_markers"],
+                         ["body_cf_challenge_platform", "body_noindex_nofollow"])
+        self.assertEqual(headers, {"cf-mitigated": "challenge"})
+
+    def test_scrapling_preserves_cf_header_on_non_jsd_platform_path(self):
+        for path in (
+            "/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=x",
+            "/CDN-CGI/CHALLENGE-PLATFORM/H/G/ORCHESTRATE/CHL_PAGE/V1?ray=x",
+            "/cdn-cgi/challenge-platform",
+            "/cdn-cgi/challenge-platform/scripts/jsd",
+            "/cdn-cgi/challenge-platform/scripts/jsd-other/main.js",
+        ):
+            with self.subTest(path=path):
+                body = f'<script src="{path}"></script>'.encode()
+                headers = {"cf-mitigated": "challenge"}
+                result = self._probe_response(200, body, headers)
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                self.assertEqual(result["challenge"], "suspected")
+                self.assertEqual(result["challenge_markers"],
+                                 ["header_cf_mitigated", "body_cf_challenge_platform"])
+                self.assertEqual(headers, {"cf-mitigated": "challenge"})
+
+    def test_scrapling_preserves_cf_header_on_mixed_platform_paths(self):
+        jsd = b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+        orchestrate = (b'<script src="/cdn-cgi/challenge-platform/'
+                       b'h/g/orchestrate/chl_page/v1?ray=x"></script>')
+        for body in (jsd + orchestrate, orchestrate + jsd):
+            with self.subTest(body=body):
+                result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                self.assertEqual(result["challenge"], "suspected")
+                self.assertEqual(result["challenge_markers"],
+                                 ["header_cf_mitigated", "body_cf_challenge_platform"])
+
+    def test_scrapling_drops_stale_cf_header_with_only_jsd_paths(self):
+        scripts = ('<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+                   '<script src="/CDN-CGI/CHALLENGE-PLATFORM/SCRIPTS/JSD/main.js"></script>')
+        for body in (scripts, b"\xff" + scripts.encode()):
+            with self.subTest(body=body):
+                result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], {})
+                self.assertEqual(result["challenge"], "none")
+                self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+
+    def test_scrapling_drops_stale_cf_header_with_mixed_case_jsd_paths(self):
+        for suffix in ("/SCRIPTS/JSD/main.js", "/Scripts/Jsd/main.js"):
+            html = f'<script src="/cdn-cgi/challenge-platform{suffix}"></script>'
+            for body in (html, html.encode()):
+                with self.subTest(suffix=suffix, body_type=type(body).__name__):
+                    result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+                    self.assertEqual(result["err"], "")
+                    self.assertEqual(result["headers"], {})
+                    self.assertEqual(result["challenge"], "none")
+                    self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+
+    def test_scrapling_preserves_cf_header_with_jsd_and_challenge_strings(self):
+        jsd = '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+        widgets = (
+            ('turnstile', '<div class="cf-turnstile" data-sitekey="key"></div>'),
+            ('cf-chl', '<div class="cf-chl-container"></div>'),
+            ('cf_chl', '<script>window.cf_chl_state = {};</script>'),
+            ('challenge-platform', '<div class="challenge-platform"></div>'),
+            ('challenges.cloudflare.com',
+             '<script src="https://challenges.cloudflare.com/widget.js"></script>'),
+            ('cf-challenge', '<div class="cf-challenge"></div>'),
+            ('cf-captcha', '<div class="cf-captcha"></div>'),
+            ('hcaptcha', '<script src="https://js.hcaptcha.com/1/api.js"></script>'),
+            ('recaptcha', '<script src="https://www.google.com/recaptcha/api.js"></script>'),
+            ('g-recaptcha', '<div class="g-recaptcha" data-sitekey="key"></div>'),
+            ('h-captcha', '<div class="h-captcha" data-sitekey="key"></div>'),
+            ('/cdn-cgi/challenge', '<form action="/cdn-cgi/challenge" method="post"></form>'),
+            ('CF-TURNSTILE', '<DIV CLASS="CF-TURNSTILE" DATA-SITEKEY="key"></DIV>'),
+        )
+        for marker, widget in widgets:
+            # Unquoted HTML attributes also carry markers, even where the
+            # detector's existing quoted-attribute captcha rule does not match.
+            for markup in (widget, widget.replace('"', '')):
+                html = f'<html><p>Checking your browser</p>{jsd}{markup}</html>'
+                for body in (html, b"\xff" + html.encode()):
+                    with self.subTest(marker=marker, markup=markup,
+                                      body_type=type(body).__name__):
+                        headers = {"cf-mitigated": "challenge"}
+                        result = self._probe_response(200, body, headers)
+                        self.assertEqual(result["err"], "")
+                        self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                        self.assertEqual(result["challenge"], "suspected")
+                        self.assertIn("header_cf_mitigated", result["challenge_markers"])
+                        self.assertEqual(headers, {"cf-mitigated": "challenge"})
+
+    def test_scrapling_drops_stale_cf_header_with_jsd_and_ordinary_words(self):
+        body = (b'<html><p>A business challenge: cloudflare integration.</p>'
+                b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+                b'</html>')
+        result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+        self.assertEqual(result["err"], "")
+        self.assertEqual(result["headers"], {})
+        self.assertEqual(result["challenge"], "none")
+        self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+
+    def test_scrapling_preserves_cf_header_on_single_cf_body_marker(self):
+        for marker, rule in (("cf_chl_opt", "body_cf_chl_opt"),
+                             ("__cf_chl", "body_cf_chl"),
+                             ("challenges.cloudflare.com", "body_cf_challenges_host")):
+            with self.subTest(marker=marker):
+                body = f"<html>{marker}</html>".encode()
+                headers = {"cf-mitigated": "challenge"}
+                result = self._probe_response(200, body, headers)
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                self.assertEqual(result["challenge"], "suspected")
+                self.assertEqual(result["challenge_markers"], ["header_cf_mitigated", rule])
+                self.assertEqual(headers, {"cf-mitigated": "challenge"})
+
+    def test_scrapling_preserves_cf_header_outside_2xx(self):
+        for status in (None, 199, 300, 403, 429, 500):
+            with self.subTest(status=status):
+                result = self._probe_response(
+                    status, b"<html>Real content</html>", {"cf-mitigated": "challenge"})
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                self.assertEqual(result["challenge"], "suspected")
+                self.assertIn("header_cf_mitigated", result["challenge_markers"])
+
+    def test_scrapling_preserves_cf_header_on_2xx_interstitial(self):
+        body = (ROOT / "tests/fixtures/cf_interstitial_200body_403.html").read_bytes()
+        for value, verdict in (("challenge", "suspected"), ("interactive", "interactive")):
+            with self.subTest(value=value):
+                result = self._probe_response(200, body, {"cf-mitigated": value})
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], {"cf-mitigated": value})
+                self.assertEqual(result["challenge"], verdict)
+                self.assertIn("header_cf_mitigated", result["challenge_markers"])
+
+    def test_scrapling_preserves_cf_header_on_2xx_captcha(self):
+        for attr in ("src", "class", "id", "name"):
+            for extra in ("", '<script src="/cdn-cgi/challenge-platform/jsd.js"></script>'):
+                with self.subTest(attr=attr, extra=extra):
+                    body = f'<html><input {attr}="captcha">{extra}</html>'.encode()
+                    headers = {"cf-mitigated": "challenge"}
+                    result = self._probe_response(200, body, headers)
+                    self.assertEqual(result["err"], "")
+                    self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                    self.assertEqual(result["challenge"], "suspected")
+                    self.assertIn("body_captcha", result["challenge_markers"])
+                    self.assertIn("header_cf_mitigated", result["challenge_markers"])
+                    self.assertEqual(headers, {"cf-mitigated": "challenge"})
+
+    def test_scrapling_keeps_missing_and_empty_headers_distinct(self):
+        for headers, expected in ((None, None), ({}, {}), ({"cf-mitigated": "challenge"}, {})):
+            with self.subTest(headers=headers):
+                result = self._probe_response(200, b"<html>Real content</html>", headers)
+                self.assertEqual(result["err"], "")
+                self.assertEqual(result["headers"], expected)
+                self.assertEqual(result["challenge"], "none")
 
     def test_scrapling_engine_failure_is_normalized_not_raised(self):
         class Boom:
