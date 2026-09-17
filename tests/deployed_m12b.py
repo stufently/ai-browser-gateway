@@ -19,7 +19,7 @@ import time
 from urllib.parse import urlsplit
 
 SHA = '929bded313e371808b0747fd9a400696a36638aa'
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent.parent
 SERVICE = Path('/home/user/services/ai-browser-gateway')
 RELEASE = SERVICE / 'releases' / SHA
 EVIDENCE = Path('/home/user/.cache/abg-coord-20260917/m12b')

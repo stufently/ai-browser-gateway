@@ -2,6 +2,7 @@
 import copy
 import io
 import json
+import runpy
 import subprocess
 import tempfile
 import unittest
@@ -140,6 +141,12 @@ class RotationTests(unittest.TestCase):
 
 
 class WorkerTests(unittest.TestCase):
+    def test_module_loads_at_container_root_mount(self):
+        # Docker binds the single file at /runner.py, with only one parent.
+        with patch.object(Path, 'resolve', return_value=Path('/runner.py')):
+            module = runpy.run_path(d.__file__)
+        self.assertTrue(callable(module['worker']))
+
     def invoke(self, payload):
         output = io.StringIO()
         with patch.object(d.sys, 'stdin', io.StringIO(json.dumps(payload))), \
