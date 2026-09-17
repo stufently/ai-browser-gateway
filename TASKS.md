@@ -482,13 +482,24 @@
     после удаления заголовка → `none` (подтверждено вызовом детектора);
     `tests/mutation_gate_scrapling.py` ссылается на удалённый тест. agy — без
     находок. Мутации по `c0a6f17` остановлены (abandoned).
-  - M13a-fix `docs/specs/m13a-fix.md` — панель `cx-abg-m13a-fix-20260917`,
-    BASE `c0a6f17`; после приёмки — мутации `docs/specs/m13a-mutations.md`
-    (SOURCE заменить на FINAL fix).
+  - M13a-fix `docs/specs/m13a-fix.md`: FINAL `c32da3c`, machine_pass (6/6
+    перезапущено). Codex: одиночный решающий CF-маркер (`cf_chl_opt`) без
+    заголовка → `none`. agy — без находок. Мутации по `c32da3c` остановлены.
+  - M13a-fix2 `docs/specs/m13a-fix2.md`: FINAL `375bdbf`, machine_pass (6/6,
+    live зелёный). Codex: `challenge-platform` ловит и `orchestrate/chl_page`;
+    тело без CF-маркеров (самописная captcha) теряет заголовок. Выбор владельца
+    17.09: сузить до `/scripts/jsd/`, остаток принять и записать в research 08.
+  - M13a-fix3 `docs/specs/m13a-fix3.md` — панель `cx-abg-m13a-fix3-20260917`,
+    BASE `375bdbf`; после приёмки — мутации `docs/specs/m13a-mutations.md`
+    (SOURCE перенацелить на FINAL fix3).
   - M13b probe принят и влит (`3a55167`): BASE red 2/6 на позднем контейнере,
     эталоны name/label green с frozen M9/M12 (перепроверено координатором).
-  - M13b-fix `docs/specs/m13b-fix.md` — панель `cx-abg-m13b-fix-20260917`,
-    BASE `5a508e4`.
+  - M13b-fix `docs/specs/m13b-fix.md`: FINAL `858fd85`, machine_pass (5/5).
+    Codex: при заполненном cidfile и уже удалённом контейнере `rm` крутится все
+    30 с (бюджет 1 с → 31 с, держит LaunchGate). agy — без находок. Мутации
+    `docs/specs/m13b-mutations.md` по `858fd85` остановлены.
+  - M13b-fix2 `docs/specs/m13b-fix2.md` — панель `cx-abg-m13b-fix2-20260917`,
+    BASE `858fd85`; после приёмки — мутации (SOURCE на FINAL fix2).
   - M13c — выкладка нового release после M13a+M13b.
 
 - [x] **M12 — COMPLETED 17.09.2026 (M12a и M12b влиты в main, сервис выкачен).**
