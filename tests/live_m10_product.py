@@ -97,11 +97,11 @@ def inner(run_id):
                               '--label', 'abg-m10-role=provider'] + argv[2:]
             return DockerLauncher().run(argv, timeout, env=env)
 
-    for kind, providers, budget in [('direct', ['curl'], 20000),
-                                     ('js', ['curl', 'patchright'], 120000),
-                                     ('ladder', ['curl', 'patchright', 'scrapling'], 180000),
-                                     ('forbidden', ['curl'], 20000),
-                                     ('slow', ['curl'], 800)]:
+    for kind, providers, budget in [('direct', ['curl_cffi'], 20000),
+                                     ('js', ['curl_cffi', 'patchright'], 120000),
+                                     ('ladder', ['curl_cffi', 'patchright', 'scrapling'], 180000),
+                                     ('forbidden', ['curl_cffi'], 20000),
+                                     ('slow', ['curl_cffi'], 800)]:
         marker = kind + '_' + secrets.token_hex(12)
         path = '/' + kind + '/' + marker
         url = base + path

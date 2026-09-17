@@ -661,6 +661,75 @@ class AdapterContractTests(unittest.TestCase):
         self.assertTrue(write_out.endswith("%{header_json}"))
         self.assertEqual(write_out.count("%{header_json}"), 1)
 
+    def test_curl_cffi_navigation_classifies_only_provider_timeouts(self):
+        class CurlError(OSError):
+            pass
+
+        class RequestException(CurlError):
+            pass
+
+        class Timeout(RequestException):
+            __module__ = "curl_cffi.requests.exceptions"
+
+        class ConnectTimeout(Timeout):
+            pass
+
+        class ConnectionError(RequestException):
+            __module__ = "curl_cffi.requests.exceptions"
+
+        unrelated_timeout = type("Timeout", (OSError,), {"__module__": "other.requests"})
+        curl_cffi = types.ModuleType("curl_cffi")
+        requests_mod = types.ModuleType("curl_cffi.requests")
+        curl_cffi.requests = requests_mod
+        for error_type, expected_err in (
+            (Timeout, "timeout"),
+            (ConnectTimeout, "timeout"),
+            (ConnectionError, "ConnectionError: request failed"),
+            (TimeoutError, "timeout"),
+            (unrelated_timeout, "Timeout: request failed"),
+        ):
+            with self.subTest(error_type=error_type):
+                def get(*args, **kwargs):
+                    raise error_type("request failed")
+
+                requests_mod.get = get
+                with patch.dict(sys.modules, {
+                    "curl_cffi": curl_cffi,
+                    "curl_cffi.requests": requests_mod,
+                }):
+                    payload = self.probe.run_probe(
+                        "curl_cffi", "https://target.invalid/", "marker",
+                        mode="cold", metrics=lambda: (0, 0),
+                    )
+                self.assertFalse(payload["ok"])
+                self.assertEqual(payload["err"], expected_err)
+
+    def test_curl_cffi_timeout_translation_preserves_cause_without_credentials(self):
+        class RequestException(OSError):
+            pass
+
+        class Timeout(RequestException):
+            __module__ = "curl_cffi.requests.exceptions"
+
+        original = Timeout("request failed via http://user:secret@proxy.invalid:8080")
+
+        def get(*args, **kwargs):
+            raise original
+
+        curl_cffi = types.ModuleType("curl_cffi")
+        requests_mod = types.ModuleType("curl_cffi.requests")
+        requests_mod.get = get
+        curl_cffi.requests = requests_mod
+        with patch.dict(sys.modules, {
+            "curl_cffi": curl_cffi,
+            "curl_cffi.requests": requests_mod,
+        }):
+            with self.assertRaises(TimeoutError) as caught:
+                self.probe.CurlCffiAdapter().navigate("https://target.invalid/")
+        self.assertIs(caught.exception.__cause__, original)
+        self.assertNotIn("secret", str(caught.exception))
+        self.assertNotIn("proxy.invalid", str(caught.exception))
+
     def test_curl_cffi_and_primp_pass_response_headers(self):
         class Response:
             status_code = 200

@@ -72,7 +72,7 @@ def inner(run, api_port, stand_port):
     with urlopen(req, timeout=150) as response:
         result = json.load(response)
     assert result['ok'] and marker in result['content']
-    assert [a['provider'] for a in result['attempts']] == ['curl', 'patchright'], result['attempts']
+    assert [a['provider'] for a in result['attempts']] == ['curl_cffi', 'patchright'], result['attempts']
     assert result['provider'] == 'patchright'
     for scenario, extra, target in [('wrong-token', {'ABG_TOKEN': 'wrong-test-token'}, url),
             ('okfalse', {'ABG_ALLOW_BROWSER': '0'}, url.replace('/js/', '/forbidden/'))]:
@@ -84,7 +84,7 @@ def inner(run, api_port, stand_port):
         print(json.dumps({'scenario': scenario, 'failure_handled': True}), flush=True)
     assert not docker('ps', '-aq', '--filter', f'label={LABEL}={run}',
                       '--filter', 'label=abg-m11-role=provider').stdout.strip()
-    print('live_m11_api: ok; real ProductFetcher curl -> patchright', flush=True)
+    print('live_m11_api: ok; real ProductFetcher curl_cffi -> patchright', flush=True)
 
 
 def main():
