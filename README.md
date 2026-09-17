@@ -176,3 +176,9 @@ docker compose -f deploy/compose.yaml -p ai-browser-gateway down
 
 `GET /health` unauthenticated; `POST /v1/fetch` is M11 Bearer JSON.
 Host publish `127.0.0.1:8765`. Live: `python3 tests/live_m12_service.py`.
+
+SIGTERM closes provider admission immediately, drains already admitted Docker
+calls, then performs the final owner/instance/role-scoped cleanup. Compose allows
+260 seconds before SIGKILL to cover the existing 180-second request budget,
+Docker launcher's 30-second timeout cleanup and final bounded sweeps. Normal
+shutdown removes running providers while draining and finishes sooner.

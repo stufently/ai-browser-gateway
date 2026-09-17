@@ -95,6 +95,8 @@ def manifest(root: Path, sha, files):
         for name, (data, _mode) in sorted(files.items())
     ]
     path = folder / (sha + '.sha256')
+    if path.is_symlink():
+        raise ValueError
     if path.exists():
         return
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)

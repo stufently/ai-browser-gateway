@@ -7,7 +7,6 @@ import stat
 import subprocess
 import sys
 import threading
-import time
 import tomllib
 from urllib.parse import urlsplit
 
@@ -23,12 +22,61 @@ class ConfigError(Exception):
     pass
 
 
+class LaunchGate:
+    """Close admission before stopping HTTP; drain admitted Docker operations.
+
+    The counter covers the entire inner.run, including work before the Docker
+    daemon creates a container. A sweep alone cannot observe that interval.
+    Runtime calls are bounded by the unchanged transport's <=180s budget and
+    DockerLauncher's <=30s timeout cleanup. Sweeping while draining also releases
+    docker run clients whose containers are already running.
+    """
+    def __init__(self):
+        self.condition = threading.Condition()
+        self.stopped = False
+        self.active = 0
+
+    def stop(self):
+        with self.condition:
+            self.stopped = True
+
+    def check(self):
+        with self.condition:
+            if self.stopped:
+                raise RuntimeError('service_stopping')
+
+    def run(self, inner, argv, timeout, env):
+        with self.condition:
+            self.check()
+            self.active += 1
+        try:
+            return inner.run(argv, timeout, env=env)
+        finally:
+            with self.condition:
+                self.active -= 1
+                self.condition.notify_all()
+
+    def drain(self, instance):
+        self.stop()
+        while True:
+            with self.condition:
+                if not self.active:
+                    break
+            sweep_providers(instance, timeout=1)
+            with self.condition:
+                if self.active:
+                    self.condition.wait(.05)
+        # No admitted call can create a late container after this sweep.
+        sweep_providers(instance)
+
+
 class LabeledLauncher:
-    def __init__(self, instance, request_id, inner=None):
+    def __init__(self, instance, request_id, inner=None, *, gate=None):
         from bench.runner.execute import DockerLauncher
         self.instance = instance
         self.request_id = request_id
         self.inner = inner or DockerLauncher()
+        self.gate = gate
 
     def run(self, argv, timeout, *, env=None):
         if argv[:2] == ['docker', 'run']:
@@ -38,6 +86,8 @@ class LabeledLauncher:
                 '--label', 'abg.role=provider',
                 '--label', 'abg.request=' + self.request_id,
             ] + argv[2:]
+        if self.gate is not None:
+            return self.gate.run(self.inner, argv, timeout, env)
         return self.inner.run(argv, timeout, env=env)
 
 
@@ -79,7 +129,8 @@ def read_private(path):
 
 def _proxy(url):
     if (not isinstance(url, str) or not url
-            or any(ord(char) < 33 or ord(char) == 127 for char in url)):
+            or any(char.isspace() or ord(char) < 32 or 127 <= ord(char) <= 159
+                   for char in url)):
         raise ConfigError
     try:
         parsed = urlsplit(url)
@@ -138,18 +189,30 @@ def make_service(environ=None, *, fetcher_factory=None):
     except (TypeError, ValueError, UnicodeError, ConfigError):
         raise ConfigError from None
 
+    launches = LaunchGate()
+
     def factory(url, **kwargs):
+        launches.check()
         if fetcher_factory is not None:
-            return fetcher_factory(url, **kwargs)
-        from gateway.fetch import ProductFetcher
-        return ProductFetcher(
-            url, launcher=LabeledLauncher(instance, os.urandom(16).hex()),
-            network=network, **kwargs)
+            fetcher = fetcher_factory(url, **kwargs)
+        else:
+            from gateway.fetch import ProductFetcher
+            fetcher = ProductFetcher(
+                url, launcher=LabeledLauncher(instance, os.urandom(16).hex(), gate=launches),
+                network=network, **kwargs)
+
+        def fetch(step, budget_ms):
+            # limit_fetcher calls this AFTER acquiring server.slots. Keep that
+            # real semaphore and reject requests resumed after stop, too.
+            launches.check()
+            return fetcher(step, budget_ms)
+        return fetch
 
     server = make_server(
         (bind, port), token=token, browser_limit=limit, profiles=profiles,
         fetcher_factory=factory, rotate_profiles=True)
     server.instance = instance
+    server.launches = launches
     return server
 
 
@@ -161,8 +224,13 @@ def main():
         return 1
     instance = getattr(server, 'instance', '')
     sweep_providers(instance)
+    stopping = threading.Event()
 
     def stop(*_args):
+        server.launches.stop()
+        if stopping.is_set():
+            return
+        stopping.set()
         threading.Thread(target=server.shutdown, daemon=True).start()
 
     signal.signal(signal.SIGTERM, stop)
@@ -170,10 +238,9 @@ def main():
     try:
         server.serve_forever()
     finally:
+        server.launches.stop()
         server.server_close()
-        sweep_providers(instance)
-        time.sleep(0.2)
-        sweep_providers(instance)
+        server.launches.drain(instance)
     return 0
 
 
