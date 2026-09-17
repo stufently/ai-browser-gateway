@@ -1,19 +1,19 @@
-# M13b — независимые мутации тестов уборки позднего контейнера (после fix2)
+# M13b — независимые мутации тестов уборки позднего контейнера (после fix4)
 
 17.09.2026. Проверочная задача cx, не реализация. Директива владельца 17.09:
 «доделывай всё до конца». Правку и тесты писала другая cx-панель.
 
 Клон /home/user/exec-clones/abg-m13b-mutations2-20260917, ветка
-m13b-mutations2, origin push DISABLED. SOURCE_SHA `498c4d3` (FINAL M13b-fix2,
-полный SHA — `git rev-parse 498c4d3` в клоне).
+m13b-mutations2, origin push DISABLED. SOURCE_SHA `9c23c17` (FINAL M13b-fix4,
+полный SHA — `git rev-parse 9c23c17` в клоне).
 Выход: /home/user/.cache/abg-coord-20260917/m13b-mutations2/. Прогон по
-`858fd85` остановлен координатором: код переделывался.
+`858fd85` остановлен координатором; fix2/fix3 сразу переделаны.
 
 ## Что мутировать
 
 Продукт мутаций — `DockerLauncher.run` и `DockerLauncher._cleanup` в
-`bench/runner/execute.py`. Прочитать целиком `docs/specs/m13b-fix.md`, `docs/specs/m13b-fix2.md`,
-`docs/specs/m13b-late-container-probe.md` и `git diff 5a508e4 498c4d3`.
+`bench/runner/execute.py`. Прочитать целиком `docs/specs/m13b-fix.md`, `docs/specs/m13b-fix2.md`, `docs/specs/m13b-fix3.md`, `docs/specs/m13b-fix4.md`,
+`docs/specs/m13b-late-container-probe.md` и `git diff 5a508e4 9c23c17`.
 
 Авторский набор — `tests.test_execute.DockerLauncherTests` и отдельно frozen
 probe `tests.probe_m13_late_container`. Команды (сначала green на SOURCE):
@@ -24,7 +24,7 @@ probe `tests.probe_m13_late_container`. Команды (сначала green н�
 результат ОБОИХ наборов раздельно; kill засчитывается по авторскому набору,
 probe — справочно.
 
-14–22 смысловых мутанта по одному изменению, каждый в отдельной копии дерева
+20–30 смысловых мутантов по одному изменению, каждый в отдельной копии дерева
 под выходным каталогом. Обязательные оси: идентичность (одна и та же метка на
 все запуски; метка не добавляется; метка добавляется и не-`docker run`
 командам; фильтр `ps` без `label=` / по префиксу `abg.launch`); бюджет (30 →
@@ -39,7 +39,9 @@ cidfile, cidfile без fallback на метку при OSError); ошибки (
 заполненном cidfile, не обновлять `seen` после непустого `ps`, возврат на
 пустом `ps` без проверки `seen`, возврат на пустом `ps` при `returncode != 0`,
 не сбрасывать `cid` — повторять `rm` по cidfile вслепую, убрать `continue`
-после неуспешного `rm`).
+после неуспешного `rm`); пауза (убрать `time.sleep` перед повторным `rm`,
+не выставлять `pause_before_removal = True`, не сбрасывать его после сна);
+полные ID (убрать `--no-trunc`, обрезать найденные ID до 12 символов).
 
 Для каждого: id, ось, diff, SHA256 исходника/мутанта/восстановления,
 доказательство активации изменённой строки авторским набором, команда/cwd/rc,
