@@ -512,6 +512,20 @@
   (0600). Спека M12b `docs/specs/m12b-deploy.md`: plan-review Codex 6 и agy 5
   находок — все приняты и внесены.
 
+  **17.09 04:30 UTC — M12b выкачена, приёмка идёт.** Сервис
+  `/home/user/services/ai-browser-gateway` (Compose-проект
+  `ai-browser-gateway`, instance `stand-host`, 127.0.0.1:8765, release `929bded`,
+  образ `abg-runtime:929bded313e3`) работает. Ветка `m12b-deploy` FINAL
+  `25dfa5c` забрана, не влита. accept_run координатора: 8/8 AC machine_pass
+  (15 прокси с разными IP, 407 без auth, ротация через API ms6→ms7→ms8, 6/6
+  целей ok, CLI ok). Healthchecks: автоматические success каждые 60 с;
+  stop api 04:05:54 → fail 04:06:25, start 04:06:27 → success 04:07:26.
+  Result-review: agy «находок нет»; Codex 3 подтверждённые (check_deploy
+  пишет через abg-release prepare, parse_api терпит неизвестные значения,
+  README откат перекрывается экспортом). Мутации runner-тестов: 28 → 23 kill
+  / 5 survivor (M07, M09, M10, M11, M21). Всё ушло в веху
+  `docs/specs/m12b-fix.md` от `25dfa5c`, панель `cx-abg-m12b-fix-20260917`.
+
   **Бэклог M12:** DockerLauncher — уборка контейнера, созданного демоном после
   таймаута клиента без cidfile (поиск по `abg.request`-label).
 
