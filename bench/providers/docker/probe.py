@@ -618,6 +618,13 @@ _SCRAPLING_STALE_CF_HEADER_RULES = frozenset({
 })
 
 
+def _scrapling_only_jsd_platform_paths(body) -> bool:
+    """Allow only passive JSD paths after every challenge-platform marker."""
+    text = body if isinstance(body, str) else body.decode("utf-8", "replace")
+    suffixes = text.lower().split("/cdn-cgi/challenge-platform")[1:]
+    return all(suffix.startswith("/scripts/jsd/") for suffix in suffixes)
+
+
 class ScraplingAdapter:
     version = "unknown"
     solve_cloudflare = True
@@ -658,7 +665,9 @@ class ScraplingAdapter:
         if (status is not None and 200 <= status < 300
                 and headers is not None and "cf-mitigated" in headers
                 and (body_challenge := detect_challenge(status, None, body))[0] == "none"
-                and set(body_challenge[1]) <= _SCRAPLING_STALE_CF_HEADER_RULES):
+                and set(body_challenge[1]) <= _SCRAPLING_STALE_CF_HEADER_RULES
+                and ("body_cf_challenge_platform" not in body_challenge[1]
+                     or _scrapling_only_jsd_platform_paths(body))):
             # Scrapling can retain challenge headers after its solver reaches
             # the real page. Trust the body only for this successful response.
             headers.pop("cf-mitigated")
