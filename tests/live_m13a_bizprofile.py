@@ -71,7 +71,7 @@ def inner(run_id):
         try:
             assert outcome.ok, outcome.error_type.value
             assert outcome.provider == 'scrapling', 'unexpected_provider'
-            assert [a.provider for a in outcome.attempts] == ['curl', 'patchright', 'scrapling'], 'unexpected_ladder'
+            assert [a.provider for a in outcome.attempts] == ['curl_cffi', 'patchright', 'scrapling'], 'unexpected_ladder'
             assert all(a.egress_profile == 'direct' for a in outcome.attempts), 'unexpected_egress'
             assert outcome.attempts[-1].success, 'missing_successful_attempt'
             assert outcome.attempts[-1].challenge.value == 'none', 'challenge_not_cleared'

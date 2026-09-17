@@ -536,7 +536,13 @@ class CurlCffiAdapter:
         proxy = _proxy_url()
         if proxy:
             kwargs["proxy"] = proxy
-        response = requests.get(url, **kwargs)
+        try:
+            response = requests.get(url, **kwargs)
+        except Exception as exc:
+            if any(cls.__name__ == "Timeout" and cls.__module__ == "curl_cffi.requests.exceptions"
+                   for cls in type(exc).__mro__):
+                raise TimeoutError("curl_cffi request timed out") from exc
+            raise
         return _result(
             response.status_code, str(response.url), response.content, len(response.history),
             headers=_normalize_headers(response.headers),

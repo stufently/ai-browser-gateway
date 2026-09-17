@@ -88,10 +88,10 @@ def plan_product(request) -> tuple[PlanStep, ...]:
     steps = []
     if request.max_age_hours > 0:
         steps.extend(PlanStep(name, 'direct', 'entrance') for name in ('rss', 'wayback'))
-    steps.append(PlanStep('curl', 'direct', 'http'))
+    steps.append(PlanStep('curl_cffi', 'direct', 'http'))
     if request.allow_browser:
         steps.extend(PlanStep(name, 'direct', 'browser') for name in ('patchright', 'scrapling'))
-    steps.extend(PlanStep('curl', name, 'egress') for name in dict.fromkeys(request.egress_profiles))
+    steps.extend(PlanStep('curl_cffi', name, 'egress') for name in dict.fromkeys(request.egress_profiles))
     return tuple(steps)
 
 
