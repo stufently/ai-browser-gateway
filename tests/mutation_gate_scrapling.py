@@ -46,8 +46,8 @@ MUTANTS = [
         "file": "bench/providers/docker/probe.py",
         "old": "        headers = _normalize_headers(getattr(response, \"headers\", None))",
         "new": "        headers = None",
-        "test": "tests.test_probe.ScraplingAdapterTests.test_scrapling_passes_response_headers",
-        "assert": 'self.assertEqual(result["headers"]["cf-mitigated"], "challenge")',
+        "test": "tests.test_probe.ScraplingAdapterTests.test_scrapling_preserves_cf_header_outside_2xx",
+        "assert": 'self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})',
     },
     {
         "name": "4",

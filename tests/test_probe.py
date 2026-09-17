@@ -875,6 +875,20 @@ class ScraplingAdapterTests(unittest.TestCase):
                 self.assertEqual(result["challenge"], verdict)
                 self.assertIn("header_cf_mitigated", result["challenge_markers"])
 
+    def test_scrapling_preserves_cf_header_on_2xx_captcha(self):
+        for attr in ("src", "class", "id", "name"):
+            for extra in ("", '<script src="/cdn-cgi/challenge-platform/jsd.js"></script>'):
+                with self.subTest(attr=attr, extra=extra):
+                    body = f'<html><input {attr}="captcha">{extra}</html>'.encode()
+                    headers = {"cf-mitigated": "challenge"}
+                    result = self._probe_response(200, body, headers)
+                    self.assertEqual(result["err"], "")
+                    self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+                    self.assertEqual(result["challenge"], "suspected")
+                    self.assertIn("body_captcha", result["challenge_markers"])
+                    self.assertIn("header_cf_mitigated", result["challenge_markers"])
+                    self.assertEqual(headers, {"cf-mitigated": "challenge"})
+
     def test_scrapling_keeps_missing_and_empty_headers_distinct(self):
         for headers, expected in ((None, None), ({}, {}), ({"cf-mitigated": "challenge"}, {})):
             with self.subTest(headers=headers):

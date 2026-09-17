@@ -652,7 +652,8 @@ class ScraplingAdapter:
         status = getattr(response, "status", None)
         if (status is not None and 200 <= status < 300
                 and headers is not None and "cf-mitigated" in headers
-                and detect_challenge(status, None, body)[0] not in ("suspected", "interactive")):
+                and (body_challenge := detect_challenge(status, None, body))[0] == "none"
+                and "body_captcha" not in body_challenge[1]):
             # Scrapling can retain challenge headers after its solver reaches
             # the real page. Trust the body only for this successful response.
             headers.pop("cf-mitigated")
