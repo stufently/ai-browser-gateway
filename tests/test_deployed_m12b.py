@@ -325,7 +325,8 @@ class ReleaseTests(unittest.TestCase):
         for path in (self.release, self.manifest, self.release / 'readme.txt',
                      self.release / 'bin'):
             with self.subTest(path=path):
-                moved = path.with_name(path.name + '.original')
+                # An extra file inside the release must not mask link following.
+                moved = self.root / 'symlink-target'
                 path.rename(moved)
                 path.symlink_to(moved)
                 try:
