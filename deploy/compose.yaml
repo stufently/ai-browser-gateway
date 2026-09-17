@@ -1,0 +1,61 @@
+name: ${ABG_COMPOSE_PROJECT:-ai-browser-gateway}
+
+services:
+  api:
+    image: ${ABG_RUNTIME_IMAGE}
+    user: "1002:1002"
+    group_add:
+      - "${ABG_DOCKER_GID:-983}"
+    working_dir: ${ABG_RELEASE}
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    # Allow the maximum 180s launch + 30s launcher cleanup + scoped sweeps.
+    stop_grace_period: 260s
+    ports:
+      - "127.0.0.1:${ABG_HOST_PORT:-8765}:8765"
+    environment:
+      HOME: /tmp
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: ${ABG_RELEASE}
+      ABG_BIND: "0.0.0.0"
+      ABG_PORT: "8765"
+      ABG_BROWSER_LIMIT: "1"
+      ABG_INSTANCE: ${ABG_INSTANCE}
+      ABG_TOKEN_FILE: /run/abg/token
+      ABG_PROFILES_FILE: /run/abg/proxies.toml
+      ABG_PROVIDER_NETWORK: ${ABG_PROVIDER_NETWORK:-}
+    volumes:
+      - ${ABG_RELEASE}:${ABG_RELEASE}:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${ABG_TOKEN_FILE}:/run/abg/token:ro
+      - ${ABG_PROFILES_FILE}:/run/abg/proxies.toml:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=4)); raise SystemExit(0 if isinstance(d, dict) and d.get('ok') is True else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    command: ["python3", "-m", "gateway.service"]
+
+  monitor:
+    image: python@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6
+    user: "1002:1002"
+    working_dir: ${ABG_RELEASE}
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: unless-stopped
+    environment:
+      HOME: /tmp
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONPATH: ${ABG_RELEASE}
+      ABG_HEALTH_URL: http://api:8765/health
+      ABG_HC_PING_FILE: /run/abg/ping
+      ABG_HEALTH_INTERVAL_SECONDS: "60"
+    volumes:
+      - ${ABG_RELEASE}:${ABG_RELEASE}:ro
+      - ${ABG_PING_FILE}:/run/abg/ping:ro
+    command: ["python3", "-m", "gateway.health_monitor"]
+    depends_on:
+      - api

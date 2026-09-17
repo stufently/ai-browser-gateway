@@ -95,8 +95,17 @@ class Handler(BaseHTTPRequestHandler):
                 plan_product(request)  # Full M10 validation before factory and budget clock.
             except (ValueError, TypeError, OverflowError, RecursionError, OSError):
                 return self.respond(400, {'error': 'invalid_request'})
+            profiles = dict(self.server.profiles)
+            if getattr(self.server, 'rotate_profiles', False) and profiles:
+                with self.server.rotate_lock:
+                    names = list(self.server.profiles)
+                    index = self.server.rotate_index % len(names)
+                    self.server.rotate_index += 1
+                    names = names[index:] + names[:index]
+                profiles = {name: self.server.profiles[name] for name in names}
+                request = ProductRequest(**data, egress_profiles=tuple(profiles))
             fetcher = self.server.factory(request.url, entrances=dict(self.server.entrances),
-                                          profiles=dict(self.server.profiles))
+                                          profiles=dict(profiles))
             result = run_product(request, limit_fetcher(fetcher, self.server.slots, url=request.url))
             value = {key: getattr(result, key) for key in ('ok', 'url', 'final_url', 'provider',
                      'age_hours', 'error_type', 'step', 'elapsed_ms')}

@@ -3,14 +3,14 @@ from http.server import ThreadingHTTPServer
 import os
 from pathlib import Path
 import sys
-from threading import BoundedSemaphore
+from threading import BoundedSemaphore, Lock
 from gateway.api_http import Handler
 from gateway.api_limit import limit_fetcher
 from gateway.fetch import ProductFetcher
 
 
 def make_server(address, *, token, browser_limit=1, profiles=None,
-                entrances=None, fetcher_factory=None):
+                entrances=None, fetcher_factory=None, rotate_profiles=False):
     if (not isinstance(token, str) or not token
             or any(not 33 <= ord(char) <= 126 for char in token)
             or type(browser_limit) is not int or browser_limit <= 0
@@ -31,6 +31,9 @@ def make_server(address, *, token, browser_limit=1, profiles=None,
     server.profiles, server.entrances = profiles, entrances
     server.factory = ProductFetcher if fetcher_factory is None else fetcher_factory
     server.slots = BoundedSemaphore(browser_limit)
+    server.rotate_profiles = bool(rotate_profiles)
+    server.rotate_lock = Lock()
+    server.rotate_index = 0
     return server
 
 

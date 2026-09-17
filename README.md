@@ -155,3 +155,30 @@ Trace `attempts`: provider/profile names, status/challenge, timing, decisions;
 no proxy credentials/intermediate pages. Total budget includes shared browser-slot
 waiting; HTTP/RSS/Wayback/health bypass slots. M10 owns policy.
 Live JS/Docker assertions: `python3 tests/live_m11_api.py`.
+
+## M12a local service
+
+Local Docker API + profile pool + health sidecar. Production/15-proxy is M12b.
+
+```bash
+docker build -t abg-runtime:m12a -f deploy/Dockerfile .
+scripts/abg-release prepare --repo . --sha <40-char-sha> --root "$HOME/services/ai-browser-gateway"
+# 0600 token, proxies.toml, ping file; values never in argv/env
+export ABG_RELEASE="$HOME/services/ai-browser-gateway/releases/<40-char-sha>"
+export ABG_TOKEN_FILE=... ABG_PROFILES_FILE=... ABG_PING_FILE=...
+export ABG_INSTANCE=local-m12a ABG_RUNTIME_IMAGE=abg-runtime:m12a
+export ABG_DOCKER_GID="$(stat -c %g /var/run/docker.sock)"
+docker compose -f deploy/compose.yaml -p ai-browser-gateway up -d
+scripts/abg-fetch https://example.org text
+docker compose -f deploy/compose.yaml -p ai-browser-gateway down
+# rollback: ABG_RELEASE=.../releases/<older-sha> and up again
+```
+
+`GET /health` unauthenticated; `POST /v1/fetch` is M11 Bearer JSON.
+Host publish `127.0.0.1:8765`. Live: `python3 tests/live_m12_service.py`.
+
+SIGTERM closes provider admission immediately, drains already admitted Docker
+calls, then performs the final owner/instance/role-scoped cleanup. Compose allows
+260 seconds before SIGKILL to cover the existing 180-second request budget,
+Docker launcher's 30-second timeout cleanup and final bounded sweeps. Normal
+shutdown removes running providers while draining and finishes sooner.
