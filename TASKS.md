@@ -467,6 +467,21 @@
   BASE и контракт задним числом не менять. После принятой M11 продолжить M12.
   Транспорт M10 не переписывать; `cf-fetch` и потребителей не переключать.
 
+- [ ] **M13 — IN_PROGRESS, директива владельца 17.09.2026** («доделывай всё до
+  конца», проверить bizprofile.net через продукт; выбраны: уборка поздних
+  контейнеров, bizprofile без expected_text, запись замера).
+  Замер координатора через deployed API: с `expected_text` главная, `/ny/albany`
+  и карточка компании — `ok:true` через scrapling (≈17 с на попытку); без него —
+  `ok:false`. Корень: Scrapling после решения challenge отдаёт status 200 и
+  настоящее тело, но заголовки challenge-ответа с `cf-mitigated: challenge` →
+  детектор `suspected`. Правка в адаптере, не в policy M10 (frozen probe M10
+  требует отвергать suspected без подтверждения).
+  - M13a `docs/specs/m13a-scrapling-headers.md` — панель
+    `cx-abg-m13a-scrapling-20260917`, BASE `6934004`.
+  - M13b подготовка probe `docs/specs/m13b-late-container-probe.md` — панель
+    `cx-abg-m13b-probe-20260917`; затем веха исправления DockerLauncher.
+  - M13c — выкладка нового release после M13a+M13b.
+
 - [x] **M12 — COMPLETED 17.09.2026 (M12a и M12b влиты в main, сервис выкачен).**
   Владелец: «доделай оставшиеся задачи через кодекс». Выбор владельца: ВСЁ
   через cx (probe/мутации и исправление — разные cx-панели, разные клоны),
