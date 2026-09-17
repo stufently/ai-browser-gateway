@@ -182,3 +182,56 @@ calls, then performs the final owner/instance/role-scoped cleanup. Compose allow
 260 seconds before SIGKILL to cover the existing 180-second request budget,
 Docker launcher's 30-second timeout cleanup and final bounded sweeps. Normal
 shutdown removes running providers while draining and finishes sooner.
+
+## M12b deployed service
+
+Stand-host runs the accepted release `929bded313e371808b0747fd9a400696a36638aa`
+under `/home/user/services/ai-browser-gateway`, with the API published at
+`127.0.0.1:8765`. Measured outcomes and image identity:
+[deployed service report](docs/research/07-deployed-service.md).
+
+Start or stop the service using its explicit configuration:
+
+```bash
+service_root=/home/user/services/ai-browser-gateway
+release_sha=929bded313e371808b0747fd9a400696a36638aa
+docker compose --env-file "$service_root/compose.env" \
+  -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
+  -p ai-browser-gateway up -d
+docker compose --env-file "$service_root/compose.env" \
+  -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
+  -p ai-browser-gateway stop
+```
+
+`compose.env` contains paths and non-secret settings. Private files are
+`secrets/token`, `secrets/proxies.toml`, and the coordinator-managed
+`secrets/hc-ping` (files `0600`, directory `0700`). Preserve these files across
+releases. The monitor mounts only its ping file and release; API credentials
+and Docker socket are absent. Production leaves `ABG_PROVIDER_NETWORK` unset.
+
+The client reads `~/.config/abg/client-token`, a symlink to `secrets/token`:
+
+```bash
+scripts/abg-fetch https://example.com/ text
+```
+
+To roll back, select an already prepared `releases/<sha>` and its corresponding
+runtime image. Set `ABG_RELEASE` and `ABG_RUNTIME_IMAGE` in `compose.env`, then
+run the same `up -d` command with `-f` pointing to that release's Compose file.
+Keep the secret paths, project name and instance unchanged. A new release is
+prepared with host Python and Git, never by editing an existing release:
+
+```bash
+python3 scripts/abg-release prepare --repo "$PWD" --sha "$release_sha" --root "$service_root"
+docker build -t "abg-runtime:${release_sha:0:12}" \
+  -f "$service_root/releases/$release_sha/deploy/Dockerfile" "$service_root/releases/$release_sha"
+```
+
+Deployment checks: `python3 tests/deployed_m12b.py --check-deploy`,
+`--check-profiles`, `--check-api-egress`, and `--run-targets` (in this order).
+Network checks run inside Docker and write sanitized JSON to
+`/home/user/.cache/abg-coord-20260917/m12b/`. Profile checks take at least
+eight minutes to respect the 30-second hostname interval. Run the API rotation
+and target checks with no other API clients. Target refusals are recorded as
+outcomes; Docker/API transport failures fail the check. Healthchecks history
+and automatic failure/recovery verification remain the coordinator's checks.
