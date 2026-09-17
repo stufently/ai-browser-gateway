@@ -198,3 +198,85 @@ LowEndTalk опроверг предположение спеки об обяз�
 Общий дедлайн, остальные ошибки и таймауты `entrance`/`browser` не изменены.
 Достаточность 15 с для обычных целей — предположение по замерам M14b;
 в M15a политика проверяется офлайн, без live-запросов и выкладки.
+
+### После выкладки M15b
+
+17.09.2026 на stand-host развёрнут release
+`58d3b738a808af71ebed84df261e87754747ee0a`, образ `abg-runtime:58d3b738a808`,
+image ID `sha256:1acaf7967acbd0a436b5a01dd0a25ab4edee9e27dbcaba4a41361e48a8e53dd0`.
+Повторные `abg-release prepare` и сборка завершились успешно; AC-934 подтвердил
+healthy API, соответствие release/образа и стабильный монитор. Непосредственный
+откат — `b31a36b10f57a21e4d2703e9de770e731d06950e`, конфигурация сохранена
+байт-в-байт в `compose.env.pre-m15b` (0600). Все три предыдущих release,
+их manifests и образы, а также прежние копии конфигурации сохранены.
+
+Улики первого прогона: `/home/user/.cache/abg-coord-20260917/m15b/`.
+Таблица взята из `targets.json` (точная сохранённая копия — `targets-initial.json`)
+и неизменяемого архива `bizprofile-20260917T135932Z.json`.
+`deploy-initial.json`, `profiles-initial.json`, `api-egress-initial.json`
+сохраняют остальные исходные измерения перед повтором машинной приёмки.
+Ступени записаны как **provider/status/challenge/elapsed_ms/next_step**;
+все попытки восьми строк ниже — `egress_profile=direct`. `null` означает
+отсутствие HTTP-статуса. Полное время API включает запуск и уборку контейнеров;
+оно не равно сумме elapsed попыток.
+
+| Цель / страница | Провайдер успеха | Лестница попыток | API elapsed, мс |
+|---|---|---|---|
+| control-hqd | `curl_cffi` | `curl_cffi/200/none/328/stop` | 1131 |
+| control-static | `curl_cffi` | `curl_cffi/200/none/87/stop` | 805 |
+| cf-lowendtalk | `curl_cffi` | `curl_cffi/200/captcha/291/stop` | 1090 |
+| cf-bizprofile | `scrapling` | `curl_cffi/403/suspected/153/browser` → `patchright/403/suspected/1313/browser` → `scrapling/200/none/18184/stop` | 23385 |
+| cf-spa-chatgpt-share | `patchright` | `curl_cffi/null/none/0/browser` → `patchright/200/none/5344/stop` | 22031 |
+| login-instagram | `patchright` | `curl_cffi/200/none/949/browser` → `patchright/200/none/2747/stop` | 5586 |
+| bizprofile главная (без expected_text) | `scrapling` | `curl_cffi/403/suspected/584/browser` → `patchright/403/suspected/1357/browser` → `scrapling/200/none/18094/stop` | 23682 |
+| bizprofile Elevate Electric LLC (без expected_text) | `scrapling` | `curl_cffi/403/suspected/163/browser` → `patchright/403/suspected/1396/browser` → `scrapling/200/none/7238/stop` | 12142 |
+
+Матрица — **6/6**, CLI: rc=0, `Example Domain` найден. Обе страницы bizprofile
+без `expected_text` успешны через Scrapling; последние попытки имеют
+`success=true`, `challenge=none`, `error_type=none`, локальные маркеры найдены.
+LowEndTalk, как в M14b, принят на HTTP при найденном `expected_text`, несмотря
+на метку `captcha`; это не замер его проходимости без ожидаемого текста.
+
+AC-935 заново подтвердил 15 уникальных рабочих egress-профилей, отличных от
+direct, HTTP 407 без авторизации и ротацию API `ms1 → ms2 → ms3`.
+Все 14 попыток `curl_cffi` в `api-egress-initial.json`, `targets-initial.json`
+и указанном архиве bizprofile имеют записанный `elapsed_ms ≤ 20000` (максимум 949 мс).
+Лестницы начинаются с `curl_cffi/direct`; попыток `curl` нет.
+
+Сравнение с `/home/user/.cache/abg-coord-20260917/m14b/targets.json`
+(точная копия базы сравнения — `m15b/m14b-targets-baseline.json`):
+
+| Цель | M14b: исход / API мс | M15b: исход / API мс | Изменение времени, мс |
+|---|---|---|---|
+| control-hqd | `curl_cffi` / 1078 | `curl_cffi` / 1131 | +53 |
+| control-static | `curl_cffi` / 926 | `curl_cffi` / 805 | -121 |
+| cf-lowendtalk | `curl_cffi` / 939 | `curl_cffi` / 1090 | +151 |
+| cf-bizprofile | `scrapling` / 23381 | `scrapling` / 23385 | +4 |
+| cf-spa-chatgpt-share | `timeout` / 120385 | `patchright` / 22031 | -98354 |
+| login-instagram | `patchright` / 5305 | `patchright` / 5586 | +281 |
+
+Пять прежних успешных исходов и их провайдеры сохранились. ChatGPT share
+сменил отказ `timeout/retry_later` на успех через patchright; полное время
+сократилось на 98354 мс, примерно на 81,7 %. Изменения времени остальных
+целей — наблюдения одного прогона, а не статистическая оценка ускорения.
+
+Для двух страниц bizprofile исход также сохранился: обе прошли через Scrapling.
+Относительно текущего `m14b/bizprofile.json` (сохранён как
+`m15b/m14b-bizprofile-baseline.json`) полное время главной изменилось
+с 23326 до 23682 мс (+356), карточки — с 21122 до 12142 мс (−8980).
+
+**Ветка таймаута задета вживую.** Единственная попытка `curl_cffi` с
+`error_type=timeout` — direct на `cf-spa-chatgpt-share`:
+`status=null`, `challenge=none`, `elapsed_ms=0`, `next_step=browser`.
+Следующая попытка patchright дала HTTP 200, `success=true`, `challenge=none`,
+`next_step=stop`; полное время запроса — 22031 мс. В M14b после аналогичного
+HTTP-таймаута браузер не запускался, а запрос завершался за 120385 мс.
+Таймаутов egress в этом прогоне не было.
+
+Нулевой `elapsed_ms` у таймаута — служебное значение транспорта
+`bench/runner/fetch.py`, когда провайдер не вернул завершённое измерение;
+это **не нулевая длительность**. Поэтому JSON-проверка порога 20000 мс
+подтверждает ограничение записанных значений, но не измеряет отдельно
+реальное время этой оборванной попытки. Передачу управления браузеру
+подтверждает сама последовательность attempts; лимит 15000 мс задан
+неизменённым кодом BASE и проверен unit-тестами.
