@@ -4,7 +4,7 @@ import signal
 import subprocess
 from threading import Event, Thread
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from gateway import service
 from tests import test_service_config as config
 from tests.m11_helpers import request, serving, reply
@@ -12,6 +12,111 @@ from tests.m11_helpers import request, serving, reply
 
 class ShutdownTests(unittest.TestCase):
     setUp = config.ConfigurationTests.setUp
+
+    def test_signal_rejects_new_launches_before_http_shutdown(self):
+        for number in (signal.SIGTERM, signal.SIGINT):
+            with self.subTest(signal=number):
+                serving_started, release_shutdown, shutdown_finished = (
+                    Event() for _ in range(3))
+                handlers = {}
+                server = service.make_service(self.env, fetcher_factory=lambda url, **kw:
+                                              lambda step, budget: reply())
+                self.addCleanup(server.server_close)
+                inner = Mock()
+                inner.run.return_value = (0, '', '')
+                launcher = service.LabeledLauncher('test-one', 'req', inner,
+                                                   gate=server.launches)
+                serve_forever, shutdown = server.serve_forever, server.shutdown
+
+                def serve():
+                    serving_started.set()
+                    serve_forever()
+
+                def delayed_shutdown():
+                    try:
+                        release_shutdown.wait(10)
+                        shutdown()
+                    finally:
+                        shutdown_finished.set()
+
+                with patch.object(service, 'make_service', return_value=server), \
+                        patch.object(service.signal, 'signal', handlers.__setitem__), \
+                        patch.object(service, 'sweep_providers'), \
+                        patch.object(server, 'serve_forever', serve), \
+                        patch.object(server, 'shutdown', delayed_shutdown), \
+                        ThreadPoolExecutor(1) as pool:
+                    main = pool.submit(service.main)
+                    try:
+                        self.assertTrue(serving_started.wait(3), 'HTTP loop not reached')
+                        self.assertTrue(callable(server.factory('http://example.invalid')))
+                        self.assertEqual(launcher.run(['docker', 'run', 'test'], 1),
+                                         (0, '', ''))
+                        inner.reset_mock()
+                        handlers[number](number, None)
+                        self.assertFalse(main.done(), 'main returned before the barrier')
+                        self.assertFalse(shutdown_finished.is_set())
+                        with self.subTest(boundary='factory'):
+                            with self.assertRaisesRegex(RuntimeError, 'service_stopping'):
+                                server.factory('http://example.invalid')
+                        with self.subTest(boundary='launcher'):
+                            with self.assertRaisesRegex(RuntimeError, 'service_stopping'):
+                                launcher.run(['docker', 'run', 'test'], 1)
+                        inner.run.assert_not_called()
+                    finally:
+                        release_shutdown.set()
+                        # Also arrange shutdown if an assertion precedes the signal.
+                        shutdown()
+                        self.assertEqual(main.result(timeout=5), 0)
+                    self.assertTrue(shutdown_finished.wait(3))
+
+    def test_final_sweep_removes_container_created_as_last_launch_exits(self):
+        entered, create_late, launch_finished = (Event() for _ in range(3))
+        live, sweeps = set(), []
+        server = service.make_service(self.env)
+        self.addCleanup(server.server_close)
+
+        class Inner:
+            def run(self, argv, timeout, *, env=None):
+                entered.set()
+                if not create_late.wait(3):
+                    raise AssertionError('cleanup did not release the launch')
+                live.add('late-owned')
+                return 0, '', ''
+
+        launcher = service.LabeledLauncher('test-one', 'req', Inner(), gate=server.launches)
+
+        def launch():
+            try:
+                return launcher.run(['docker', 'run', '--rm', 'test'], 3)
+            finally:
+                # LabeledLauncher.run has returned, including the gate's finally.
+                launch_finished.set()
+
+        def sweep(instance, timeout=20):
+            self.assertEqual(instance, 'test-one')
+            with server.launches.condition:
+                active = server.launches.active
+            sweeps.append((active, set(live)))
+            live.clear()
+            if active:
+                # The Docker listing/removal has finished. A daemon-create that
+                # missed that listing completes before this sweep returns.
+                create_late.set()
+                self.assertTrue(launch_finished.wait(3), 'launch did not leave the gate')
+
+        with patch.object(service, 'sweep_providers', sweep), ThreadPoolExecutor(1) as pool:
+            future = pool.submit(launch)
+            try:
+                self.assertTrue(entered.wait(3), 'launch was not admitted')
+                server.launches.drain('test-one')
+                self.assertEqual(future.result(timeout=3), (0, '', ''))
+            finally:
+                create_late.set()
+        self.assertEqual(sweeps[0], (1, set()))
+        with self.subTest(property='final sweep after gate exit'):
+            self.assertEqual(sweeps[-1], (0, {'late-owned'}))
+        with self.subTest(property='late container removed'):
+            self.assertFalse(live, 'container created after the earlier sweep leaked')
 
     def test_main_signal_closes_admission_and_finishes_cleanup(self):
         ready = Event()

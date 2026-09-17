@@ -57,6 +57,12 @@ class ConfigurationTests(unittest.TestCase):
                 self.token.write_bytes(raw)
                 self.reject()
 
+    def test_token_boundary_whitespace_is_rejected_before_bind(self):
+        for raw in (b' token', b'token ', b'\ttoken', b'token\t', b'\ntoken'):
+            with self.subTest(raw=raw):
+                self.token.write_bytes(raw)
+                self.reject()
+
     def test_private_files_permissions_type_owner_and_read_error(self):
         for path in (self.token, self.profiles):
             for mode in (0o640, 0o604, 0o644):
