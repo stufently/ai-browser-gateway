@@ -360,7 +360,10 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
             if "data-sitekey" in attributes or _CAPTCHA_WIDGET_CLASSES.intersection(classes):
                 self.found = True
             if tag == "script":
-                src = (attributes.get("src") or "").partition("#")[0]
+                # WHATWG URL input cleanup precedes fragment/query parsing.
+                src = re.sub(r"[\t\n\r]", "", attributes.get("src") or "")
+                src = re.sub(r"^[\x00-\x20]+|[\x00-\x20]+$", "", src)
+                src = src.partition("#")[0]
                 path, _, query = src.partition("?")
                 render_values = [
                     part.partition("=")[2] for part in query.split("&")

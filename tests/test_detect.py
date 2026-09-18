@@ -530,7 +530,48 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_render_value_preserves_surrounding_spaces(self):
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
-        for value in (' explicit', 'explicit '):
+        for value in (' explicit', 'explicit &foo=1', 'explicit #frag'):
+            with self.subTest(value=value):
+                body = cf + f'<script src="recaptcha/api.js?render={value}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+        body = cf + '<script src="recaptcha/api.js?render=explicit "></script>'
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
+    def test_script_src_removes_tabs_and_newlines(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for src in ('recaptcha/api.js?render=explicit\n',
+                    'recaptcha/api.js?render=exp\tlicit',
+                    'recaptcha/\rapi.js?render=explicit',
+                    '\t recaptcha/api.js?render=explicit \r\n'):
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
+    def test_script_src_trims_c0_and_space_at_edges(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for codepoint in range(0x21):
+            char = chr(codepoint)
+            for src in (f'{char}recaptcha/api.js?render=explicit',
+                        f'recaptcha/api.js?render=explicit{char}'):
+                with self.subTest(src=src):
+                    body = cf + f'<script src="{src}"></script>'
+                    self.assertEqual(self.detect(200, {}, body), (
+                        "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                    "body_captcha_interactive"),
+                    ))
+
+    def test_script_src_preserves_non_url_whitespace(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for value in ('explicit\x7f', 'explicit\u00a0', 'explicit\u2003',
+                      'exp\x00licit', 'exp\x0blicit', 'exp licit'):
             with self.subTest(value=value):
                 body = cf + f'<script src="recaptcha/api.js?render={value}"></script>'
                 self.assertEqual(self.detect(200, {}, body), (

@@ -921,8 +921,8 @@ MUTANTS = [
     {
         "name": "121",
         "file": "bench/providers/docker/probe.py",
-        "old": '                src = (attributes.get("src") or "").partition("#")[0]\n',
-        "new": '                src = (attributes.get("src") or "")\n',
+        "old": '                src = src.partition("#")[0]\n',
+        "new": '',
         "test": "tests.test_detect.DetectChallengeTests.test_script_fragment_is_removed_before_render_query",
         "assert": "self.assertEqual(self.detect(200, {}, body), (",
     },
@@ -955,11 +955,10 @@ MUTANTS = [
         "name": "125",
         "file": "bench/providers/docker/probe.py",
         "old": (
-            '                src = (attributes.get("src") or "").partition("#")[0]\n'
+            '                src = src.partition("#")[0]\n'
             '                path, _, query = src.partition("?")\n'
         ),
         "new": (
-            '                src = attributes.get("src") or ""\n'
             '                path, _, query = src.partition("?")\n'
             '                path = path.partition("#")[0]\n'
             '                query = query.partition("#")[0]\n'
@@ -1046,6 +1045,23 @@ MUTANTS = [
         "new": '    return _DECIMAL_CHARREF.sub(replace, text).replace("&#;", "\\ufffd")\n',
         "test": "tests.test_detect.CharacterReferenceTests.test_empty_numeric_reference_is_preserved",
         "assert": 'self.assertEqual(self.probe._title("<title>L&#;R</title>"), "L&#;R")',
+    },
+    # M16a-fix7: URL input normalization must retain both cleanup steps.
+    {
+        "name": "136",
+        "file": "bench/providers/docker/probe.py",
+        "old": '                src = re.sub(r"[\\t\\n\\r]", "", attributes.get("src") or "")\n',
+        "new": '                src = attributes.get("src") or ""\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_script_src_removes_tabs_and_newlines",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    {
+        "name": "137",
+        "file": "bench/providers/docker/probe.py",
+        "old": '                src = re.sub(r"^[\\x00-\\x20]+|[\\x00-\\x20]+$", "", src)\n',
+        "new": '',
+        "test": "tests.test_detect.DetectChallengeTests.test_script_src_trims_c0_and_space_at_edges",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
     },
 ]
 
