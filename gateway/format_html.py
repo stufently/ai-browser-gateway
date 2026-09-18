@@ -6,6 +6,22 @@ from urllib.parse import quote, urljoin, urlsplit
 VOID = frozenset('area base br col embed hr img input link meta param source track wbr'.split())
 HIDDEN = frozenset('script style noscript iframe svg nav header footer head'.split())
 HEAD_CONTENT = frozenset('base link meta title style script noscript template'.split())
+_DECIMAL_CHARREF = re.compile(r"&#([0-9]+)(;?)")
+
+
+# Keep paired with _clip_oversized_charrefs in bench/providers/docker/probe.py.
+# The provider probe is mounted as one standalone file, so it cannot share imports.
+def _clip_oversized_charrefs(text: str) -> str:
+    """Keep decimal references safe for unescape's integer conversion."""
+    def replace(match: re.Match[str]) -> str:
+        # The integer digit limit includes leading zeros. Strip them even
+        # when the value fits Unicode; eight significant digits never fit.
+        digits = match.group(1).lstrip("0") or "0"
+        if len(digits) >= 8:
+            return "\ufffd"
+        return "&#" + digits + match.group(2)
+
+    return _DECIMAL_CHARREF.sub(replace, text)
 
 
 def normalized(text):
@@ -57,7 +73,7 @@ class Document(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.root = Node()
         self.stack = [self.root]
-        self.feed(html)
+        self.feed(_clip_oversized_charrefs(html))
         self.close()
 
     def handle_starttag(self, tag, attrs):

@@ -6,6 +6,72 @@ from gateway.models import GatewayOutcome
 
 
 class FormatTests(unittest.TestCase):
+    def test_markdown_oversized_decimal_reference(self):
+        from gateway.format import render_content
+        html = '<p>L&#' + '9' * 5000 + 'R</p>'
+        obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', html,
+                             'plain', 'curl', None, F.none, Step.stop, (), 0)
+        try:
+            result = render_content(obj, 'markdown')
+        except ValueError as exc:
+            self.fail(f'oversized decimal reference raised ValueError: {exc}')
+        self.assertEqual(result, 'L\ufffdR')
+
+    def test_markdown_decimal_reference_leading_zeros(self):
+        from gateway.format import render_content
+        html = '<p>&#' + '0' * 5000 + '65;</p>'
+        obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', html,
+                             'plain', 'curl', None, F.none, Step.stop, (), 0)
+        self.assertEqual(render_content(obj, 'markdown'), 'A')
+
+    def test_markdown_seven_digit_unicode_reference(self):
+        from gateway.format import render_content
+        obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', '<p>&#1114109;</p>',
+                             'plain', 'curl', None, F.none, Step.stop, (), 0)
+        self.assertEqual(render_content(obj, 'markdown'), '\U0010fffd')
+
+    def test_all_formats_with_giant_references_in_text_and_attributes(self):
+        from gateway.format import MODES, render_content
+        for digits, decoded in [('9' * 5000, '\ufffd'), ('0' * 5000 + '65', 'A')]:
+            for suffix in (';', ''):
+                ref = '&#' + digits + suffix
+                for location in ('text', 'attribute'):
+                    if location == 'text':
+                        html = f'<head><title>{ref}</title></head><p>x {ref} y</p><a href=/l>{ref}</a>'
+                        expected = {
+                            'markdown': f'x {decoded} y\n\n[{decoded}](https://a/l)',
+                            'links': [{'text': decoded, 'href': 'https://a/l'}],
+                            'meta': {'title': decoded, 'h1': []},
+                        }
+                    else:
+                        html = (f'<head><title>t</title><meta name=description content="{ref}"></head>'
+                                f'<p>x <img src=/i alt="{ref}"> y</p><a href=/l title="{ref}">L</a>')
+                        expected = {
+                            'markdown': f'x ![{decoded}](https://a/i) y\n\n[L](https://a/l)',
+                            'links': [{'text': 'L', 'href': 'https://a/l'}],
+                            'meta': {'title': 't', 'h1': [], 'description': decoded},
+                        }
+                    obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', html,
+                                         'plain', 'curl', None, F.none, Step.stop, (), 0)
+                    expected.update(text='plain', html=html)
+                    for mode in MODES:
+                        with self.subTest(digits=digits[:8], suffix=suffix, location=location, mode=mode):
+                            self.assertEqual(render_content(obj, mode), expected[mode])
+
+    def test_markdown_character_reference_boundaries(self):
+        from gateway.format import render_content
+        cases = [('65', 'A'), ('0000065', 'A'), ('1114109', '\U0010fffd'),
+                 ('1114112', '\ufffd'), ('9999999', '\ufffd'), ('10000000', '\ufffd'),
+                 ('x' + 'f' * 5000, '\ufffd'), ('x41', 'A'), ('X41', 'A'),
+                 ('9' * 5000, '\ufffd'), ('0' * 5000 + '65', 'A'), ('0' * 5000, '\ufffd')]
+        for digits, expected in cases:
+            for suffix in (';', ''):
+                html = '<p>L&#' + digits + suffix + 'R</p>'
+                obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', html,
+                                     'plain', 'curl', None, F.none, Step.stop, (), 0)
+                with self.subTest(digits=digits[:16], length=len(digits), suffix=suffix):
+                    self.assertEqual(render_content(obj, 'markdown'), 'L' + expected + 'R')
+
     def test_markdown_keeps_equals_as_visible_text(self):
         from gateway.format import render_content
         obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', '<p>price<br>===</p>',

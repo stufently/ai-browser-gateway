@@ -48,6 +48,30 @@ MUTANTS = (
         "test": TEST_PREFIX + "test_second_block_needs_human_without_trying_another_profile",
         "assert": "self.assertEqual(out.step, Step.human)",
     },
+    {
+        "name": "formatter decimal clipping",
+        "path": "gateway/format_html.py",
+        "old": "self.feed(_clip_oversized_charrefs(html))",
+        "new": "self.feed(html)",
+        "test": "tests.test_gateway_format.FormatTests.test_markdown_oversized_decimal_reference",
+        "assert": "self.fail(f'oversized decimal reference raised ValueError: {exc}')",
+    },
+    {
+        "name": "formatter leading zeros",
+        "path": "gateway/format_html.py",
+        "old": 'digits = match.group(1).lstrip("0") or "0"',
+        "new": "digits = match.group(1)",
+        "test": "tests.test_gateway_format.FormatTests.test_markdown_decimal_reference_leading_zeros",
+        "assert": "self.assertEqual(render_content(obj, 'markdown'), 'A')",
+    },
+    {
+        "name": "formatter seven digit boundary",
+        "path": "gateway/format_html.py",
+        "old": "if len(digits) >= 8:",
+        "new": "if len(digits) >= 7:",
+        "test": "tests.test_gateway_format.FormatTests.test_markdown_seven_digit_unicode_reference",
+        "assert": "self.assertEqual(render_content(obj, 'markdown'), '\\U0010fffd')",
+    },
 )
 
 
@@ -86,7 +110,7 @@ def _assertion_frame(item: dict[str, str]) -> str:
 
 
 def _apply(item: dict[str, str]) -> bool:
-    path = ROOT / "gateway/engine.py"
+    path = ROOT / item.get("path", "gateway/engine.py")
     original = path.read_bytes()
     digest = hashlib.sha256(original).hexdigest()
     source = original.decode("utf-8")
