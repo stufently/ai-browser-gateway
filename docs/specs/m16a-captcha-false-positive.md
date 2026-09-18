@@ -3,7 +3,7 @@
 ## Шапка и где работать
 
 Репозиторий /home/user/github/ai-browser-gateway, 18.09.2026.
-BASE_SHA `a4b61f97d6fa895b827992dda9aed73a22693374` — main после принятой и выкаченной M15.
+BASE_SHA `1fd976158be2c0b3e67668618295b1557b10a4a3` — main после принятой и выкаченной M15 и починки мутанта 27.
 Клон /home/user/exec-clones/abg-m16a-captcha-20260918, ветка m16a-captcha,
 origin push DISABLED. Исполнитель — cx (директива владельца 18.09.2026:
 «доделывай все через кодекс»).
@@ -43,7 +43,7 @@ title «Offers — LowEndTalk», 222 365 байт настоящего фору�
 Фикстура. Скопировать байт-в-байт
 `/home/user/.cache/abg-coord-20260918/lowendtalk_200_grecaptcha.html`
 (SHA256 `26df951816a14b269ea64b551e7535fda7a57280ac06cd640b42152ffd7dc808`,
-7939 байт) в `tests/fixtures/lowendtalk_200_grecaptcha.html` и добавить строку
+7943 байта) в `tests/fixtures/lowendtalk_200_grecaptcha.html` и добавить строку
 в таблицу `tests/fixtures/README.md`: настоящая страница 200 с невидимым
 reCAPTCHA и служебным скриптом Cloudflare, источник
 `lowendtalk.com/categories/offers`, снято 18.09.2026, sitekey и параметры
@@ -108,17 +108,17 @@ moment». На подготовленной фикстуре текущий ко
 - **AC-111.** Мутационные ворота проходят на своей команде:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 tests/mutation_gate.py'`
 - **AC-112.** Детектор изменён одной строкой условия, правила и регулярка целы:
-  `bash -c 'test "$(git diff a4b61f97d6fa895b827992dda9aed73a22693374 HEAD -- bench/providers/docker/probe.py | grep -c "^[-+][^-+]")" -le 6 && git diff --exit-code a4b61f97d6fa895b827992dda9aed73a22693374 HEAD -- bench ":(exclude)bench/providers/docker/probe.py" gateway scripts deploy && git grep -q "_CAPTCHA_ATTR = re.compile" -- bench/providers/docker/probe.py && git grep -q "\"body_captcha\": ASSUMED," -- bench/providers/docker/probe.py'`
+  `bash -c 'test "$(git diff 1fd976158be2c0b3e67668618295b1557b10a4a3 HEAD -- bench/providers/docker/probe.py | grep -c "^[-+][^-+]")" -le 6 && git diff --exit-code 1fd976158be2c0b3e67668618295b1557b10a4a3 HEAD -- bench ":(exclude)bench/providers/docker/probe.py" gateway scripts deploy && git grep -q "_CAPTCHA_ATTR = re.compile" -- bench/providers/docker/probe.py && git grep -q "\"body_captcha\": ASSUMED," -- bench/providers/docker/probe.py'`
 - **AC-113.** Research дополнен:
   `bash -c 'grep -q "Ложная captcha на 200 (M16a)" docs/research/04-phase1-verdict.md && grep -q lowendtalk docs/research/04-phase1-verdict.md'`
 - **AC-114.** Вне разрешённых путей ничего не изменено, дерево чистое:
-  `bash -c 'git diff --exit-code a4b61f97d6fa895b827992dda9aed73a22693374 HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)tests/test_detect.py" ":(exclude)tests/mutation_gate.py" ":(exclude)tests/fixtures" ":(exclude)docs/research/04-phase1-verdict.md" ":(exclude)docs/specs/m16a-captcha-false-positive.md" && git ls-files --error-unmatch docs/specs/m16a-captcha-false-positive.md >/dev/null && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
+  `bash -c 'git diff --exit-code 1fd976158be2c0b3e67668618295b1557b10a4a3 HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)tests/test_detect.py" ":(exclude)tests/mutation_gate.py" ":(exclude)tests/fixtures" ":(exclude)docs/research/04-phase1-verdict.md" ":(exclude)docs/specs/m16a-captcha-false-positive.md" && git ls-files --error-unmatch docs/specs/m16a-captcha-false-positive.md >/dev/null && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
 
 ## Авторевью
 
 Политика cross-review-v1. Исполнитель Codex, ревьюеры **agy + grok**. После
 commit REVIEW_SHA параллельно:
-`bash /home/user/.claude/skills/executor-milestone/scripts/review_run.sh initial agy --clone <клон> --base a4b61f97d6fa895b827992dda9aed73a22693374 --range a4b61f97d6fa895b827992dda9aed73a22693374..<REVIEW_SHA> --context "<эта спека; только чтение>"`
+`bash /home/user/.claude/skills/executor-milestone/scripts/review_run.sh initial agy --clone <клон> --base 1fd976158be2c0b3e67668618295b1557b10a4a3 --range 1fd976158be2c0b3e67668618295b1557b10a4a3..<REVIEW_SHA> --context "<эта спека; только чтение>"`
 и тот же wrapper `initial grok`. Разобрать ВСЕ finding_id: fixed с
 proof/commit, disproved с proof, иначе needs_owner. Один FIX_ONCE, затем verify
 теми же на REVIEW..FINAL. Неполный ответ/таймаут — не принятие; один
@@ -130,7 +130,7 @@ report.json v2 в корне клона, untracked, ровно 8 записей 
 command посимвольно из спеки; blocked — rc=null и безопасный текст ошибки.
 ```json
 {"schema_version":2,"policy_id":"cross-review-v1","spec_sha256":"<SHA этой спеки>",
- "base_sha":"a4b61f97d6fa895b827992dda9aed73a22693374","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
+ "base_sha":"1fd976158be2c0b3e67668618295b1557b10a4a3","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
  "executor":{"backend":"codex","model":"<фактическая модель>"},
  "review":{"initial_receipts":[],"verification_receipts":[],"resolutions":[]},
  "handoff_status":"ready","criteria":[{"id":"AC-107","status":"pass|fail|blocked",
