@@ -294,6 +294,7 @@ _CAPTCHA_ATTR = re.compile(
     re.I,
 )
 _CAPTCHA_WIDGET_CLASSES = frozenset({"g-recaptcha", "h-captcha", "cf-turnstile"})
+_SPECIAL_URL_SCHEMES = frozenset({"http", "https", "ws", "wss", "ftp", "file"})
 
 
 def _header_value(raw: Any) -> str:
@@ -355,10 +356,10 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
                 self.template_depth += 1
             if self.template_depth:
                 return
-            # HTML tokenization replaces NUL in attribute values before use.
+            # HTML keeps the first duplicate attribute and replaces NUL in values.
             attributes = {
                 name: value.replace("\x00", "\ufffd") if value is not None else None
-                for name, value in attrs
+                for name, value in reversed(attrs)
             }
             classes = [token for token in re.split(r"[ \t\n\f\r]+", attributes.get("class") or "") if token]
             if "data-sitekey" in attributes or _CAPTCHA_WIDGET_CLASSES.intersection(classes):
@@ -366,8 +367,10 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
             if tag == "script":
                 # WHATWG URL input cleanup precedes fragment/query parsing.
                 src = re.sub(r"[\t\n\r]", "", attributes.get("src") or "")
-                src = src.replace("\\", "/")
                 src = src.strip("".join(chr(codepoint) for codepoint in range(0x21)))
+                scheme = re.match(r"([A-Za-z][A-Za-z0-9+.-]*):", src)
+                if scheme is None or scheme.group(1).lower() in _SPECIAL_URL_SCHEMES:
+                    src = src.replace("\\", "/")
                 src = src.partition("#")[0]
                 path, _, query = src.partition("?")
                 render_values = [

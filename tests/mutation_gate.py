@@ -1083,8 +1083,8 @@ MUTANTS = [
     {
         "name": '140',
         "file": 'bench/providers/docker/probe.py',
-        "old": '                src = src.replace("\\\\", "/")\n',
-        "new": '',
+        "old": '                    src = src.replace("\\\\", "/")\n',
+        "new": '                    pass\n',
         "test": 'tests.test_detect.DetectChallengeTests.test_script_src_normalizes_backslashes',
         "assert": 'self.assertEqual(self.detect(200, {}, body), (',
     },
@@ -1095,6 +1095,23 @@ MUTANTS = [
         "new": '                src = re.sub(r"^[\\x00-\\x20]+|[\\x00-\\x20]+$", "", src)\n',
         "test": 'tests.test_detect.DetectChallengeTests.test_script_src_internal_spaces_parse_within_time_budget',
         "assert": 'self.assertLess(elapsed, 2.0)',
+    },
+    # M16a-fix9: only special/relative URLs normalize backslashes; first attr wins.
+    {
+        "name": "142",
+        "file": "bench/providers/docker/probe.py",
+        "old": '                if scheme is None or scheme.group(1).lower() in _SPECIAL_URL_SCHEMES:\n',
+        "new": '                if True:\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_non_special_script_src_preserves_backslashes",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    {
+        "name": "143",
+        "file": "bench/providers/docker/probe.py",
+        "old": '                for name, value in reversed(attrs)\n',
+        "new": '                for name, value in attrs\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_duplicate_class_uses_first_attribute",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
     },
 ]
 

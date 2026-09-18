@@ -614,6 +614,84 @@ class DetectChallengeTests(unittest.TestCase):
                     "none", ("body_cf_challenge_platform", "body_captcha"),
                 ))
 
+    def test_non_special_script_src_preserves_backslashes(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for src in (
+            r'data:text/javascript,//recaptcha\api.js?render=explicit',
+            r'blob:https://e/recaptcha\api.js?render=explicit',
+            r'javascript://recaptcha\api.js?render=explicit',
+            r'custom+v1.2-test://recaptcha\api.js?render=explicit',
+            ' \t\nDATA:text/javascript,//recaptcha\\api.js?render=explicit\r ',
+            'da\tta:text/javascript,//recaptcha\\api.js?render=explicit',
+        ):
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_special_and_relative_script_src_normalizes_backslashes(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        sources = [r'recaptcha\api.js?render=explicit']
+        for scheme in ('http', 'https', 'ws', 'wss', 'ftp', 'file', 'HTTPS'):
+            sources.append(scheme + r':\\www.google.com\recaptcha\api.js?render=explicit')
+        sources.extend((
+            ' \tHTTPS:\\\\www.google.com\\recaptcha\\api.js?render=explicit\r ',
+            r'./data:folder/recaptcha\api.js?render=explicit',
+            r'1custom://recaptcha\api.js?render=explicit',
+        ))
+        for src in sources:
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
+    def test_duplicate_class_uses_first_attribute(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for attrs in ('class="foo" class="g-recaptcha"',
+                      'CLASS="foo" class="g-recaptcha"',
+                      'class class="g-recaptcha"',
+                      'class="g-recaptcha\x00" class="g-recaptcha"'):
+            with self.subTest(attrs=attrs):
+                body = cf + f'<div {attrs}></div>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+                self.assertEqual(self.detect(403, {}, f'<div {attrs}></div>'), (
+                    "access_denied", ("body_captcha", "status_403"),
+                ))
+
+    def test_duplicate_class_keeps_first_widget(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<div class="g-recaptcha" class="foo"></div>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
+    def test_duplicate_src_uses_first_attribute(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for first in ('src="one.js"', 'SRC="one.js"', 'src'):
+            with self.subTest(first=first):
+                body = cf + f'<script {first} src="recaptcha/api.js?render=explicit"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_duplicate_src_keeps_first_widget(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js?render=explicit" src="one.js"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
     def test_recaptcha_path_rejects_prefixed_names(self):
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
         for path in ('xrecaptcha/api.js', 'not-recaptcha/api.js', 'grecaptcha/api.js'):
