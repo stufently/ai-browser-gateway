@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -557,7 +558,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_script_src_trims_c0_and_space_at_edges(self):
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
-        for codepoint in range(0x21):
+        for codepoint in range(0x01, 0x21):
             char = chr(codepoint)
             for src in (f'{char}recaptcha/api.js?render=explicit',
                         f'recaptcha/api.js?render=explicit{char}'):
@@ -567,6 +568,41 @@ class DetectChallengeTests(unittest.TestCase):
                         "captcha", ("body_cf_challenge_platform", "body_captcha",
                                     "body_captcha_interactive"),
                     ))
+
+    def test_script_src_replaces_nul_before_url_cleanup(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for src in ('recaptcha/api.js?render=explicit\x00',
+                    '\x00recaptcha/api.js?render=explicit',
+                    'recaptcha/api.js?render=explicit\x00 \t\n'):
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_script_src_normalizes_backslashes(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for src in (r'recaptcha\api.js?render=explicit',
+                    r'https:\\www.google.com\recaptcha\api.js?render=explicit'):
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
+    def test_script_src_internal_spaces_parse_within_time_budget(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js?render=' + ' ' * 32000 + 'KEY"></script>'
+        )
+        started = time.perf_counter()
+        result = self.detect(200, {}, body)
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual(result, (
+            "none", ("body_cf_challenge_platform", "body_captcha"),
+        ))
 
     def test_script_src_preserves_non_url_whitespace(self):
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
@@ -606,15 +642,29 @@ class DetectChallengeTests(unittest.TestCase):
                     "captcha", ("body_captcha_interactive",),
                 ))
 
-    def test_widget_class_tokens_split_on_all_whitespace(self):
+    def test_widget_class_tokens_split_on_ascii_whitespace(self):
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
-        for whitespace in ('\t', '\n', '\r'):
+        for whitespace in (' ', '\t', '\n', '\f', '\r'):
             with self.subTest(whitespace=whitespace):
                 body = cf + f'<div class="g-recaptcha{whitespace}foo"></div>'
                 self.assertEqual(self.detect(200, {}, body), (
                     "captcha", ("body_cf_challenge_platform", "body_captcha",
                                 "body_captcha_interactive"),
                 ))
+
+    def test_widget_class_keeps_non_ascii_whitespace_in_token(self):
+        for whitespace in ('\u00a0', '\x0b'):
+            with self.subTest(whitespace=whitespace):
+                body = f'<div class="g-recaptcha{whitespace}foo"></div>'
+                self.assertEqual(self.detect(403, {}, body), (
+                    "access_denied", ("body_captcha", "status_403"),
+                ))
+
+    def test_widget_class_nul_does_not_form_widget_token(self):
+        body = '<div class="g-recaptcha\x00 foo"></div>'
+        self.assertEqual(self.detect(403, {}, body), (
+            "access_denied", ("body_captcha", "status_403"),
+        ))
 
     def test_boolean_class_preserves_access_denied_verdict(self):
         body = '<div class></div>'

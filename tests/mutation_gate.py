@@ -889,7 +889,7 @@ MUTANTS = [
     {
         "name": "117",
         "file": "bench/providers/docker/probe.py",
-        "old": '            classes = (attributes.get("class") or "").split()\n',
+        "old": '            classes = [token for token in re.split(r"[ \\t\\n\\f\\r]+", attributes.get("class") or "") if token]\n',
         "new": '            classes = (attributes.get("class") or "").lower().split()\n',
         "test": "tests.test_detect.DetectChallengeTests.test_widget_class_tokens_are_case_sensitive",
         "assert": "self.assertEqual(self.detect(200, {}, body), (",
@@ -1017,15 +1017,15 @@ MUTANTS = [
     {
         "name": "132",
         "file": "bench/providers/docker/probe.py",
-        "old": '            classes = (attributes.get("class") or "").split()\n',
+        "old": '            classes = [token for token in re.split(r"[ \\t\\n\\f\\r]+", attributes.get("class") or "") if token]\n',
         "new": '            classes = (attributes.get("class") or "").split(" ")\n',
-        "test": "tests.test_detect.DetectChallengeTests.test_widget_class_tokens_split_on_all_whitespace",
+        "test": "tests.test_detect.DetectChallengeTests.test_widget_class_tokens_split_on_ascii_whitespace",
         "assert": "self.assertEqual(self.detect(200, {}, body), (",
     },
     {
         "name": "133",
         "file": "bench/providers/docker/probe.py",
-        "old": '            classes = (attributes.get("class") or "").split()\n',
+        "old": '            classes = [token for token in re.split(r"[ \\t\\n\\f\\r]+", attributes.get("class") or "") if token]\n',
         "new": '            classes = attributes.get("class", "").split()\n',
         "test": "tests.test_detect.DetectChallengeTests.test_boolean_class_preserves_access_denied_verdict",
         "assert": "self.assertEqual(self.detect(403, {}, body), (",
@@ -1058,10 +1058,43 @@ MUTANTS = [
     {
         "name": "137",
         "file": "bench/providers/docker/probe.py",
-        "old": '                src = re.sub(r"^[\\x00-\\x20]+|[\\x00-\\x20]+$", "", src)\n',
+        "old": '                src = src.strip("".join(chr(codepoint) for codepoint in range(0x21)))\n',
         "new": '',
         "test": "tests.test_detect.DetectChallengeTests.test_script_src_trims_c0_and_space_at_edges",
         "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    # M16a-fix8: HTML attribute and URL parsing must match the browser in linear time.
+    {
+        "name": '138',
+        "file": 'bench/providers/docker/probe.py',
+        "old": '                name: value.replace("\\x00", "\\ufffd") if value is not None else None\n',
+        "new": '                name: value\n',
+        "test": 'tests.test_detect.DetectChallengeTests.test_script_src_replaces_nul_before_url_cleanup',
+        "assert": 'self.assertEqual(self.detect(200, {}, body), (',
+    },
+    {
+        "name": '139',
+        "file": 'bench/providers/docker/probe.py',
+        "old": '            classes = [token for token in re.split(r"[ \\t\\n\\f\\r]+", attributes.get("class") or "") if token]\n',
+        "new": '            classes = (attributes.get("class") or "").split()\n',
+        "test": 'tests.test_detect.DetectChallengeTests.test_widget_class_keeps_non_ascii_whitespace_in_token',
+        "assert": 'self.assertEqual(self.detect(403, {}, body), (',
+    },
+    {
+        "name": '140',
+        "file": 'bench/providers/docker/probe.py',
+        "old": '                src = src.replace("\\\\", "/")\n',
+        "new": '',
+        "test": 'tests.test_detect.DetectChallengeTests.test_script_src_normalizes_backslashes',
+        "assert": 'self.assertEqual(self.detect(200, {}, body), (',
+    },
+    {
+        "name": '141',
+        "file": 'bench/providers/docker/probe.py',
+        "old": '                src = src.strip("".join(chr(codepoint) for codepoint in range(0x21)))\n',
+        "new": '                src = re.sub(r"^[\\x00-\\x20]+|[\\x00-\\x20]+$", "", src)\n',
+        "test": 'tests.test_detect.DetectChallengeTests.test_script_src_internal_spaces_parse_within_time_budget',
+        "assert": 'self.assertLess(elapsed, 2.0)',
     },
 ]
 
