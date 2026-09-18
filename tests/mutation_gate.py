@@ -830,20 +830,6 @@ MUTANTS = [
         "assert": 'self.assertEqual(verdict, "captcha")',
     },
     {
-        "name": "110",
-        "file": "bench/providers/docker/probe.py",
-        "old": (
-            "    try:\n"
-            "        widget.feed(text)\n"
-            "    except Exception:\n"
-            "        # Malformed markup must not discard evidence already recognized.\n"
-            "        pass\n"
-        ),
-        "new": "    widget.feed(text)\n",
-        "test": "tests.test_detect.DetectChallengeTests.test_parser_error_preserves_recognized_widget",
-        "assert": "self.assertEqual(self.detect(200, {}, body), expected)",
-    },
-    {
         "name": "111",
         "file": "bench/providers/docker/probe.py",
         "old": (
@@ -855,6 +841,50 @@ MUTANTS = [
         "new": "",
         "test": "tests.test_detect.DetectChallengeTests.test_template_widgets_with_cf_are_not_interactive",
         "assert": 'self.assertEqual(verdict, "none")',
+    },
+    {
+        "name": "112",
+        "file": "bench/providers/docker/probe.py",
+        "old": "    text = _clip_oversized_charrefs(text)\n",
+        "new": "",
+        "test": "tests.test_detect.CharacterReferenceTests.test_widget_after_oversized_reference_is_recognized",
+        "assert": "self.assertEqual(self.probe.detect_challenge(200, {}, payload), expected)",
+    },
+    {
+        "name": "113",
+        "file": "bench/providers/docker/probe.py",
+        "old": "    parser.feed(_clip_oversized_charrefs(body))\n",
+        "new": "    parser.feed(body)\n",
+        "test": "tests.test_detect.CharacterReferenceTests.test_html_to_text_keeps_text_after_oversized_reference",
+        "assert": "self.assertEqual(self.probe.html_to_text(body), expected)",
+    },
+    {
+        "name": "114",
+        "file": "bench/providers/docker/probe.py",
+        "old": "    title = _clip_oversized_charrefs(match.group(1))\n",
+        "new": "    title = match.group(1)\n",
+        "test": "tests.test_detect.CharacterReferenceTests.test_title_replaces_oversized_decimal_reference",
+        "assert": 'self.assertEqual(self.probe._title(body), "before \\ufffd after")',
+    },
+    {
+        "name": "115",
+        "file": "bench/providers/docker/probe.py",
+        "old": '        digits = match.group(1).lstrip("0") or "0"\n',
+        "new": "        digits = match.group(1)\n",
+        "test": "tests.test_detect.CharacterReferenceTests.test_zero_padded_references_preserve_their_value",
+        "assert": 'self.assertEqual(self.probe._title("<title>" + reference + "</title>"), expected)',
+    },
+    {
+        "name": "116",
+        "file": "bench/providers/docker/probe.py",
+        "old": (
+            "        def handle_startendtag(self, tag, attrs):\n"
+            "            # HTML ignores the self-closing slash on non-void elements.\n"
+            "            self.handle_starttag(tag, attrs)\n\n"
+        ),
+        "new": "",
+        "test": "tests.test_detect.SelfClosingWidgetTests.test_self_closing_template_keeps_widgets_inert",
+        "assert": "self.assertEqual(self.probe.detect_challenge(200, {}, cf + template), (",
     },
 ]
 

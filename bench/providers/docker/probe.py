@@ -81,6 +81,22 @@ _BLOCK_TAGS = frozenset({
 })
 
 
+_DECIMAL_CHARREF = re.compile(r"&#([0-9]+)(;?)")
+
+
+def _clip_oversized_charrefs(text: str) -> str:
+    """Keep decimal references safe for unescape's integer conversion."""
+    def replace(match: re.Match[str]) -> str:
+        # The integer digit limit includes leading zeros. Strip them even
+        # when the value fits Unicode; eight significant digits never fit.
+        digits = match.group(1).lstrip("0") or "0"
+        if len(digits) >= 8:
+            return "\ufffd"
+        return "&#" + digits + match.group(2)
+
+    return _DECIMAL_CHARREF.sub(replace, text)
+
+
 class _VisibleText(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -109,7 +125,7 @@ class _VisibleText(HTMLParser):
 
 def html_to_text(body: str) -> str:
     parser = _VisibleText()
-    parser.feed(body)
+    parser.feed(_clip_oversized_charrefs(body))
     parser.close()
     return parser.text()
 
@@ -216,7 +232,8 @@ def _title(body: str) -> str:
     match = re.search(r"<title[^>]*>(.*?)</title\s*>", body, re.I | re.S)
     if not match:
         return ""
-    return html_module.unescape(re.sub(r"\s+", " ", match.group(1))).strip()
+    title = _clip_oversized_charrefs(match.group(1))
+    return html_module.unescape(re.sub(r"\s+", " ", title)).strip()
 
 
 # A decision must not hang on the FIRST <title> in the file: a commented-out or
@@ -298,6 +315,7 @@ def _normalize_headers(raw: Any) -> dict[str, str] | None:
 def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
     """Return (challenge type, names of rules that fired). Pure: no I/O."""
     text = body if isinstance(body, str) else body.decode("utf-8", "replace")
+    text = _clip_oversized_charrefs(text)
     lowered = text.lower()
 
     header_names: list[str] = []
@@ -353,16 +371,16 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
                 ):
                     self.found = True
 
+        def handle_startendtag(self, tag, attrs):
+            # HTML ignores the self-closing slash on non-void elements.
+            self.handle_starttag(tag, attrs)
+
         def handle_endtag(self, tag):
             if tag == "template" and self.template_depth:
                 self.template_depth -= 1
 
     widget = InteractiveCaptcha(convert_charrefs=False)
-    try:
-        widget.feed(text)
-    except Exception:
-        # Malformed markup must not discard evidence already recognized.
-        pass
+    widget.feed(text)
     # CF body markers still win: the live interstitial remains suspected.
     captcha_names: list[str] = []
     if _CAPTCHA_ATTR.search(text):

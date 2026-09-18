@@ -425,7 +425,8 @@ class DetectChallengeTests(unittest.TestCase):
         self.assertEqual(self.detect(200, {}, bad), ("none", ()))
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
         widget = '<div data-sitekey="k"></div>'
-        for body in (cf + widget + bad, cf + bad + widget):
+        attr = '<div title="' + bad + '"></div>'
+        for body in (cf + widget + bad, cf + bad + widget, cf + attr + widget):
             with self.subTest(widget_before_bad=body.endswith(bad)):
                 self.assertEqual(self.detect(200, {}, body), (
                     "captcha", ("body_cf_challenge_platform", "body_captcha_interactive"),
@@ -437,11 +438,11 @@ class DetectChallengeTests(unittest.TestCase):
         # Attribute references are decoded even with convert_charrefs=False.
         for bad in ('<span title="&#' + "9" * 5000 + ';">', '<![invalid]>'):
             with self.subTest(bad_kind=bad[:6]):
-                body = cf + widget + bad
                 expected = (
                     "captcha", ("body_cf_challenge_platform", "body_captcha_interactive"),
                 )
-                self.assertEqual(self.detect(200, {}, body), expected)
+                for body in (cf + widget + bad, cf + bad + widget):
+                    self.assertEqual(self.detect(200, {}, body), expected)
 
     def test_parser_error_preserves_header_and_status_verdicts(self):
         bad = '<span title="&#' + "9" * 5000 + ';">'
@@ -507,6 +508,114 @@ class DetectChallengeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CharacterReferenceTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def test_widget_after_oversized_reference_is_recognized(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        widget = '<div data-sitekey="k"></div>'
+        expected = ("captcha", ("body_cf_challenge_platform", "body_captcha_interactive"))
+        for suffix in (";", ""):
+            reference = "&#" + "9" * 5000 + suffix
+            for fragment in (reference, '<div title="' + reference + '"></div>'):
+                for body in (cf + fragment + widget, cf + widget + fragment):
+                    for as_bytes in (False, True):
+                        with self.subTest(semicolon=bool(suffix), attribute=fragment.startswith("<"),
+                                          widget_last=body.endswith(widget), as_bytes=as_bytes):
+                            payload = body.encode("utf-8") if as_bytes else body
+                            self.assertEqual(self.probe.detect_challenge(200, {}, payload), expected)
+
+    def test_oversized_title_preserves_header_and_status_verdicts(self):
+        for suffix in (";", ""):
+            body = "<title>&#" + "9" * 5000 + suffix + "</title><p>page</p>"
+            for status, verdict, markers in (
+                (200, "none", ()),
+                (403, "access_denied", ("status_403",)),
+                (429, "rate_limited", ("status_429",)),
+            ):
+                for headers, expected in (
+                    ({}, (verdict, markers)),
+                    ({"cf-mitigated": "challenge"}, ("suspected", ("header_cf_mitigated",))),
+                    ({"cf-mitigated": "interactive"}, ("interactive", ("header_cf_mitigated",))),
+                ):
+                    with self.subTest(semicolon=bool(suffix), status=status, headers=headers):
+                        self.assertEqual(self.probe.detect_challenge(status, headers, body), expected)
+
+    def test_html_to_text_keeps_text_after_oversized_reference(self):
+        for suffix in (";", ""):
+            reference = "&#" + "9" * 5000 + suffix
+            for body, expected in (
+                ("<p>before " + reference + " after</p>", " before \ufffd after "),
+                ('<p title="' + reference + '">after</p>', " after "),
+            ):
+                with self.subTest(semicolon=bool(suffix), attribute='title=' in body):
+                    self.assertEqual(self.probe.html_to_text(body), expected)
+
+    def test_title_replaces_oversized_decimal_reference(self):
+        for suffix in (";", ""):
+            body = "<title>before &#" + "9" * 5000 + suffix + " after</title>"
+            with self.subTest(semicolon=bool(suffix)):
+                self.assertEqual(self.probe._title(body), "before \ufffd after")
+
+    def test_title_character_reference_boundaries_are_unchanged(self):
+        for reference, expected in (
+            ("&#1114111;", ""), ("&#x10FFFF;", ""),
+            ("&#1114109;", "\U0010fffd"), ("&#1114112;", "\ufffd"),
+            ("&#9999999;", "\ufffd"), ("&#10000000;", "\ufffd"),
+            ("&#65;", "A"), ("&#x41;", "A"), ("&#0000065;", "A"),
+            ("&#x" + "f" * 5000 + ";", "\ufffd"),
+            ("&amp;", "&"), ("&nbsp;", "\xa0"),
+        ):
+            with self.subTest(reference=reference[:24]):
+                self.assertEqual(self.probe._title("<title>L" + reference + "R</title>"),
+                                 "L" + expected + "R")
+
+    def test_zero_padded_references_preserve_their_value(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        widget = '<div data-sitekey="k"></div>'
+        for suffix in (";", ""):
+            for digits, expected in (("0" * 5000 + "65", "A"), ("0" * 5000, "\ufffd")):
+                reference = "&#" + digits + suffix
+                with self.subTest(semicolon=bool(suffix), all_zero=digits.endswith("0")):
+                    self.assertEqual(self.probe._title("<title>" + reference + "</title>"), expected)
+                    self.assertEqual(self.probe.html_to_text("<p>" + reference + "</p>"),
+                                     " " + expected + " ")
+                    body = cf + '<div title="' + reference + '"></div>' + widget
+                    self.assertEqual(self.probe.detect_challenge(200, {}, body), (
+                        "captcha", ("body_cf_challenge_platform", "body_captcha_interactive"),
+                    ))
+
+
+class SelfClosingWidgetTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def test_self_closing_template_keeps_widgets_inert(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        widget = '<div data-sitekey="k"></div>'
+        for template in (
+            '<template/>' + widget + '</template>',
+            '<template/><template/></template>' + widget + '</template>',
+            '<template/>' + widget,
+        ):
+            with self.subTest(template=template):
+                self.assertEqual(self.probe.detect_challenge(200, {}, cf + template), (
+                    "none", ("body_cf_challenge_platform",),
+                ))
+
+    def test_self_closing_widget_is_recognized_after_template(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for prefix in ("", "<template/></template>"):
+            with self.subTest(prefix=prefix):
+                body = cf + prefix + '<div data-sitekey="k"/>'
+                self.assertEqual(self.probe.detect_challenge(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha_interactive"),
+                ))
 
 
 class RuleProvenanceTests(unittest.TestCase):
