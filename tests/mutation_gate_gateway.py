@@ -72,6 +72,14 @@ MUTANTS = (
         "test": "tests.test_gateway_format.FormatTests.test_markdown_seven_digit_unicode_reference",
         "assert": "self.assertEqual(render_content(obj, 'markdown'), '\\U0010fffd')",
     },
+    {
+        "name": "formatter reference semicolon",
+        "path": "gateway/format_html.py",
+        "old": 'return "&#" + digits + match.group(2)',
+        "new": 'return "&#" + digits',
+        "test": "tests.test_gateway_format.FormatTests.test_markdown_reference_semicolon_separates_following_digit",
+        "assert": "self.assertEqual(render_content(obj, 'markdown'), 'A6')",
+    },
 )
 
 
