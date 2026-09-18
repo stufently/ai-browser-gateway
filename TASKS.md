@@ -490,6 +490,17 @@
     `grecaptcha.execute`) уликой не считается, видимый виджет (`g-recaptcha`,
     `data-sitekey`, `h-captcha`, `cf-turnstile`) — считается. Заодно закрыть оба
     выживших мутанта и убрать из `captcha_confirmed` два недостижимых дизъюнкта.
+  - M16a-fix2 `docs/specs/m16a-fix2-widget-edges.md` (на находки Codex по
+    M16a-fix): `render=explicit` — интерактивный виджет, разбор разметки
+    `HTMLParser`ом, содержимое `<template>` инертно. machine_pass 7/7,
+    agy — принято без находок.
+  - M16a-fix3 `docs/specs/m16a-fix3-charrefs-and-template.md` (на четыре
+    находки Codex по fix2, все воспроизведены координатором): `html.unescape`
+    падает с `ValueError` на числовой сущности длиннее 4300 цифр — на трёх
+    маршрутах (`_title`, `html_to_text`, `feed`), а самозакрытый `<template/>`
+    через `handle_startendtag` не считался открывающим и давал ложную
+    `captcha`. Клипуем out-of-range сущности в U+FFFD на входе, снимаем
+    `try/except` вокруг `feed`, переопределяем `handle_startendtag`.
   - M16b — выкладка фикса детектора на stand-host (детектор бинд-маунтится из релиза,
     пересборка провайдерского образа не нужна).
 
