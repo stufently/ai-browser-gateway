@@ -225,9 +225,11 @@ MUTANTS = [
      'assert': "self.assertNotIn('--network', target_argv)"},
     {'name': '27',
      'file': 'bench/runner/execute.py',
-     'old': "                            subprocess.run(['docker', 'rm', '--force', cid], timeout=30,\n"
-            "                                           capture_output=True, stdin=subprocess.DEVNULL)",
-     'new': '                            pass',
+     'old': "                    removed = subprocess.run(['docker', 'rm', '--force', *ids],\n"
+            "                                             timeout=remaining, **kwargs)\n"
+            "                    if removed.returncode == 0:\n"
+            "                        return",
+     'new': '                    return',
      'test': 'tests.test_execute.DockerLauncherTests.test_timeout_removes_container_from_cidfile',
      'assert': "self.assertEqual(calls[1:], [['docker', 'rm', '--force', 'test-container-id']])"},
     {'name': '28',
