@@ -501,9 +501,15 @@
     через `handle_startendtag` не считался открывающим и давал ложную
     `captcha`. Клипуем out-of-range сущности в U+FFFD на входе, снимаем
     `try/except` вокруг `feed`, переопределяем `handle_startendtag`.
-    Принята 18.09.2026: machine_pass 8/8, 569 unit + 125 frozen probes зелены,
-    дифф прочитан координатором; agy сломался (вместо вердикта стена нулей) —
-    soft-fail; независимые мутации Grok ждут слот исполнителя.
+    ПРИНЯТА и влита в main 18.09.2026 (merge `00959e2`, цепочка fix+fix2+fix3):
+    machine_pass 8/8, 569 unit + 125 frozen probes, дифф прочитан
+    координатором; независимые мутации Grok 23 kill / 2 survivor / 5
+    equivalent / 0 invalid, все пять обязательных откатов убиты; agy сломался
+    (вместо вердикта стена нулей) — soft-fail.
+    Живой стенд (улики в `/home/user/.cache/abg-coord-20260918/m16a-fix3-live/`):
+    lowendtalk.com теперь `ok=true`, `curl_cffi` 200 `challenge=none` 201 мс,
+    `step=stop` — против `ok=false`/`interactive_challenge`/`human` на проде;
+    bizprofile.net обе цели `ok=true` через scrapling.
   - M16a-fix4 `docs/specs/m16a-fix4-format-charrefs.md` (находка Codex по fix3,
     воспроизведена координатором): тот же лимит 4300 цифр остался в ПРОДУКТЕ —
     `gateway/format_html.py` кормит сырое тело `HTMLParser` с
