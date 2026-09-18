@@ -1,12 +1,12 @@
-# M16a-fix — независимые мутации тестов детектора
+# M16a-fix2 — независимые мутации тестов детектора
 
 18.09.2026. Проверочная задача gk, не реализация. Правку и тесты писала
 cx-панель; мутации гоняет противоположный исполнитель.
 
-Клон /home/user/exec-clones/abg-m16a-fix-mutations-20260918, ветка
-m16a-fix-mutations, origin push DISABLED. SOURCE_SHA `7b00349` (FINAL M16a-fix,
-полный SHA — `git rev-parse 7b00349` в клоне).
-Выход: /home/user/.cache/abg-coord-20260918/m16a-fix-mutations/.
+Клон /home/user/exec-clones/abg-m16a-fix2-mutations-20260918, ветка
+m16a-fix2-mutations, origin push DISABLED. SOURCE_SHA `6ff902fb7746929865c4e8e0db6599d81cbffe4a` (FINAL M16a-fix2,
+полный SHA уже записан).
+Выход: /home/user/.cache/abg-coord-20260918/m16a-fix2-mutations/.
 
 ## Что мутировать
 
@@ -16,8 +16,9 @@ m16a-fix-mutations, origin push DISABLED. SOURCE_SHA `7b00349` (FINAL M16a-fix,
 разбор `src` у `script`, отсечение `#`, разбор query и условие `render=`),
 множество `_CAPTCHA_WIDGET_CLASSES`, добавление метки
 `body_captcha_interactive`, выражение `captcha_confirmed`, условие ветки
-`captcha`. Прочитать целиком `docs/specs/m16a-fix-interactive-captcha.md` и
-`git diff 7cca18c 7b00349`.
+`captcha`. Прочитать целиком `docs/specs/m16a-fix-interactive-captcha.md`,
+`docs/specs/m16a-fix2-widget-edges.md` и
+`git diff 7cca18c 6ff902fb7746929865c4e8e0db6599d81cbffe4a`.
 
 Суть правки: `captcha` теперь требует ИНТЕРАКТИВНОГО виджета (класс
 `g-recaptcha`/`h-captcha`/`cf-turnstile`, атрибут `data-sitekey`, подключение
@@ -45,12 +46,19 @@ m16a-fix-mutations, origin push DISABLED. SOURCE_SHA `7b00349` (FINAL M16a-fix,
 условие ветки `captcha` без требования метки; `captcha_confirmed` всегда True;
 всегда False; `status in (403, 429)` → `status >= 400` → `status == 403`;
 `decisive_body` → `body_names`); **порядок** (поменять местами ветку
-`body_enough` и ветку `captcha`).
+`body_enough` и ветку `captcha`); **краевые случаи M16a-fix2** (считать `render=explicit`
+невидимым; считать интерактивным ЛЮБОЕ значение `render=`; сравнивать
+`explicit` без учёта регистра и наоборот; убрать `convert_charrefs=False`;
+убрать `try/except` вокруг `feed`; ловить только `ValueError`; считать
+`template` флагом вместо счётчика; не уменьшать счётчик на закрывающем теге;
+не возвращаться из `handle_starttag` внутри шаблона).
 
-Отдельно проверить два отката, каждый обязан падать на авторском наборе:
-условие ветки `captcha` назад к `if captcha_names and captcha_confirmed:`
-и `captcha_confirmed` назад к `header_names or body_enough or status in
-(403, 429)`. Выживший откат — главная находка прогона.
+Отдельно проверить пять откатов, каждый обязан падать на авторском наборе:
+условие ветки `captcha` назад к `if captcha_names and captcha_confirmed:`;
+`captcha_confirmed` назад к `header_names or body_enough or status in
+(403, 429)`; условие `render=` назад к «любой `render=` — невидимый»; снятие
+`try/except` вокруг `feed`; снятие учёта `<template>`. Выживший откат —
+главная находка прогона.
 
 Для каждого: id, ось, diff, SHA256 исходника/мутанта/восстановления,
 доказательство активации изменённой строки авторским набором, команда/cwd/rc,
