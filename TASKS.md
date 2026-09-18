@@ -467,7 +467,7 @@
   BASE и контракт задним числом не менять. После принятой M11 продолжить M12.
   Транспорт M10 не переписывать; `cf-fetch` и потребителей не переключать.
 
-- [ ] **M16 — IN_PROGRESS 18.09.2026: ложная `captcha` на честном HTTP 200.**
+- [x] **M16 — COMPLETED 18.09.2026 (release `ae72bfe` выкачен): ложная `captcha` на честном HTTP 200.**
   Корень: `detect_challenge` объявляет `captcha`, когда в теле есть ЛЮБАЯ одна
   решающая метка. На lowendtalk.com это `/cdn-cgi/challenge-platform/.../jsd/main.js`
   (Cloudflare вставляет его в обычные страницы) плюс невидимая reCAPTCHA v3
@@ -548,7 +548,10 @@
     healthchecks `up`, lowendtalk через боевой API `ok=true`/`curl_cffi`/
     `challenge=none`/213 мс против `ok=false`/`interactive_challenge`/`human`
     до выкладки, шесть целей и bizprofile совпали с матрицей M15b. Улики —
-    `/home/user/.cache/abg-coord-20260918/m16b/`.
+    `/home/user/.cache/abg-coord-20260918/m16b/`. machine_pass 9/9 с
+    перезапуском живых проверок, Codex принял без находок, agy сломался третий
+    раз за день (таймаут 900 с) — soft-fail. Документы слиты в main (`40176ba`).
+    Мутаций у этой вехи нет: новых тестов она не добавляет.
 
 - [x] **M15 — COMPLETED 17.09.2026 (release `58d3b73` выкачен), решение владельца 17.09.2026** («Лимит + переход
   дальше» — закрывает открытый риск M14: зависшая HTTP-ступень съедала весь бюджет).
