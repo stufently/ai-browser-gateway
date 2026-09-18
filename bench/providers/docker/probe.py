@@ -251,6 +251,7 @@ RULE_PROVENANCE = {
     "body_just_a_moment": CF_INTERSTITIAL,
     "body_noindex_nofollow": CF_INTERSTITIAL,
     "body_captcha": ASSUMED,
+    "body_captcha_interactive": ASSUMED,
     "status_403": "protocol:HTTP 403",
     "status_429": "protocol:HTTP 429",
 }
@@ -275,6 +276,7 @@ _CAPTCHA_ATTR = re.compile(
     r'(?:src|class|id|name)\s*=\s*["\'][^"\']*captcha',
     re.I,
 )
+_CAPTCHA_WIDGET_CLASSES = frozenset({"g-recaptcha", "h-captcha", "cf-turnstile"})
 
 
 def _header_value(raw: Any) -> str:
@@ -323,14 +325,34 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
     decisive_body = [name for name, _ in _BODY_RULES if name in body_names]
     body_enough = "body_just_a_moment" in body_names or len(decisive_body) >= 2
 
-    # Unverified widget. CF body markers still win the verdict: the live
-    # interstitial is suspected, not captcha, even if the word appears.
+    # Widget markup is assumed evidence. Parse attributes so prose, comments
+    # and script strings do not masquerade as widgets. Invisible v3 scripts
+    # (render=) and grecaptcha.ready/execute calls are not interactive evidence.
+    class InteractiveCaptcha(HTMLParser):
+        found = False
+
+        def handle_starttag(self, tag, attrs):
+            attributes = dict(attrs)
+            classes = (attributes.get("class") or "").split()
+            if "data-sitekey" in attributes or _CAPTCHA_WIDGET_CLASSES.intersection(classes):
+                self.found = True
+            if tag == "script":
+                src = (attributes.get("src") or "").partition("#")[0]
+                path, _, query = src.partition("?")
+                if (path == "recaptcha/api.js" or path.endswith("/recaptcha/api.js")) and not any(
+                    part.startswith("render=") for part in query.split("&")
+                ):
+                    self.found = True
+
+    widget = InteractiveCaptcha()
+    widget.feed(text)
+    # CF body markers still win: the live interstitial remains suspected.
     captcha_names: list[str] = []
     if _CAPTCHA_ATTR.search(text):
         captcha_names.append("body_captcha")
-    captcha_confirmed = bool(
-        header_names or body_enough or status in (403, 429)
-    )
+    if widget.found:
+        captcha_names.append("body_captcha_interactive")
+    captcha_confirmed = bool(decisive_body or status in (403, 429))
 
     status_names: list[str] = []
     status_verdict: str | None = None
@@ -345,7 +367,7 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
         return header_verdict, tuple(header_names + body_names + captcha_names)
     if body_enough:
         return "suspected", tuple(body_names + captcha_names)
-    if captcha_names and captcha_confirmed:
+    if "body_captcha_interactive" in captcha_names and captcha_confirmed:
         return "captcha", tuple(body_names + captcha_names)
     if status_verdict is not None:
         return status_verdict, tuple(body_names + captcha_names + status_names)

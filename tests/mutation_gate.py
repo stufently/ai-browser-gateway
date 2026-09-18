@@ -374,9 +374,9 @@ MUTANTS = [
     {
         "name": "46",
         "file": "bench/providers/docker/probe.py",
-        "old": "    if captcha_names and captcha_confirmed:\n",
-        "new": "    if captcha_names:\n",
-        "test": "tests.test_detect.DetectChallengeTests.test_lone_captcha_attribute_is_none_but_named",
+        "old": '    if "body_captcha_interactive" in captcha_names and captcha_confirmed:\n',
+        "new": '    if "body_captcha_interactive" in captcha_names:\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_interactive_widget_without_cf_on_200_is_none",
         "assert": 'self.assertEqual(verdict, "none")',
     },
     {
@@ -412,7 +412,7 @@ MUTANTS = [
         "file": "bench/providers/docker/probe.py",
         "old": '        return "captcha", tuple(body_names + captcha_names)',
         "new": '        return "captcha", ()',
-        "test": "tests.test_detect.DetectChallengeTests.test_captcha_with_403_is_captcha_and_named",
+        "test": "tests.test_detect.DetectChallengeTests.test_interactive_widget_plus_one_cf_marker_is_captcha_and_named",
         "assert": 'self.assertIn("body_captcha", markers)',
     },
     {
@@ -443,7 +443,7 @@ MUTANTS = [
      'file': 'bench/providers/docker/probe.py',
      'old': '    "body_captcha": ASSUMED,',
      'new': '    "body_captcha": CF_INTERSTITIAL,',
-     'test': 'tests.test_detect.RuleProvenanceTests.test_exact_provenance_of_the_one_unmeasured_rule',
+     'test': 'tests.test_detect.RuleProvenanceTests.test_exact_provenance_of_both_unmeasured_rules',
      'assert': 'self.assertEqual(self.probe.RULE_PROVENANCE["body_captcha"], "assumed")'},
     {'name': '54',
      'file': 'bench/providers/docker/probe.py',
@@ -797,6 +797,30 @@ MUTANTS = [
      'new': '            decisions[provider] = (True, "; ".join(parts))',
      'test': 'tests.test_select.CoordinatorFindingsTests.test_decision_is_a_plain_three_field_tuple',
      'assert': 'self.assertEqual(len(list(decision)), 3, decision)'},
+    {
+        "name": "106",
+        "file": "bench/providers/docker/probe.py",
+        "old": '    if "body_captcha_interactive" in captcha_names and captcha_confirmed:\n',
+        "new": "    if captcha_names and captcha_confirmed:\n",
+        "test": "tests.test_detect.DetectChallengeTests.test_noninteractive_captcha_with_cf_never_becomes_captcha",
+        "assert": "self.assertEqual(verdict, expected)",
+    },
+    {
+        "name": "107",
+        "file": "bench/providers/docker/probe.py",
+        "old": "    captcha_confirmed = bool(decisive_body or status in (403, 429))",
+        "new": "    captcha_confirmed = bool(decisive_body or status >= 400)",
+        "test": "tests.test_detect.DetectChallengeTests.test_interactive_widget_on_other_error_status_is_none",
+        "assert": 'self.assertEqual(verdict, "none")',
+    },
+    {
+        "name": "108",
+        "file": "bench/providers/docker/probe.py",
+        "old": '        haystack = _decisive_title(text).lower() if name == "body_just_a_moment" else lowered\n',
+        "new": '        haystack = _decisive_title(text).lower() if name == "body_just_a_moment" else text\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_uppercase_body_needles_are_suspected_and_named",
+        "assert": 'self.assertEqual(verdict, "suspected")',
+    },
 ]
 
 

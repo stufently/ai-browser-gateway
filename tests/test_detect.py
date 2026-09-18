@@ -249,20 +249,20 @@ class DetectChallengeTests(unittest.TestCase):
         self.assertEqual(verdict, "none")
         self.assertIn("body_captcha", markers)
 
-    def test_captcha_with_403_is_captcha_and_named(self):
+    def test_captcha_with_403_is_access_denied_and_named(self):
         body = (
             '<html><body><img id="captcha-history" '
             'src="/img/captcha-example.png"></body></html>'
         )
         verdict, markers = self.detect(403, {}, body)
-        self.assertEqual(verdict, "captcha")
-        self.assertIn("body_captcha", markers)
+        self.assertEqual(verdict, "access_denied")
+        self.assertEqual(markers, ("body_captcha", "status_403"))
 
-    def test_captcha_with_429_is_captcha_and_named(self):
+    def test_captcha_with_429_is_rate_limited_and_named(self):
         body = '<div class="g-captcha" id="box"></div>'
         verdict, markers = self.detect(429, {}, body)
-        self.assertEqual(verdict, "captcha")
-        self.assertIn("body_captcha", markers)
+        self.assertEqual(verdict, "rate_limited")
+        self.assertEqual(markers, ("body_captcha", "status_429"))
 
     def test_captcha_plus_one_body_marker_is_none_but_named(self):
         body = (
@@ -281,12 +281,14 @@ class DetectChallengeTests(unittest.TestCase):
         self.assertEqual(verdict, "none")
         self.assertEqual(markers, ("body_cf_challenge_platform", "body_captcha"))
 
-    def test_lowendtalk_grecaptcha_on_403_is_captcha(self):
+    def test_lowendtalk_grecaptcha_on_403_is_access_denied(self):
         verdict, markers = self.detect(
             403, {}, fixture("lowendtalk_200_grecaptcha.html")
         )
-        self.assertEqual(verdict, "captcha")
-        self.assertEqual(markers, ("body_cf_challenge_platform", "body_captcha"))
+        self.assertEqual(verdict, "access_denied")
+        self.assertEqual(
+            markers, ("body_cf_challenge_platform", "body_captcha", "status_403")
+        )
 
     def test_lowendtalk_grecaptcha_with_second_body_marker_is_suspected(self):
         body = fixture("lowendtalk_200_grecaptcha.html") + "<div class=cf_chl_opt></div>"
@@ -295,6 +297,119 @@ class DetectChallengeTests(unittest.TestCase):
         self.assertIn("body_cf_chl_opt", markers)
         self.assertIn("body_cf_challenge_platform", markers)
         self.assertIn("body_captcha", markers)
+
+    def test_interactive_widget_plus_one_cf_marker_is_captcha_and_named(self):
+        body = (
+            '<title>Offers</title>'
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<div class="g-recaptcha" data-sitekey="k"></div>'
+        )
+        verdict, markers = self.detect(200, {}, body)
+        self.assertEqual(verdict, "captcha")
+        self.assertIn("body_captcha", markers)
+        self.assertEqual(markers, (
+            "body_cf_challenge_platform", "body_captcha", "body_captcha_interactive",
+        ))
+
+    def test_interactive_widget_without_cf_on_200_is_none(self):
+        verdict, markers = self.detect(200, {}, '<div class="g-recaptcha"></div>')
+        self.assertEqual(verdict, "none")
+        self.assertEqual(markers, ("body_captcha", "body_captcha_interactive"))
+
+    def test_interactive_widget_on_other_error_status_is_none(self):
+        for status in (404, 500):
+            with self.subTest(status=status):
+                verdict, markers = self.detect(
+                    status, {}, '<div class="g-recaptcha" data-sitekey="k"></div>'
+                )
+                self.assertEqual(verdict, "none")
+                self.assertEqual(markers, ("body_captcha", "body_captcha_interactive"))
+
+    def test_interactive_widget_on_403_and_429_is_captcha(self):
+        for status in (403, 429):
+            with self.subTest(status=status):
+                self.assertEqual(
+                    self.detect(status, {}, '<div data-sitekey="k"></div>'),
+                    ("captcha", ("body_captcha_interactive",)),
+                )
+
+    def test_interactive_markup_is_recognized_independently(self):
+        cases = (
+            ('<div class="g-recaptcha"></div>', ("body_captcha",)),
+            ("<div class='form h-captcha active'></div>", ("body_captcha",)),
+            ('<div class="cf-turnstile"></div>', ()),
+            ('<div class=cf-turnstile></div>', ()),
+            ('<div data-sitekey="k"></div>', ()),
+            ('<DIV DATA-SITEKEY=k></DIV>', ()),
+            ('<script src="https://www.google.com/recaptcha/api.js"></script>',
+             ("body_captcha",)),
+            ('<script src="https://www.google.com/recaptcha/api.js?hl=en"></script>',
+             ("body_captcha",)),
+            ('<script src=https://www.google.com/recaptcha/api.js></script>', ()),
+        )
+        for body, old_markers in cases:
+            with self.subTest(body=body):
+                self.assertEqual(
+                    self.detect(200, {}, body),
+                    ("none", old_markers + ("body_captcha_interactive",)),
+                )
+
+    def test_noninteractive_captcha_with_cf_never_becomes_captcha(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        bodies = (
+            '<img id="captcha-history">',
+            '<script src="https://www.google.com/recaptcha/api.js?render=KEY"></script>',
+            '<script src="https://www.google.com/recaptcha/api.js?hl=en&amp;render=KEY"></script>',
+            '<script src="https://www.google.com/recaptcha/api.js?render="></script>',
+            '<script>grecaptcha.ready(function() { grecaptcha.execute("KEY"); });</script>',
+        )
+        for body in bodies:
+            for status, expected in ((200, "none"), (403, "access_denied"), (429, "rate_limited")):
+                with self.subTest(body=body, status=status):
+                    verdict, markers = self.detect(status, {}, cf + body)
+                    self.assertEqual(verdict, expected)
+                    self.assertNotIn("body_captcha_interactive", markers)
+
+    def test_widget_words_outside_attributes_are_not_interactive(self):
+        bodies = (
+            '<p>g-recaptcha h-captcha cf-turnstile data-sitekey recaptcha/api.js</p>',
+            '<div class="g-recaptcha-history h-captcha-example cf-turnstile-info"></div>',
+            '<div data-example="data-sitekey" id="g-recaptcha"></div>',
+            '<!-- <div data-sitekey="k"></div> -->',
+            '<script>const example = \'<div data-sitekey="k"></div>\';</script>',
+        )
+        for body in bodies:
+            with self.subTest(body=body):
+                verdict, markers = self.detect(403, {}, body)
+                self.assertEqual(verdict, "access_denied")
+                self.assertNotIn("body_captcha_interactive", markers)
+
+    def test_v3_script_does_not_hide_a_separate_interactive_widget(self):
+        body = (
+            '<script src="https://www.google.com/recaptcha/api.js?render=KEY"></script>'
+            '<div data-sitekey="k"></div>'
+        )
+        self.assertEqual(self.detect(403, {}, body), (
+            "captcha", ("body_captcha", "body_captcha_interactive"),
+        ))
+
+    def test_uppercase_body_needles_are_suspected_and_named(self):
+        verdict, markers = self.detect(200, {}, '<p>CHALLENGES.CLOUDFLARE.COM CF_CHL_OPT</p>')
+        self.assertEqual(verdict, "suspected")
+        self.assertEqual(markers, ("body_cf_challenges_host", "body_cf_chl_opt"))
+
+    def test_header_and_body_verdicts_outrank_interactive_widget(self):
+        widget = '<div data-sitekey="k"></div>'
+        body = '<p>challenges.cloudflare.com cf_chl_opt</p>' + widget
+        self.assertEqual(self.detect(403, {}, body), (
+            "suspected", ("body_cf_challenges_host", "body_cf_chl_opt", "body_captcha_interactive"),
+        ))
+        for value, expected in (("challenge", "suspected"), ("interactive", "interactive")):
+            with self.subTest(value=value):
+                self.assertEqual(self.detect(403, {"cf-mitigated": value}, body), (
+                    expected, ("header_cf_mitigated", "body_cf_challenges_host",
+                               "body_cf_chl_opt", "body_captcha_interactive"),
+                ))
 
 
 if __name__ == "__main__":
@@ -307,6 +422,7 @@ class RuleProvenanceTests(unittest.TestCase):
     # One minimal body per unmeasured rule: firing that rule and nothing else.
     ASSUMED_SAMPLES = {
         "body_captcha": '<html><body><img id="captcha-history" src="/x.png"></body></html>',
+        "body_captcha_interactive": '<html><body><div data-sitekey="k"></div></body></html>',
     }
 
     @classmethod
@@ -317,6 +433,7 @@ class RuleProvenanceTests(unittest.TestCase):
         named = {name for name, _ in self.probe._BODY_RULES}
         named |= {name for name, _ in self.probe._SUPPORTING_BODY_RULES}
         named |= {"header_cf_mitigated", "body_captcha", "status_403", "status_429"}
+        named.add("body_captcha_interactive")
         self.assertEqual(set(self.probe.RULE_PROVENANCE), named)
 
     def test_measured_rules_name_a_fixture_that_exists(self):
@@ -335,12 +452,13 @@ class RuleProvenanceTests(unittest.TestCase):
             with self.subTest(rule=name):
                 verdict, markers = self.probe.detect_challenge(200, {}, body)
                 self.assertEqual(verdict, "none")
-                self.assertIn(name, markers)
+                self.assertEqual(markers, (name,))
 
-    def test_exact_provenance_of_the_one_unmeasured_rule(self):
+    def test_exact_provenance_of_both_unmeasured_rules(self):
         # Flipping this to "measured" has to be typed here as well: an assumption
         # cannot quietly become a fact between milestones.
         self.assertEqual(self.probe.RULE_PROVENANCE["body_captcha"], "assumed")
+        self.assertEqual(self.probe.RULE_PROVENANCE["body_captcha_interactive"], "assumed")
         self.assertEqual(
             self.probe.RULE_PROVENANCE["body_just_a_moment"],
             "fixture:cf_interstitial_200body_403.html",
