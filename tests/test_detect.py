@@ -264,15 +264,37 @@ class DetectChallengeTests(unittest.TestCase):
         self.assertEqual(verdict, "captcha")
         self.assertIn("body_captcha", markers)
 
-    def test_captcha_plus_one_body_marker_is_captcha(self):
+    def test_captcha_plus_one_body_marker_is_none_but_named(self):
         body = (
             '<p>See challenges.cloudflare.com</p>'
             '<img id="captcha-history" src="/x.png">'
         )
         verdict, markers = self.detect(200, {}, body)
-        self.assertEqual(verdict, "captcha")
+        self.assertEqual(verdict, "none")
         self.assertIn("body_captcha", markers)
         self.assertIn("body_cf_challenges_host", markers)
+
+    def test_lowendtalk_grecaptcha_on_200_is_none_but_named(self):
+        verdict, markers = self.detect(
+            200, {}, fixture("lowendtalk_200_grecaptcha.html")
+        )
+        self.assertEqual(verdict, "none")
+        self.assertEqual(markers, ("body_cf_challenge_platform", "body_captcha"))
+
+    def test_lowendtalk_grecaptcha_on_403_is_captcha(self):
+        verdict, markers = self.detect(
+            403, {}, fixture("lowendtalk_200_grecaptcha.html")
+        )
+        self.assertEqual(verdict, "captcha")
+        self.assertEqual(markers, ("body_cf_challenge_platform", "body_captcha"))
+
+    def test_lowendtalk_grecaptcha_with_second_body_marker_is_suspected(self):
+        body = fixture("lowendtalk_200_grecaptcha.html") + "<div class=cf_chl_opt></div>"
+        verdict, markers = self.detect(200, {}, body)
+        self.assertEqual(verdict, "suspected")
+        self.assertIn("body_cf_chl_opt", markers)
+        self.assertIn("body_cf_challenge_platform", markers)
+        self.assertIn("body_captcha", markers)
 
 
 if __name__ == "__main__":

@@ -329,7 +329,7 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
     if _CAPTCHA_ATTR.search(text):
         captcha_names.append("body_captcha")
     captcha_confirmed = bool(
-        header_names or decisive_body or status in (403, 429)
+        header_names or body_enough or status in (403, 429)
     )
 
     status_names: list[str] = []

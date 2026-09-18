@@ -10,6 +10,7 @@
 | `cf_interstitial_200body_403.html` | заглушка Cloudflare Managed Challenge | `bizprofile.net`, ответ `403 cf-mitigated: challenge` |
 | `js_shell_200.html` | ответ `200`, sentinel дорисовывает скрипт | сценарий `/js` стенда A |
 | `real_page_head.html` | начало настоящей страницы | `lowendtalk.com/categories/offers`, `200` |
+| `lowendtalk_200_grecaptcha.html` | настоящая страница `200` с невидимым reCAPTCHA и служебным скриптом Cloudflare; sitekey и параметры `__CF$cv$params` затёрты координатором | `lowendtalk.com/categories/offers`, снято 18.09.2026 |
 
 Ray ID в заглушке заменён на `RAYREDACTED0000`; ничего секретного в файлах нет.
 
