@@ -505,3 +505,126 @@ WHATWG URL: сначала удаляются все табы, LF и CR (U+0009,
 reCAPTCHA. Основание — [замеры координатора в Chromium от 18.09.2026](../specs/m16a-fix9-scheme-and-duplicates.md#что-проверено-вживую-а-что-предположение)
 в `abg-playwright:m2` (`new URL`, `classList`, `createHTMLDocument`,
 provider_version 1.62.0, `--network none`).
+
+### После выкладки M16c
+
+18.09.2026 на stand-host развёрнут release
+`db4fc359171c304470d7edae3d60cb13394e7881`, образ `abg-runtime:db4fc359171c`,
+image ID `sha256:632f783a9b7cf0cd22f368314f1a2d71daaf8c02d0e503bd2bca733ccbc07485`.
+Непосредственный откат — `ae72bfe1bae927a0297edfa273632df14ac89689`;
+`compose.env.pre-m16c` хранит исходную конфигурацию байт-в-байт (0600).
+В `compose.env` изменены только `ABG_RELEASE` и `ABG_RUNTIME_IMAGE`.
+Прежние release, manifests, образы и копии конфигурации сохранены.
+Провайдерский `abg-curl_cffi:m2` не пересобирался: детектор подключается
+из каталога release, и его SHA-256 совпадает с файлом в BASE (AC-951).
+
+**Что приехало.** Буквальный NUL в HTML-атрибуте заменяется на U+FFFD,
+поэтому `render=explicit\x00` не становится интерактивным виджетом.
+`class` разбивается только по ASCII-пробелам: NBSP внутри
+`g-recaptcha<NBSP>foo` оставляет один токен. Обратный слэш в относительном
+`src="recaptcha\api.js?render=explicit"` становится разделителем пути,
+и виджет распознаётся. Краевая обрезка C0/пробелов использует линейный
+`str.strip` вместо квадратичной регулярки. В BASE также уже включено
+уточнение M16a-fix9: обратные слэши нормализуются с учётом схемы URL,
+а из дублирующихся атрибутов сохраняется первый.
+
+**Выложенный детектор, офлайн (AC-956).** Импортирован именно
+`releases/db4fc359171c304470d7edae3d60cb13394e7881/bench/providers/docker/probe.py`.
+Каждая фикстура обёрнута в HTML с `cf_chl_opt`, статус 200, заголовки пусты.
+Улика — `detector-offline.json` в
+`/home/user/.cache/abg-coord-20260918/m16c/`.
+
+| Фикстура | Ожидание | Результат |
+|---|---|---|
+| `src="recaptcha/api.js?render=explicit\x00"`, буквальный NUL | `none` | `none` |
+| `class="g-recaptcha<NBSP>foo"` | `none` | `none` |
+| `class="g-recaptcha<TAB>foo"` | `captcha` | `captcha` |
+| `src="recaptcha\api.js?render=explicit"` | `captcha` | `captcha` |
+
+Разбор `render=` + 32 000 внутренних пробелов + `explicit` занял
+0.001475468 с при лимите <2 с; результат — `none`. Это единичный
+замер полного детектора, а не отдельного `str.strip`. Все четыре фикстуры
+прошли. Синтетические страницы в production не подавались; живые проверки
+ниже проверяют отсутствие регресса на прежних целях. Unit: 613 тестов, OK
+(AC-950, закреплённый Python-образ, сеть отключена).
+
+**Живые результаты.** AC-952 подтвердил healthy API, соответствие release/образа
+и стабильный монитор. Улики — `/home/user/.cache/abg-coord-20260918/m16c/`.
+Таблица взята из `targets-initial.json` (копия `targets.json`) и
+`bizprofile-20260918T154152Z.json`. `deploy-initial.json`, `profiles-initial.json`,
+`api-egress-initial.json` сохраняют первое измерение.
+Ступени: **provider/status/challenge/elapsed_ms/next_step**;
+все попытки восьми строк ниже — `egress_profile=direct`.
+Время API включает запуск и уборку контейнеров.
+
+| Цель / страница | Провайдер успеха | Лестница попыток | API elapsed, мс |
+|---|---|---|---|
+| control-hqd | `curl_cffi` | `curl_cffi/200/none/378/stop` | 1330 |
+| control-static | `curl_cffi` | `curl_cffi/200/none/165/stop` | 1010 |
+| cf-lowendtalk | `curl_cffi` | `curl_cffi/200/none/318/stop` | 1261 |
+| cf-bizprofile | `scrapling` | `curl_cffi/403/suspected/176/browser` → `patchright/403/suspected/1361/browser` → `scrapling/200/none/16471/stop` | 21976 |
+| cf-spa-chatgpt-share | `curl_cffi` | `curl_cffi/200/none/1352/stop` | 2862 |
+| login-instagram | `patchright` | `curl_cffi/200/none/922/browser` → `patchright/200/none/2250/stop` | 5357 |
+| bizprofile главная (без expected_text) | `scrapling` | `curl_cffi/403/suspected/200/browser` → `patchright/403/suspected/1181/browser` → `scrapling/200/none/18156/stop` | 22974 |
+| bizprofile Elevate Electric LLC (без expected_text) | `scrapling` | `curl_cffi/403/suspected/189/browser` → `patchright/403/suspected/1329/browser` → `scrapling/200/none/18587/stop` | 23723 |
+
+Матрица — **6/6**, CLI rc=0, `Example Domain` найден. Обе страницы bizprofile
+без `expected_text` прошли через Scrapling, локальные маркеры найдены;
+последние попытки имеют `success=true`, `challenge=none`, `error_type=none`.
+Все шесть лестниц начинаются с `curl_cffi/direct` (AC-955).
+
+**LowEndTalk без expected_text (AC-957).** Выполнен ровно один отдельный запрос
+через deployed API: `format=text`, `budget_ms=120000`, `allow_browser=true`,
+`max_age_hours=0`, ключ `expected_text` отсутствует. Полный ответ сохранён
+в `lowendtalk.json`, параметры — `lowendtalk-request.json`, HTTP-статус API —
+`lowendtalk-http.json`. Повтора этого запроса нет.
+
+| Замер | Итог | Лестница provider/status/challenge/elapsed_ms/next_step | API elapsed, мс |
+|---|---|---|---|
+| M16b: замер координатора из спеки | `ok=true`, `curl_cffi` | `curl_cffi/200/none/213/stop` | не указан |
+| M16c | `ok=true`, `curl_cffi` | `curl_cffi/200/none/364/stop` | 1344 |
+
+Регресса на этом ответе нет: HTTP 200, `challenge=none`, сочетание
+`captcha` + `next_step=human` отсутствует. Отдельный замер не смешивается
+со строкой `cf-lowendtalk` матрицы, где есть ожидаемый текст.
+
+**Сравнение с M16b.** База — последний сохранённый
+`/home/user/.cache/abg-coord-20260918/m16b/targets.json`, точная копия —
+`m16b-targets-baseline.json`. Это иной прогон, чем первоначальная таблица M16b выше.
+
+| Цель | M16b: исход / API мс | M16c: исход / API мс | Изменение времени, мс |
+|---|---|---|---|
+| control-hqd | `curl_cffi` / 1262 | `curl_cffi` / 1330 | +68 |
+| control-static | `curl_cffi` / 981 | `curl_cffi` / 1010 | +29 |
+| cf-lowendtalk | `curl_cffi` / 1288 | `curl_cffi` / 1261 | -27 |
+| cf-bizprofile | `scrapling` / 22629 | `scrapling` / 21976 | -653 |
+| cf-spa-chatgpt-share | `curl_cffi` / 4643 | `curl_cffi` / 2862 | -1781 |
+| login-instagram | `patchright` / 5228 | `patchright` / 5357 | +129 |
+
+Все шесть успешных исходов и провайдеры успеха сохранились. Разница времени
+между единичными прогонами не доказывает ускорение или замедление.
+
+**Незакрытый AC-954: ротация egress.** `--check-profiles` прошёл: 13 уникальных
+рабочих адресов, отличных от direct; `ms3` и `ms14` дали `connection_error`;
+без авторизации получен HTTP 407. Затем `--check-api-egress` завершился
+rc=1 с `worker_internal_error`. В `api-egress-initial.json` сохранены:
+
+| Запрос | Итог | Лестница provider/status/challenge/elapsed_ms/next_step | API elapsed, мс |
+|---|---|---|---|
+| anchor, direct → ms1 | `ok=true`, `none` | `curl_cffi/200/none/167/change_egress` → `curl_cffi/200/none/184/stop` | 1847 |
+| required_success, direct → ms2 | `ok=true`, `none` | `curl_cffi/200/none/238/change_egress` → `curl_cffi/200/none/189/stop` | 1888 |
+| intermediate, direct → ms3 | `ok=false`, `content_missing` | `curl_cffi/200/none/157/change_egress` → `curl_cffi/200/none/200/human` | 1856 |
+
+`ms3` во время API-запроса уже вернул 200, но ожидаемый текст промежуточной
+проверки отсутствовал. Следующий запрос (ожидался `ms4`) не сохранён:
+runner скрыл причину ошибки worker и не записал его ответ. `rotation_proven`
+отсутствует. По доступным уликам нельзя назвать этот сбой честным внешним
+отказом или дефектом детектора. API остался healthy, контейнеры без
+перезапусков, журнал API пуст (`rotation-failure-diagnostics.json`).
+Повторы ради успешного исхода не выполнялись, runner и код не менялись.
+
+Выкладка работает на новом release, но **приёмка M16c заблокирована AC-954**.
+Обязательные условия отката (`up`/AC-952, AC-956, ложная captcha на HTTP 200)
+не сработали; сервис оставлен на `db4fc359171c304470d7edae3d60cb13394e7881`.
+Для закрытия сбоя нужна отдельная разрешённая диагностика с сохранением
+причины ошибки worker; в рамках этой вехи оснастку менять запрещено.
