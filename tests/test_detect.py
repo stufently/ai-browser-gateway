@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import time
 import unittest
 from pathlib import Path
 
@@ -499,6 +500,256 @@ class DetectChallengeTests(unittest.TestCase):
                                 "body_captcha_interactive"),
                 ))
 
+    def test_render_key_inside_fragment_is_not_a_query_parameter(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js#frag?render=KEY"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
+    def test_semicolon_does_not_split_render_query(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js?render=explicit;foo=1"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "none", ("body_cf_challenge_platform", "body_captcha"),
+        ))
+
+    def test_render_parameter_name_is_case_sensitive(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js?RENDER=KEY"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
+    def test_render_value_preserves_surrounding_spaces(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for value in (' explicit', 'explicit &foo=1', 'explicit #frag'):
+            with self.subTest(value=value):
+                body = cf + f'<script src="recaptcha/api.js?render={value}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+        body = cf + '<script src="recaptcha/api.js?render=explicit "></script>'
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
+    def test_script_src_removes_tabs_and_newlines(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for src in ('recaptcha/api.js?render=explicit\n',
+                    'recaptcha/api.js?render=exp\tlicit',
+                    'recaptcha/\rapi.js?render=explicit',
+                    '\t recaptcha/api.js?render=explicit \r\n'):
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
+    def test_script_src_trims_c0_and_space_at_edges(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for codepoint in range(0x01, 0x21):
+            char = chr(codepoint)
+            for src in (f'{char}recaptcha/api.js?render=explicit',
+                        f'recaptcha/api.js?render=explicit{char}'):
+                with self.subTest(src=src):
+                    body = cf + f'<script src="{src}"></script>'
+                    self.assertEqual(self.detect(200, {}, body), (
+                        "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                    "body_captcha_interactive"),
+                    ))
+
+    def test_script_src_replaces_nul_before_url_cleanup(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for src in ('recaptcha/api.js?render=explicit\x00',
+                    '\x00recaptcha/api.js?render=explicit',
+                    'recaptcha/api.js?render=explicit\x00 \t\n'):
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_script_src_normalizes_backslashes(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for src in (r'recaptcha\api.js?render=explicit',
+                    r'https:\\www.google.com\recaptcha\api.js?render=explicit'):
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
+    def test_script_src_internal_spaces_parse_within_time_budget(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js?render=' + ' ' * 32000 + 'KEY"></script>'
+        )
+        started = time.perf_counter()
+        result = self.detect(200, {}, body)
+        elapsed = time.perf_counter() - started
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual(result, (
+            "none", ("body_cf_challenge_platform", "body_captcha"),
+        ))
+
+    def test_script_src_preserves_non_url_whitespace(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for value in ('explicit\x7f', 'explicit\u00a0', 'explicit\u2003',
+                      'exp\x00licit', 'exp\x0blicit', 'exp licit'):
+            with self.subTest(value=value):
+                body = cf + f'<script src="recaptcha/api.js?render={value}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_non_special_script_src_preserves_backslashes(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for src in (
+            r'data:text/javascript,//recaptcha\api.js?render=explicit',
+            r'blob:https://e/recaptcha\api.js?render=explicit',
+            r'javascript://recaptcha\api.js?render=explicit',
+            r'custom+v1.2-test://recaptcha\api.js?render=explicit',
+            ' \t\nDATA:text/javascript,//recaptcha\\api.js?render=explicit\r ',
+            'da\tta:text/javascript,//recaptcha\\api.js?render=explicit',
+        ):
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_special_and_relative_script_src_normalizes_backslashes(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        sources = [r'recaptcha\api.js?render=explicit']
+        for scheme in ('http', 'https', 'ws', 'wss', 'ftp', 'file', 'HTTPS'):
+            sources.append(scheme + r':\\www.google.com\recaptcha\api.js?render=explicit')
+        sources.extend((
+            ' \tHTTPS:\\\\www.google.com\\recaptcha\\api.js?render=explicit\r ',
+            r'./data:folder/recaptcha\api.js?render=explicit',
+            r'1custom://recaptcha\api.js?render=explicit',
+        ))
+        for src in sources:
+            with self.subTest(src=src):
+                body = cf + f'<script src="{src}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
+    def test_duplicate_class_uses_first_attribute(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for attrs in ('class="foo" class="g-recaptcha"',
+                      'CLASS="foo" class="g-recaptcha"',
+                      'class class="g-recaptcha"',
+                      'class="g-recaptcha\x00" class="g-recaptcha"'):
+            with self.subTest(attrs=attrs):
+                body = cf + f'<div {attrs}></div>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+                self.assertEqual(self.detect(403, {}, f'<div {attrs}></div>'), (
+                    "access_denied", ("body_captcha", "status_403"),
+                ))
+
+    def test_duplicate_class_keeps_first_widget(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<div class="g-recaptcha" class="foo"></div>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
+    def test_duplicate_src_uses_first_attribute(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for first in ('src="one.js"', 'SRC="one.js"', 'src'):
+            with self.subTest(first=first):
+                body = cf + f'<script {first} src="recaptcha/api.js?render=explicit"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_duplicate_src_keeps_first_widget(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js?render=explicit" src="one.js"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
+    def test_recaptcha_path_rejects_prefixed_names(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for path in ('xrecaptcha/api.js', 'not-recaptcha/api.js', 'grecaptcha/api.js'):
+            with self.subTest(path=path):
+                body = cf + f'<script src="{path}?render=explicit"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_iframe_src_is_not_an_interactive_script(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<iframe src="recaptcha/api.js?render=explicit"></iframe>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "none", ("body_cf_challenge_platform", "body_captcha"),
+        ))
+
+    def test_sitekey_is_interactive_on_any_tag(self):
+        for tag in ('span', 'input', 'button', 'p', 'section', 'img'):
+            with self.subTest(tag=tag):
+                body = f'<{tag} data-sitekey="k">'
+                if tag not in ('input', 'img'):
+                    body += f'</{tag}>'
+                self.assertEqual(self.detect(403, {}, body), (
+                    "captcha", ("body_captcha_interactive",),
+                ))
+
+    def test_widget_class_tokens_split_on_ascii_whitespace(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for whitespace in (' ', '\t', '\n', '\f', '\r'):
+            with self.subTest(whitespace=whitespace):
+                body = cf + f'<div class="g-recaptcha{whitespace}foo"></div>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
+    def test_widget_class_keeps_non_ascii_whitespace_in_token(self):
+        for whitespace in ('\u00a0', '\x0b'):
+            with self.subTest(whitespace=whitespace):
+                body = f'<div class="g-recaptcha{whitespace}foo"></div>'
+                self.assertEqual(self.detect(403, {}, body), (
+                    "access_denied", ("body_captcha", "status_403"),
+                ))
+
+    def test_widget_class_nul_does_not_form_widget_token(self):
+        body = '<div class="g-recaptcha\x00 foo"></div>'
+        self.assertEqual(self.detect(403, {}, body), (
+            "access_denied", ("body_captcha", "status_403"),
+        ))
+
+    def test_boolean_class_preserves_access_denied_verdict(self):
+        body = '<div class></div>'
+        self.assertEqual(self.detect(403, {}, body), (
+            "access_denied", ("status_403",),
+        ))
+
     def test_render_substring_is_not_a_render_parameter(self):
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
         for query in ('onload=render', 'hl=render', 'rendering=KEY', 'foo=renderer'):
@@ -564,6 +815,14 @@ class CharacterReferenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.probe = load_probe()
+
+    def test_ampersand_without_hash_is_not_a_numeric_reference(self):
+        self.assertEqual(self.probe._title("<title>&65;6</title>"), "&65;6")
+        self.assertEqual(self.probe.html_to_text("<p>&65;</p>"), " &65; ")
+
+    def test_empty_numeric_reference_is_preserved(self):
+        self.assertEqual(self.probe._title("<title>L&#;R</title>"), "L&#;R")
+        self.assertEqual(self.probe.html_to_text("<p>&#;</p>"), " &#; ")
 
     def test_title_reference_semicolon_separates_following_digit(self):
         self.assertEqual(self.probe._title("<title>&#65;6</title>"), "A6")
