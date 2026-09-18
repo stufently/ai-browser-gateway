@@ -2,6 +2,15 @@
 
 ## 2026-09-18
 
+### Добавлено
+
+- **Выкладка M16b на stand-host:** сервис на release `ae72bfe` (образ
+  `abg-runtime:ae72bfe1bae9`); откат на `58d3b73` сохранён, конфиг до выкладки
+  лежит в `compose.env.pre-m16b`. На боевом API lowendtalk.com теперь
+  `ok=true`, `curl_cffi`, `challenge=none`, 213 мс, `step=stop` — до выкладки
+  та же страница давала `ok=false`, `interactive_challenge`, `step=human`.
+  Шесть целей и bizprofile повторили матрицу M15b без сдвигов.
+
 ### Исправлено
 
 - **Ложная `captcha` на честном HTTP 200 (M16a):** детектор объявлял captcha по
