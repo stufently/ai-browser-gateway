@@ -80,6 +80,22 @@ MUTANTS = (
         "test": "tests.test_gateway_format.FormatTests.test_markdown_reference_semicolon_separates_following_digit",
         "assert": "self.assertEqual(render_content(obj, 'markdown'), 'A6')",
     },
+    {
+        "name": "formatter requires hash in numeric reference",
+        "path": "gateway/format_html.py",
+        "old": '_DECIMAL_CHARREF = re.compile(r"&#([0-9]+)(;?)")',
+        "new": '_DECIMAL_CHARREF = re.compile(r"&#?([0-9]+)(;?)")',
+        "test": "tests.test_gateway_format.FormatTests.test_markdown_escapes_ampersand_without_hash",
+        "assert": "self.assertEqual(render_content(obj, 'markdown'), r'\\&65;6')",
+    },
+    {
+        "name": "formatter preserves empty numeric reference",
+        "path": "gateway/format_html.py",
+        "old": 'return _DECIMAL_CHARREF.sub(replace, text)',
+        "new": 'return _DECIMAL_CHARREF.sub(replace, text).replace("&#;", "\\ufffd")',
+        "test": "tests.test_gateway_format.FormatTests.test_markdown_escapes_empty_numeric_reference",
+        "assert": "self.assertEqual(render_content(obj, 'markdown'), r'\\&\\#;')",
+    },
 )
 
 

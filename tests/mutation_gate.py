@@ -950,6 +950,103 @@ MUTANTS = [
         "test": "tests.test_detect.CharacterReferenceTests.test_title_replaces_all_oversized_references",
         "assert": 'self.assertEqual(self.probe._title(body), "\\ufffdX\\ufffd")',
     },
+    # M16a-fix6: one designated test for each detector hole, in spec order.
+    {
+        "name": "125",
+        "file": "bench/providers/docker/probe.py",
+        "old": (
+            '                src = (attributes.get("src") or "").partition("#")[0]\n'
+            '                path, _, query = src.partition("?")\n'
+        ),
+        "new": (
+            '                src = attributes.get("src") or ""\n'
+            '                path, _, query = src.partition("?")\n'
+            '                path = path.partition("#")[0]\n'
+            '                query = query.partition("#")[0]\n'
+        ),
+        "test": "tests.test_detect.DetectChallengeTests.test_render_key_inside_fragment_is_not_a_query_parameter",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    {
+        "name": "126",
+        "file": "bench/providers/docker/probe.py",
+        "old": '                    part.partition("=")[2] for part in query.split("&")\n',
+        "new": '                    part.partition("=")[2] for part in re.split("[&;]", query)\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_semicolon_does_not_split_render_query",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    {
+        "name": "127",
+        "file": "bench/providers/docker/probe.py",
+        "old": '                    if part.startswith("render=")\n',
+        "new": '                    if part.lower().startswith("render=")\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_render_parameter_name_is_case_sensitive",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    {
+        "name": "128",
+        "file": "bench/providers/docker/probe.py",
+        "old": '                    part.partition("=")[2] for part in query.split("&")\n',
+        "new": '                    part.partition("=")[2].strip() for part in query.split("&")\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_render_value_preserves_surrounding_spaces",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    {
+        "name": "129",
+        "file": "bench/providers/docker/probe.py",
+        "old": '                if (path == "recaptcha/api.js" or path.endswith("/recaptcha/api.js")) and (\n',
+        "new": '                if path.endswith("recaptcha/api.js") and (\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_recaptcha_path_rejects_prefixed_names",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    {
+        "name": "130",
+        "file": "bench/providers/docker/probe.py",
+        "old": '            if tag == "script":\n',
+        "new": '            if tag in ("script", "iframe"):\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_iframe_src_is_not_an_interactive_script",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    {
+        "name": "131",
+        "file": "bench/providers/docker/probe.py",
+        "old": '            if "data-sitekey" in attributes or _CAPTCHA_WIDGET_CLASSES.intersection(classes):\n',
+        "new": '            if (tag in ("div", "script") and "data-sitekey" in attributes) or _CAPTCHA_WIDGET_CLASSES.intersection(classes):\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_sitekey_is_interactive_on_any_tag",
+        "assert": "self.assertEqual(self.detect(403, {}, body), (",
+    },
+    {
+        "name": "132",
+        "file": "bench/providers/docker/probe.py",
+        "old": '            classes = (attributes.get("class") or "").split()\n',
+        "new": '            classes = (attributes.get("class") or "").split(" ")\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_widget_class_tokens_split_on_all_whitespace",
+        "assert": "self.assertEqual(self.detect(200, {}, body), (",
+    },
+    {
+        "name": "133",
+        "file": "bench/providers/docker/probe.py",
+        "old": '            classes = (attributes.get("class") or "").split()\n',
+        "new": '            classes = attributes.get("class", "").split()\n',
+        "test": "tests.test_detect.DetectChallengeTests.test_boolean_class_preserves_access_denied_verdict",
+        "assert": "self.assertEqual(self.detect(403, {}, body), (",
+    },
+    {
+        "name": "134",
+        "file": "bench/providers/docker/probe.py",
+        "old": '_DECIMAL_CHARREF = re.compile(r"&#([0-9]+)(;?)")\n',
+        "new": '_DECIMAL_CHARREF = re.compile(r"&#?([0-9]+)(;?)")\n',
+        "test": "tests.test_detect.CharacterReferenceTests.test_ampersand_without_hash_is_not_a_numeric_reference",
+        "assert": 'self.assertEqual(self.probe._title("<title>&65;6</title>"), "&65;6")',
+    },
+    {
+        "name": "135",
+        "file": "bench/providers/docker/probe.py",
+        "old": '    return _DECIMAL_CHARREF.sub(replace, text)\n',
+        "new": '    return _DECIMAL_CHARREF.sub(replace, text).replace("&#;", "\\ufffd")\n',
+        "test": "tests.test_detect.CharacterReferenceTests.test_empty_numeric_reference_is_preserved",
+        "assert": 'self.assertEqual(self.probe._title("<title>L&#;R</title>"), "L&#;R")',
+    },
 ]
 
 

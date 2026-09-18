@@ -6,6 +6,22 @@ from gateway.models import GatewayOutcome
 
 
 class FormatTests(unittest.TestCase):
+    def test_markdown_escapes_ampersand_without_hash(self):
+        from gateway.format import render_content
+        obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', '<p>&65;6</p>',
+                             'plain', 'curl', None, F.none, Step.stop, (), 0)
+        self.assertEqual(render_content(obj, 'markdown'), r'\&65;6')
+        obj = replace(obj, html='<p>&65;</p>')
+        self.assertEqual(render_content(obj, 'markdown'), r'\&65;')
+
+    def test_markdown_escapes_empty_numeric_reference(self):
+        from gateway.format import render_content
+        obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', '<p>&#;</p>',
+                             'plain', 'curl', None, F.none, Step.stop, (), 0)
+        self.assertEqual(render_content(obj, 'markdown'), r'\&\#;')
+        obj = replace(obj, html='<p>L&#;R</p>')
+        self.assertEqual(render_content(obj, 'markdown'), r'L\&\#;R')
+
     def test_markdown_reference_semicolon_separates_following_digit(self):
         from gateway.format import render_content
         obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', '<p>&#65;6</p>',

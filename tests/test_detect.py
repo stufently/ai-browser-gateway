@@ -499,6 +499,88 @@ class DetectChallengeTests(unittest.TestCase):
                                 "body_captcha_interactive"),
                 ))
 
+    def test_render_key_inside_fragment_is_not_a_query_parameter(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js#frag?render=KEY"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
+    def test_semicolon_does_not_split_render_query(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js?render=explicit;foo=1"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "none", ("body_cf_challenge_platform", "body_captcha"),
+        ))
+
+    def test_render_parameter_name_is_case_sensitive(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="recaptcha/api.js?RENDER=KEY"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "captcha", ("body_cf_challenge_platform", "body_captcha",
+                        "body_captcha_interactive"),
+        ))
+
+    def test_render_value_preserves_surrounding_spaces(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for value in (' explicit', 'explicit '):
+            with self.subTest(value=value):
+                body = cf + f'<script src="recaptcha/api.js?render={value}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_recaptcha_path_rejects_prefixed_names(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for path in ('xrecaptcha/api.js', 'not-recaptcha/api.js', 'grecaptcha/api.js'):
+            with self.subTest(path=path):
+                body = cf + f'<script src="{path}?render=explicit"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_iframe_src_is_not_an_interactive_script(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<iframe src="recaptcha/api.js?render=explicit"></iframe>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "none", ("body_cf_challenge_platform", "body_captcha"),
+        ))
+
+    def test_sitekey_is_interactive_on_any_tag(self):
+        for tag in ('span', 'input', 'button', 'p', 'section', 'img'):
+            with self.subTest(tag=tag):
+                body = f'<{tag} data-sitekey="k">'
+                if tag not in ('input', 'img'):
+                    body += f'</{tag}>'
+                self.assertEqual(self.detect(403, {}, body), (
+                    "captcha", ("body_captcha_interactive",),
+                ))
+
+    def test_widget_class_tokens_split_on_all_whitespace(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for whitespace in ('\t', '\n', '\r'):
+            with self.subTest(whitespace=whitespace):
+                body = cf + f'<div class="g-recaptcha{whitespace}foo"></div>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
+    def test_boolean_class_preserves_access_denied_verdict(self):
+        body = '<div class></div>'
+        self.assertEqual(self.detect(403, {}, body), (
+            "access_denied", ("status_403",),
+        ))
+
     def test_render_substring_is_not_a_render_parameter(self):
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
         for query in ('onload=render', 'hl=render', 'rendering=KEY', 'foo=renderer'):
@@ -564,6 +646,14 @@ class CharacterReferenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.probe = load_probe()
+
+    def test_ampersand_without_hash_is_not_a_numeric_reference(self):
+        self.assertEqual(self.probe._title("<title>&65;6</title>"), "&65;6")
+        self.assertEqual(self.probe.html_to_text("<p>&65;</p>"), " &65; ")
+
+    def test_empty_numeric_reference_is_preserved(self):
+        self.assertEqual(self.probe._title("<title>L&#;R</title>"), "L&#;R")
+        self.assertEqual(self.probe.html_to_text("<p>&#;</p>"), " &#; ")
 
     def test_title_reference_semicolon_separates_following_digit(self):
         self.assertEqual(self.probe._title("<title>&#65;6</title>"), "A6")
