@@ -189,8 +189,10 @@ Stand-host runs release `db4fc359171c304470d7edae3d60cb13394e7881`
 under `/home/user/services/ai-browser-gateway`, with the API published at
 `127.0.0.1:8765`. Measured outcomes and image identity:
 [M16c deployment results](docs/research/04-phase1-verdict.md#после-выкладки-m16c).
-Deployment and target checks passed; M16c acceptance remains blocked by
-AC-954 (`worker_internal_error` during API egress rotation).
+Deployment and target checks passed. The executor's AC-954 run hit
+`worker_internal_error` — a failure of the check harness itself, not of the
+gateway; the coordinator reran the same egress-rotation check on this release
+and it passed.
 The [M12b report](docs/research/07-deployed-service.md) retains the original
 profile-pool and target measurements.
 
