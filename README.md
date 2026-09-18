@@ -185,10 +185,10 @@ shutdown removes running providers while draining and finishes sooner.
 
 ## M12b deployed service
 
-Stand-host runs release `58d3b738a808af71ebed84df261e87754747ee0a`
+Stand-host runs release `ae72bfe1bae927a0297edfa273632df14ac89689`
 under `/home/user/services/ai-browser-gateway`, with the API published at
 `127.0.0.1:8765`. Measured outcomes and image identity:
-[M15b deployment results](docs/research/04-phase1-verdict.md#после-выкладки-m15b).
+[M16b deployment results](docs/research/04-phase1-verdict.md#после-выкладки-m16b).
 The [M12b report](docs/research/07-deployed-service.md) retains the original
 profile-pool and target measurements.
 
@@ -196,7 +196,7 @@ Start or stop the service using its explicit configuration:
 
 ```bash
 service_root=/home/user/services/ai-browser-gateway
-release_sha=58d3b738a808af71ebed84df261e87754747ee0a
+release_sha=ae72bfe1bae927a0297edfa273632df14ac89689
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
@@ -217,21 +217,21 @@ The client reads `~/.config/abg/client-token`, a symlink to `secrets/token`:
 scripts/abg-fetch https://example.com/ text
 ```
 
-The retained rollback release is `b31a36b10f57a21e4d2703e9de770e731d06950e`,
-with image `abg-runtime:b31a36b10f57`. M15b preserves all three earlier releases
-(`b31a36b…`, `4409f8a…` and `929bded…`), their manifests and images, and
-`compose.env.pre-m13c` / `compose.env.pre-m14b`.
-The configuration before M15b is saved as `compose.env.pre-m15b`
+The retained rollback release is `58d3b738a808af71ebed84df261e87754747ee0a`,
+with image `abg-runtime:58d3b738a808`. M16b preserves all four earlier releases
+(`58d3b73…`, `b31a36b…`, `4409f8a…` and `929bded…`), their manifests and images,
+and `compose.env.pre-m13c` / `compose.env.pre-m14b` / `compose.env.pre-m15b`.
+The configuration before M16b is saved as `compose.env.pre-m16b`
 (mode `0600`, never overwritten). Restore that file byte for byte to roll back:
 
 ```bash
-cp "$service_root/compose.env.pre-m15b" "$service_root/compose.env"
-rollback_sha=b31a36b10f57a21e4d2703e9de770e731d06950e
+cp "$service_root/compose.env.pre-m16b" "$service_root/compose.env"
+rollback_sha=58d3b738a808af71ebed84df261e87754747ee0a
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$rollback_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
 python3 tests/deployed_m12b.py --check-deploy --release "$rollback_sha" \
-  --evidence /home/user/.cache/abg-coord-20260917/m15b-rollback
+  --evidence /home/user/.cache/abg-coord-20260918/m16b-rollback
 ```
 
 Clearing these two variables prevents earlier shell exports from overriding
@@ -244,10 +244,10 @@ docker build -t "abg-runtime:${release_sha:0:12}" \
   -f "$service_root/releases/$release_sha/deploy/Dockerfile" "$service_root/releases/$release_sha"
 ```
 
-For M15b, run these checks sequentially from the clone, with no other API clients:
+For M16b, run these checks sequentially from the clone, with no other API clients:
 
 ```bash
-evidence=/home/user/.cache/abg-coord-20260917/m15b
+evidence=/home/user/.cache/abg-coord-20260918/m16b
 python3 tests/deployed_m12b.py --check-deploy --release "$release_sha" --evidence "$evidence"
 python3 tests/deployed_m12b.py --check-profiles --release "$release_sha" --evidence "$evidence"
 python3 tests/deployed_m12b.py --check-api-egress --release "$release_sha" --evidence "$evidence"
@@ -274,3 +274,11 @@ Run the API rotation and target checks with no other API clients. Refusals in
 the six-target matrix are recorded as outcomes; Docker/API transport failures
 fail the check. Healthchecks history and automatic failure/recovery verification
 remain the coordinator's checks.
+
+M16b also includes the M16a-fix4 numeric-entity fix for `markdown`, `links`
+and `meta`. Its hostile-page regression was checked on the coordinator's
+staging service before deployment; no synthetic page is injected into production.
+The single additional M16b request to `https://lowendtalk.com/` omits
+`expected_text`; its full response is retained as `lowendtalk.json` in the
+M16b evidence directory. Keep that measurement separate from the target matrix,
+which supplies expected text, and do not repeat it during acceptance.

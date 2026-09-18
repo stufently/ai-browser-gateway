@@ -370,3 +370,91 @@ body-меток по-прежнему определяют вердикт ран
 а не документированный контракт. Координатор воспроизвёл таблицу на
 прототипе 18.09.2026; полнота распознавания реальных интерактивных виджетов
 и результат в продукте проверяются после выкладки M16b.
+
+### После выкладки M16b
+
+18.09.2026 на stand-host развёрнут release
+`ae72bfe1bae927a0297edfa273632df14ac89689`, образ `abg-runtime:ae72bfe1bae9`,
+image ID `sha256:ada25963a6592dab44996b00c8fa9d5495631a00d2c920d73252765a64190b43`.
+AC-942 подтвердил healthy API, соответствие release/образа и стабильный монитор.
+Непосредственный откат — `58d3b738a808af71ebed84df261e87754747ee0a`;
+исходный `compose.env` сохранён байт-в-байт в `compose.env.pre-m16b` (0600).
+Четыре прежних release, их manifests и образы, прежние копии конфигурации
+сохранены. Провайдерский `abg-curl_cffi:m2` не пересобирался: новый
+`bench/providers/docker/probe.py` подключается из каталога release.
+
+В этот же release входит правка продуктового форматтера **M16a-fix4**:
+гигантские десятичные числовые ссылки больше не обрывают `markdown`, `links`
+и `meta` с HTTP 500. Проверку 500 → 200 для этих трёх форматов координатор
+выполнил на стенде до выкладки; на production враждебную страницу не
+подкладывали и отдельную живую проверку форматтера не выполняли.
+
+Улики первого прогона: `/home/user/.cache/abg-coord-20260918/m16b/`.
+Таблица взята из `targets.json` (точная сохранённая копия —
+`targets-initial.json`) и неизменяемого архива `bizprofile-20260918T090728Z.json`.
+`deploy-initial.json`, `profiles-initial.json`, `api-egress-initial.json`
+сохраняют исходные измерения перед повтором машинной приёмки.
+Ступени: **provider/status/challenge/elapsed_ms/next_step**;
+все попытки восьми строк ниже — `egress_profile=direct`.
+Полное время API включает запуск и уборку контейнеров и не равно сумме
+времён провайдеров.
+
+| Цель / страница | Провайдер успеха | Лестница попыток | API elapsed, мс |
+|---|---|---|---|
+| control-hqd | `curl_cffi` | `curl_cffi/200/none/344/stop` | 1190 |
+| control-static | `curl_cffi` | `curl_cffi/200/none/174/stop` | 919 |
+| cf-lowendtalk | `curl_cffi` | `curl_cffi/200/none/212/stop` | 1036 |
+| cf-bizprofile | `scrapling` | `curl_cffi/403/suspected/179/browser` → `patchright/403/suspected/1135/browser` → `scrapling/200/none/15865/stop` | 20577 |
+| cf-spa-chatgpt-share | `curl_cffi` | `curl_cffi/200/none/1422/stop` | 2759 |
+| login-instagram | `patchright` | `curl_cffi/200/none/1155/browser` → `patchright/200/none/2573/stop` | 5639 |
+| bizprofile главная (без expected_text) | `scrapling` | `curl_cffi/403/suspected/176/browser` → `patchright/403/suspected/1271/browser` → `scrapling/200/none/17600/stop` | 22404 |
+| bizprofile Elevate Electric LLC (без expected_text) | `scrapling` | `curl_cffi/403/suspected/184/browser` → `patchright/403/suspected/1237/browser` → `scrapling/200/none/17135/stop` | 21703 |
+
+Матрица — **6/6**, CLI: rc=0, `Example Domain` найден. Обе страницы bizprofile
+без `expected_text` прошли через Scrapling: локальные маркеры найдены,
+последние попытки имеют `success=true`, `challenge=none`, `error_type=none`.
+Все шесть лестниц начинаются с `curl_cffi/direct`.
+AC-944 подтвердил 15 уникальных рабочих egress-профилей, отличных от direct,
+HTTP 407 без авторизации и ротацию API `ms1 → ms2 → ms3`.
+
+**LowEndTalk без expected_text — до и после.** Отдельный запрос к
+`https://lowendtalk.com/` выполнен ровно один раз через deployed API,
+с `format=text`, `budget_ms=120000`, `allow_browser=true`, `max_age_hours=0`;
+ключ `expected_text` отсутствовал. Полный ответ — `lowendtalk.json`,
+параметры — `lowendtalk-request.json`, HTTP-статус API — `lowendtalk-http.json`.
+Это отдельное измерение от строки `cf-lowendtalk` матрицы с ожидаемым текстом.
+
+| Замер | Итог | Лестница provider/status/challenge/elapsed_ms/next_step | API elapsed, мс |
+|---|---|---|---|
+| До: координатор, 18.09, `58d3b73…` | `ok=false`, `interactive_challenge`, `step=human` | `curl_cffi/не указан/captcha/275/human` | не указан |
+| После: M16b | `ok=true`, `error_type=none`, `step=stop` | `curl_cffi/200/none/213/stop` | 1110 |
+
+В исходном замере координатора из спецификации HTTP-статус попытки и полное
+время API не приведены; 275 мс — время единственной попытки. До фикса
+лестница останавливалась сразу и браузер не пробовала. После фикса первая
+попытка вернула HTTP 200 с `challenge=none`, результат принят без браузера;
+сочетания `captcha` + `next_step=human` в ответе нет (AC-946).
+Это подтверждение исчезновения ложной captcha на данном живом ответе,
+а не проверка всех видов интерактивных челленджей.
+
+**Сравнение матрицы с M15b.** База —
+`/home/user/.cache/abg-coord-20260917/m15b/targets.json`, точная копия —
+`m16b/m15b-targets-baseline.json`. Это последний сохранённый прогон M15b,
+а не его первоначальная таблица выше.
+
+| Цель | M15b: исход / API мс | M16b: исход / API мс | Изменение времени, мс |
+|---|---|---|---|
+| control-hqd | `curl_cffi` / 1163 | `curl_cffi` / 1190 | +27 |
+| control-static | `curl_cffi` / 932 | `curl_cffi` / 919 | -13 |
+| cf-lowendtalk | `curl_cffi` / 1105 | `curl_cffi` / 1036 | -69 |
+| cf-bizprofile | `scrapling` / 23974 | `scrapling` / 20577 | -3397 |
+| cf-spa-chatgpt-share | `curl_cffi` / 2829 | `curl_cffi` / 2759 | -70 |
+| login-instagram | `patchright` / 5356 | `patchright` / 5639 | +283 |
+
+Все шесть успешных исходов и провайдеры успеха сохранились.
+У `cf-lowendtalk` прежняя метка `captcha` сменилась на `none`; в M15b
+страница принималась только благодаря совпавшему `expected_text`.
+В выбранной базе M15b ChatGPT share уже проходил через `curl_cffi`;
+HTTP-таймаут с переходом к браузеру из первоначального прогона M15b здесь не повторялся.
+Разница времени — наблюдение единичных прогонов, не статистическая оценка
+ускорения. Честных внешних отказов в первом прогоне M16b не было.
