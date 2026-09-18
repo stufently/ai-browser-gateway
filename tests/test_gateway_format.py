@@ -6,6 +6,12 @@ from gateway.models import GatewayOutcome
 
 
 class FormatTests(unittest.TestCase):
+    def test_markdown_reference_semicolon_separates_following_digit(self):
+        from gateway.format import render_content
+        obj = GatewayOutcome(True, 'https://a/x', 'https://a/x', '<p>&#65;6</p>',
+                             'plain', 'curl', None, F.none, Step.stop, (), 0)
+        self.assertEqual(render_content(obj, 'markdown'), 'A6')
+
     def test_markdown_oversized_decimal_reference(self):
         from gateway.format import render_content
         html = '<p>L&#' + '9' * 5000 + 'R</p>'

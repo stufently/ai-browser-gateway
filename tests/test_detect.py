@@ -455,6 +455,60 @@ class DetectChallengeTests(unittest.TestCase):
             with self.subTest(status=status, headers=headers):
                 self.assertEqual(self.detect(status, headers, bad), expected)
 
+    def test_widget_class_tokens_are_case_sensitive(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        body = cf + '<div class="G-reCAPTCHA"></div>'
+        self.assertEqual(self.detect(200, {}, body), (
+            "none", ("body_cf_challenge_platform", "body_captcha"),
+        ))
+
+    def test_widget_parser_preserves_attribute_value_case(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<div class="G-reCAPTCHA"></div>'
+            '<script src="https://www.google.com/recaptcha/api.js?render=EXPLICIT"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "none", ("body_cf_challenge_platform", "body_captcha"),
+        ))
+
+    def test_explicit_render_value_is_case_sensitive(self):
+        body = (
+            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src="https://www.google.com/recaptcha/api.js?render=EXPLICIT"></script>'
+        )
+        self.assertEqual(self.detect(200, {}, body), (
+            "none", ("body_cf_challenge_platform", "body_captcha"),
+        ))
+
+    def test_empty_or_valueless_sitekey_is_interactive(self):
+        for attribute in ('data-sitekey=""', 'data-sitekey'):
+            with self.subTest(attribute=attribute):
+                body = f'<div {attribute}></div>'
+                self.assertEqual(self.detect(403, {}, body), (
+                    "captcha", ("body_captcha_interactive",),
+                ))
+
+    def test_script_fragment_is_removed_before_render_query(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for suffix in ('#frag?render=explicit', '?render=explicit#frag'):
+            with self.subTest(suffix=suffix):
+                body = cf + f'<script src="recaptcha/api.js{suffix}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
+    def test_render_substring_is_not_a_render_parameter(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for query in ('onload=render', 'hl=render', 'rendering=KEY', 'foo=renderer'):
+            with self.subTest(query=query):
+                body = cf + f'<script src="recaptcha/api.js?{query}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha",
+                                "body_captcha_interactive"),
+                ))
+
     def test_template_widgets_with_cf_are_not_interactive(self):
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
         for widget in (
@@ -506,14 +560,36 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class CharacterReferenceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.probe = load_probe()
+
+    def test_title_reference_semicolon_separates_following_digit(self):
+        self.assertEqual(self.probe._title("<title>&#65;6</title>"), "A6")
+
+    def test_text_reference_semicolon_separates_following_digit(self):
+        self.assertEqual(self.probe.html_to_text("<p>&#65;6</p>"), " A6 ")
+
+    def test_title_replaces_all_oversized_references(self):
+        references = "&#" + "9" * 5000 + ";X&#" + "9" * 5000 + ";"
+        body = "<title>" + references + "</title>"
+        self.assertEqual(self.probe._title(body), "\ufffdX\ufffd")
+
+    def test_text_replaces_all_oversized_references(self):
+        body = "&#" + "9" * 5000 + ";X&#" + "9" * 5000 + ";"
+        self.assertEqual(self.probe.html_to_text(body), "\ufffdX\ufffd")
+
+    def test_widget_after_multiple_oversized_references_is_recognized(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        widget = '<div data-sitekey="k"></div>'
+        references = "&#" + "9" * 5000 + ";X&#" + "9" * 5000 + ";"
+        for fragment in (references, '<div title="' + references + '"></div>'):
+            with self.subTest(attribute=fragment.startswith("<")):
+                body = cf + fragment + widget
+                self.assertEqual(self.probe.detect_challenge(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha_interactive"),
+                ))
 
     def test_widget_after_oversized_reference_is_recognized(self):
         cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
@@ -699,3 +775,7 @@ class DecisiveTitleTests(unittest.TestCase):
         body = "<html><head><!-- <title>Ghost</title> --><title>Real</title></head></html>"
         self.assertEqual(self.probe._title(body), "Ghost")
         self.assertEqual(self.probe._decisive_title(body), "Real")
+
+
+if __name__ == "__main__":
+    unittest.main()
