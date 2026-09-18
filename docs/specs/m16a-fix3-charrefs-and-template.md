@@ -56,13 +56,27 @@ data-sitekey="k"></div></template>` на 200 даёт ложную `captcha` и 
    вне диапазона Unicode, заменяется на символ замены U+FFFD (`"\ufffd"`). Так же поступает и
    стандарт HTML с out-of-range ссылкой, так что это не эвристика, а
    приведение к спецификации.
-   - Точка отсчёта «заведомо вне диапазона»: значащих (без ведущих нулей)
-     десятичных цифр 8 и больше либо шестнадцатеричных 7 и больше. Максимальный
-     кодпойнт `0x10FFFF` = 1114111 — семь десятичных, шесть шестнадцатеричных
-     цифр, он и всё меньшее обязаны проходить НЕТРОНУТЫМИ.
+   - **Помощник трогает ТОЛЬКО десятичные ссылки `&#<цифры>`.** Лимит в 4300
+     цифр действует лишь для оснований, не являющихся степенью двойки:
+     `int(s, 16)` его не знает, и координатор проверил — `&#x` с пятью тысячами
+     `f` НЕ бросает, `html.unescape` сам отдаёт U+FFFD за 0.1 мс. Шестнадцатеричной
+     ветки в помощнике быть НЕ должно: она не меняет поведение, и мутант,
+     снимающий её, окажется неубиваемым.
+   - **Лимит считает ВСЮ строку цифр, включая ведущие нули** (замер
+     координатора 18.09.2026: `int("0"*4299 + "65")` уже бросает). Поэтому
+     критерий «значащих цифр» недостаточен, и помощник обязан ещё и
+     НОРМАЛИЗОВАТЬ ссылку. Правило целиком:
+     - взять цифры ссылки, снять ведущие нули (всё из нулей → `0`);
+     - если осталось 8 цифр и больше — значение заведомо больше `0x10FFFF`
+       (1114111, семь цифр), ссылка заменяется на U+FFFD;
+     - иначе ссылка заменяется на себя же БЕЗ ведущих нулей: `&#0000065;` →
+       `&#65;`. Смысл не меняется, а `unescape` больше не видит длинной строки.
+     Семизначные значения вне диапазона (1114112…9999999) специально НЕ
+     трогаем: `int()` их переваривает, а `unescape` сам отдаёт U+FFFD.
    - Завершающая `;` НЕОБЯЗАТЕЛЬНА: `html.unescape` разбирает и `&#999…9` без
      неё (регулярка стандартной библиотеки — `&(#[0-9]+;?|#[xX][0-9a-fA-F]+;?|…)`),
      и именно этот вариант остаётся миной, если требовать точку с запятой.
+     Наличие или отсутствие `;` в замене сохраняется как во входе.
    - Применить в трёх местах: к `text` в самом начале `detect_challenge`
      (сразу после декодирования тела), к телу внутри `html_to_text` перед
      `feed`, и к захваченному заголовку внутри `_title` перед `unescape`.
@@ -88,11 +102,15 @@ data-sitekey="k"></div></template>` на 200 даёт ложную `captcha` и 
 в BASE.
 
 Проверено координатором на РАБОТАЮЩЕМ прототипе именно этих правок: помощник
-клипует `&#<5000 девяток>` с точкой с запятой и без, hex-форму и оба варианта в
-атрибуте, но НЕ трогает `&#1114111;`, `&#x10FFFF;`, `&#65;`, `&#x41;`,
+клипует `&#<5000 девяток>` с точкой с запятой и без, в тексте и в значении
+атрибута, но НЕ портит `&#1114111;`, `&#x10FFFF;`, `&#65;`, `&#x41;`,
 `&#0000065;`; на документе 240 КиБ работает за 0.2 мс; переопределённый
 `handle_startendtag` даёт на входе `<template/><div data-sitekey=k></div></template>`
-ожидаемую последовательность событий.
+ожидаемую последовательность событий. На собранном прототипе (помощник +
+три точки применения + снятый `try/except` + переопределённый
+`handle_startendtag`) критерии AC-131…AC-134 дают rc=0, а `tests.test_detect`
+остаётся 59/59 зелёным БЕЗ единой правки теста — то есть менять существующие
+тесты не обязательно, это разрешение, а не требование.
 
 Тесты в `tests/test_detect.py` — ДОБАВИТЬ новые; из существующих разрешено
 менять ровно три, чьё утверждение правка делает сильнее:
@@ -105,15 +123,19 @@ data-sitekey="k"></div></template>` на 200 даёт ложную `captcha` и 
 - `<title>` с гигантской сущностью + статус 200/403/429 и заголовок
   `cf-mitigated` → функция возвращает те же вердикты, что и без сущности;
 - `html_to_text` на теле с гигантской сущностью возвращает текст, а не бросает;
-- сущности на границе (`&#1114111;`, `&#x10FFFF;`, `&#65;`, `&#0000065;`) не
-  портятся: `_title` даёт прежнюю строку;
+- сущности на границе (`&#1114111;`, `&#x10FFFF;`, `&#65;`, `&#0000065;`,
+  `&#1114109;`, `&#x` с пятью тысячами `f`) не портятся: `_title` даёт прежнюю
+  строку;
+- «нулевая бомба» `&#` + 5000 нулей + `65` (с `;` и без) → `_title` даёт `A`,
+  а `detect_challenge` и `html_to_text` не бросают;
 - `<template/>` (самозакрытый) + виджет + `</template>` на 200 с меткой CF →
   `none`; самозакрытый `<div data-sitekey="k"/>` в тех же условиях → `captcha`.
 
-В `tests/mutation_gate.py`: УДАЛИТЬ мутанта `110` и ДОБАВИТЬ ровно три новых —
-снять клипование в `detect_challenge`; снять клипование в `html_to_text`;
-убрать переопределение `handle_startendtag`. Остальных мутантов не трогать.
-Итоговое число убитых — 113.
+В `tests/mutation_gate.py`: УДАЛИТЬ мутанта `110` и ДОБАВИТЬ ровно пять новых —
+снять клипование в `detect_challenge`; снять клипование в `html_to_text`; снять
+клипование в `_title`; снять нормализацию ведущих нулей (считать длину сырой
+строки цифр); убрать переопределение `handle_startendtag`. Остальных мутантов
+не трогать. Итоговое число убитых — 115.
 
 `docs/research/04-phase1-verdict.md`: в подраздел «Интерактивный виджет
 (M16a-fix)» добавить абзац про лимит в 4300 цифр, про то, что клипование стоит
@@ -129,6 +151,13 @@ data-sitekey="k"></div></template>` на 200 даёт ложную `captcha` и 
 перед виджетом → `('none', ('body_cf_challenge_platform',))`; `<template/>` +
 виджет → `('captcha', (…,'body_captcha_interactive'))`). Там же проверены
 границы клипования и отсутствие входов, роняющих `feed` после клипования.
+
+Отдельно измерено 18.09.2026 после первой остановки панели по контракту (панель
+была права, спека несла ложный инвариант): лимит `int()` считает ВСЮ строку
+цифр вместе с ведущими нулями — `int("0"*4299 + "65")` уже бросает, поэтому
+критерия «значащих цифр» мало и нужна нормализация. Шестнадцатеричные ссылки
+лимита не знают вовсе (основание — степень двойки): `&#x` с пятью тысячами `f`
+отрабатывает за 0.1 мс и сам даёт U+FFFD.
 
 Предположение: `&#…` — единственная сущность, способная уронить `html.unescape`
 в этом окружении. Именованные сущности ограничены 32 символами самой
@@ -155,15 +184,15 @@ untracked, и без этого критерий чистоты дерева н�
 - **AC-130.** Unit и frozen probes без регрессий:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-131.** Гигантская сущность больше не роняет ни детектор, ни извлечение текста:
-  `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(\"p\",\"bench/providers/docker/probe.py\"); m=importlib.util.module_from_spec(s); sys.modules[\"p\"]=m; s.loader.exec_module(m); big=\"&#\"+\"9\"*5000+\";\"; nosemi=\"&#\"+\"9\"*5000; hexbig=\"&#x\"+\"f\"*5000+\";\"; [m.detect_challenge(st,h,b) for b in (\"<title>\"+big+\"</title>\", \"<title>\"+nosemi+\"</title>\", \"<title>\"+hexbig+\"</title>\", big, nosemi) for st in (200,403,429) for h in ({}, {\"cf-mitigated\":\"challenge\"})]; [m.html_to_text(b) for b in (\"<p>\"+big+\"</p>\", \"<p>\"+nosemi+\"</p>\", \"<p>\"+hexbig+\"</p>\")]; print(\"ok\")"'`
+  `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(\"p\",\"bench/providers/docker/probe.py\"); m=importlib.util.module_from_spec(s); sys.modules[\"p\"]=m; s.loader.exec_module(m); big=\"&#\"+\"9\"*5000+\";\"; nosemi=\"&#\"+\"9\"*5000; hexbig=\"&#x\"+\"f\"*5000+\";\"; zb=\"&#\"+\"0\"*5000+\"65;\"; zbn=\"&#\"+\"0\"*5000+\"65\"; [m.detect_challenge(st,h,b) for b in (\"<title>\"+big+\"</title>\", \"<title>\"+nosemi+\"</title>\", \"<title>\"+hexbig+\"</title>\", \"<title>\"+zb+\"</title>\", \"<title>\"+zbn+\"</title>\", big, nosemi, zb, zbn) for st in (200,403,429) for h in ({}, {\"cf-mitigated\":\"challenge\"})]; [m.html_to_text(b) for b in (\"<p>\"+big+\"</p>\", \"<p>\"+nosemi+\"</p>\", \"<p>\"+hexbig+\"</p>\", \"<p>\"+zb+\"</p>\", \"<p>\"+zbn+\"</p>\")]; print(\"ok\")"'`
 - **AC-132.** Страница просмотрена целиком: виджет ПОСЛЕ сущности найден:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(\"p\",\"bench/providers/docker/probe.py\"); m=importlib.util.module_from_spec(s); sys.modules[\"p\"]=m; s.loader.exec_module(m); cf=\"<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>\"; big=\"&#\"+\"9\"*5000+\";\"; w=\"<div data-sitekey=k></div>\"; attr=\"<div title=\\\"\"+big+\"\\\"></div>\"; bodies=(cf+attr+w, cf+big+w, cf+w+big, cf+w+attr); assert all(m.detect_challenge(200,{},b)[0]==\"captcha\" for b in bodies), [m.detect_challenge(200,{},b) for b in bodies]; print(\"ok\")"'`
 - **AC-133.** Границы клипования не задеты, `<template/>` инертен, самозакрытый виджет виден:
-  `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(\"p\",\"bench/providers/docker/probe.py\"); m=importlib.util.module_from_spec(s); sys.modules[\"p\"]=m; s.loader.exec_module(m); assert m._title(\"<title>&#65;&#0000065;&#x41;&#1114109;</title>\")==\"AAA\\U0010fffd\", repr(m._title(\"<title>&#65;&#0000065;&#x41;&#1114109;</title>\")); cf=\"<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>\"; t=cf+\"<template/><div data-sitekey=k></div></template>\"; assert m.detect_challenge(200,{},t)[0]==\"none\", m.detect_challenge(200,{},t); sc=cf+\"<div data-sitekey=k/>\"; assert m.detect_challenge(200,{},sc)[0]==\"captcha\", m.detect_challenge(200,{},sc); print(\"ok\")"'`
+  `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(\"p\",\"bench/providers/docker/probe.py\"); m=importlib.util.module_from_spec(s); sys.modules[\"p\"]=m; s.loader.exec_module(m); assert m._title(\"<title>&#65;&#0000065;&#x41;&#1114109;</title>\")==\"AAA\\U0010fffd\", repr(m._title(\"<title>&#65;&#0000065;&#x41;&#1114109;</title>\")); assert m._title(\"<title>&#\"+\"0\"*5000+\"65;</title>\")==\"A\", repr(m._title(\"<title>&#\"+\"0\"*5000+\"65;</title>\")); assert m._title(\"<title>&#x\"+\"f\"*5000+\";</title>\")==\"\\ufffd\", repr(m._title(\"<title>&#x\"+\"f\"*5000+\";</title>\")); cf=\"<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>\"; t=cf+\"<template/><div data-sitekey=k></div></template>\"; assert m.detect_challenge(200,{},t)[0]==\"none\", m.detect_challenge(200,{},t); sc=cf+\"<div data-sitekey=k/>\"; assert m.detect_challenge(200,{},sc)[0]==\"captcha\", m.detect_challenge(200,{},sc); print(\"ok\")"'`
 - **AC-134.** Поведение прежних вех не сдвинуто:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(\"p\",\"bench/providers/docker/probe.py\"); m=importlib.util.module_from_spec(s); sys.modules[\"p\"]=m; s.loader.exec_module(m); b=open(\"tests/fixtures/lowendtalk_200_grecaptcha.html\",encoding=\"utf-8\").read(); i=open(\"tests/fixtures/cf_interstitial_200body_403.html\",encoding=\"utf-8\").read(); assert m.detect_challenge(200,{},b)==(\"none\",(\"body_cf_challenge_platform\",\"body_captcha\")); assert m.detect_challenge(403,{},b)[0]==\"access_denied\"; assert m.detect_challenge(403,{},i)[0]==\"suspected\"; assert m.detect_challenge(200,{\"cf-mitigated\":\"interactive\"},i)[0]==\"interactive\"; cf=\"<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>\"; w=\"<div class=\\\"g-recaptcha\\\" data-sitekey=\\\"k\\\"></div>\"; assert m.detect_challenge(200,{},w)[0]==\"none\"; assert m.detect_challenge(200,{},cf+w)[0]==\"captcha\"; e=cf+\"<script src=https://www.google.com/recaptcha/api.js?onload=cb&render=explicit></script>\"; assert m.detect_challenge(200,{},e)[0]==\"captcha\"; v3=cf+\"<script src=https://www.google.com/recaptcha/api.js?render=KEY></script>\"; assert m.detect_challenge(200,{},v3)[0]==\"none\"; tp=cf+\"<template><div data-sitekey=k></div></template>\"; assert m.detect_challenge(200,{},tp)[0]==\"none\"; print(\"ok\")"'`
 - **AC-135.** Мутационные ворота: мутант 110 удалён, три новых убиты, всего 113:
-  `bash -c 'set -o pipefail; test -z "$(grep -n \"\\\"110\\\"\" tests/mutation_gate.py)" && n=$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 tests/mutation_gate.py | grep -c убит) && test "$n" -eq 113 && test -z "$(git status --porcelain -- tests/mutation_gate.py bench/providers/docker/probe.py ":(exclude)report.json")"'`
+  `bash -c 'set -o pipefail; test -z "$(grep -n \"\\\"110\\\"\" tests/mutation_gate.py)" && n=$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 tests/mutation_gate.py | grep -c убит) && test "$n" -eq 115 && test -z "$(git status --porcelain -- tests/mutation_gate.py bench/providers/docker/probe.py ":(exclude)report.json")"'`
 - **AC-136.** Документы:
   `bash -c 'grep -q "4300" docs/research/04-phase1-verdict.md && grep -q "template/>" docs/research/04-phase1-verdict.md && grep -q "html_to_text" docs/research/04-phase1-verdict.md'`
 - **AC-137.** Вне разрешённых путей ничего не изменено, дерево чистое:
