@@ -3,7 +3,7 @@
 ## Шапка и где работать
 
 Репозиторий /home/user/github/ai-browser-gateway, 18.09.2026.
-BASE_SHA `d26c75a5ee9b9ef4b4c0a21a9c5d2ef3ce091cba` — main после слияния M16a.
+BASE_SHA `5fa9f968ee3fb4e183545f0f79f11436b2196315` — main после слияния M16a и коммита спек M16a-fix и m16a-mutations.
 Клон /home/user/exec-clones/abg-m16a-fix-20260918, ветка m16a-fix,
 origin push DISABLED. Исполнитель — cx. Реквизит — `docs/specs/m16a-captcha-false-positive.md`
 (прочитать целиком) и `git diff e80a5ef c90a395`.
@@ -134,9 +134,9 @@ Commit в клоне.
 `_CAPTCHA_ATTR`, порядок веток `return`, `RULE_PROVENANCE["body_captcha"]`
 (остаётся `ASSUMED`), другие specs, TASKS.md, CHANGELOG.md, `secrets/**`,
 `/home/user/services/**`. Сеть не нужна: все прогоны `--network none`.
-Push и merge запрещены. Первым делом ЗАКОММИТИТЬ спеку
-`docs/specs/m16a-fix-interactive-captcha.md` byte-identical: она приезжает
-untracked, и без этого критерий чистоты дерева недостижим.
+Push и merge запрещены. Спека `docs/specs/m16a-fix-interactive-captcha.md`
+уже отслеживается в BASE — её не менять и не коммитить заново; критерий
+чистоты дерева считает её изменение отклонением.
 
 ## Критерии приёмки
 
@@ -151,16 +151,16 @@ untracked, и без этого критерий чистоты дерева н�
 - **AC-119.** Заголовок и настоящий интерстишл не сломаны:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(\"p\",\"bench/providers/docker/probe.py\"); m=importlib.util.module_from_spec(s); sys.modules[\"p\"]=m; s.loader.exec_module(m); i=open(\"tests/fixtures/cf_interstitial_200body_403.html\",encoding=\"utf-8\").read(); assert m.detect_challenge(403,{},i)[0]==\"suspected\", m.detect_challenge(403,{},i); assert m.detect_challenge(200,{\"cf-mitigated\":\"challenge\"},i)[0]==\"suspected\"; assert m.detect_challenge(200,{\"cf-mitigated\":\"interactive\"},i)[0]==\"interactive\""'`
 - **AC-120.** Мутационные ворота с тремя новыми мутантами:
-  `bash -c 'test "$(git diff d26c75a5ee9b9ef4b4c0a21a9c5d2ef3ce091cba HEAD -- tests/mutation_gate.py | grep -c "^-[^-]")" -eq 0 && docker run --rm --network none --user 1002:1002 -v "$PWD":/work -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 tests/mutation_gate.py && test -z "$(git status --porcelain -- tests/mutation_gate.py bench/runner/execute.py bench/providers/docker/probe.py ":(exclude)report.json")"'`
+  `bash -c 'test "$(git diff 5fa9f968ee3fb4e183545f0f79f11436b2196315 HEAD -- tests/mutation_gate.py | grep -c "^-[^-]")" -eq 0 && docker run --rm --network none --user 1002:1002 -v "$PWD":/work -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 tests/mutation_gate.py && test -z "$(git status --porcelain -- tests/mutation_gate.py bench/runner/execute.py bench/providers/docker/probe.py ":(exclude)report.json")"'`
 - **AC-121.** Документы и провенанс:
   `bash -c 'grep -q "Интерактивный виджет (M16a-fix)" docs/research/04-phase1-verdict.md && grep -q "render=" docs/research/04-phase1-verdict.md && git grep -q "\"body_captcha\": ASSUMED," -- bench/providers/docker/probe.py && git grep -q "_CAPTCHA_ATTR = re.compile" -- bench/providers/docker/probe.py'`
 - **AC-122.** Вне разрешённых путей ничего не изменено, дерево чистое:
-  `bash -c 'git diff --exit-code d26c75a5ee9b9ef4b4c0a21a9c5d2ef3ce091cba HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)tests/test_detect.py" ":(exclude)tests/mutation_gate.py" ":(exclude)docs/research/04-phase1-verdict.md" ":(exclude)docs/specs/m16a-fix-interactive-captcha.md" && git ls-files --error-unmatch docs/specs/m16a-fix-interactive-captcha.md >/dev/null && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
+  `bash -c 'git diff --exit-code 5fa9f968ee3fb4e183545f0f79f11436b2196315 HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)tests/test_detect.py" ":(exclude)tests/mutation_gate.py" ":(exclude)docs/research/04-phase1-verdict.md" ":(exclude)docs/specs/m16a-fix-interactive-captcha.md" && git ls-files --error-unmatch docs/specs/m16a-fix-interactive-captcha.md >/dev/null && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
 
 ## Авторевью
 
 Политика cross-review-v1: после commit REVIEW_SHA параллельно
-`bash /home/user/.claude/skills/executor-milestone/scripts/review_run.sh initial agy --clone <клон> --base d26c75a5ee9b9ef4b4c0a21a9c5d2ef3ce091cba --range d26c75a5ee9b9ef4b4c0a21a9c5d2ef3ce091cba..<REVIEW_SHA> --context "<эта спека; только чтение>"`
+`bash /home/user/.claude/skills/executor-milestone/scripts/review_run.sh initial agy --clone <клон> --base 5fa9f968ee3fb4e183545f0f79f11436b2196315 --range 5fa9f968ee3fb4e183545f0f79f11436b2196315..<REVIEW_SHA> --context "<эта спека; только чтение>"`
 и тот же wrapper `initial grok`. Разобрать все finding_id; один FIX_ONCE, затем
 verify на REVIEW..FINAL. Неполный ответ/таймаут — не принятие; один
 технический повтор; quota error — без повторов, записать в note.
@@ -171,7 +171,7 @@ report.json v2 в корне клона, untracked, ровно 8 записей 
 command посимвольно из спеки; blocked — rc=null и безопасный текст ошибки.
 ```json
 {"schema_version":2,"policy_id":"cross-review-v1","spec_sha256":"<SHA этой спеки>",
- "base_sha":"d26c75a5ee9b9ef4b4c0a21a9c5d2ef3ce091cba","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
+ "base_sha":"5fa9f968ee3fb4e183545f0f79f11436b2196315","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
  "executor":{"backend":"codex","model":"<фактическая модель>"},
  "review":{"initial_receipts":[],"verification_receipts":[],"resolutions":[]},
  "handoff_status":"ready","criteria":[{"id":"AC-115","status":"pass|fail|blocked",
