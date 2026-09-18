@@ -39,9 +39,14 @@ Cloudflare, обычный title, без заголовка `cf-mitigated`) те
    или `cf-turnstile`; атрибут `data-sitekey`; подключение
    `recaptcha/api.js` БЕЗ параметра `render=`. Не считать интерактивным
    `recaptcha/api.js?render=…` и вызовы `grecaptcha.execute`/`grecaptcha.ready`.
-   При срабатывании добавлять в возвращаемые метки имя
-   `body_captcha_interactive` ПОСЛЕ `body_captcha`; имя `body_captcha` и
-   регулярка `_CAPTCHA_ATTR` остаются как есть.
+   Метка `body_captcha_interactive` добавляется ОТДЕЛЬНЫМ условием, НЕ вложенным
+   в срабатывание `_CAPTCHA_ATTR`: тело `<div data-sitekey="k"></div>` обязано
+   поднимать только новую метку и ни одной старой (иначе инвариант
+   «assumed-правило срабатывает в одиночку» недостижим — разметка
+   `class="g-recaptcha"` содержит подстроку `captcha` и поднимает старое
+   правило тоже). Порядок в кортеже: `body_captcha`, затем
+   `body_captcha_interactive`. Имя `body_captcha` и регулярка `_CAPTCHA_ATTR`
+   остаются как есть.
 2. `captcha_confirmed` привести к честному виду: `decisive_body or status in
    (403, 429)`. Дизъюнкты `header_names` и `body_enough` удалить — они
    недостижимы в точке использования (ранние `return` по `header_verdict` и по
@@ -80,9 +85,11 @@ Cloudflare, обычный title, без заголовка `cf-mitigated`) те
 - `test_provenance_covers_every_rule_and_nothing_else` → в набор `named`
   добавить `body_captcha_interactive`;
 - `test_assumed_rule_never_decides_a_verdict_alone` → в `ASSUMED_SAMPLES`
-  добавить минимальное тело, поднимающее ТОЛЬКО новое правило
-  (`<div class="g-recaptcha" data-sitekey="k"></div>`): на 200 оно обязано
-  давать `none` и называть метку.
+  добавить минимальное тело, поднимающее ТОЛЬКО новое правило:
+  `<html><body><div data-sitekey="k"></div></body></html>`. Проверено
+  координатором на прототипе: даёт ровно `('none', ('body_captcha_interactive',))`.
+  Разметку с `class="g-recaptcha"` сюда брать НЕЛЬЗЯ — она поднимает и
+  `body_captcha`.
 
 Кроме того `test_exact_provenance_of_the_one_unmeasured_rule` больше не про
 «одно» правило: расширить его на оба `assumed`-правила и переименовать
@@ -95,10 +102,29 @@ Cloudflare, обычный title, без заголовка `cf-mitigated`) те
 `suspected` с обеими метками). Новых фикстур не заводить — тела задавать в
 тестах строками, как уже принято в этом файле.
 
-В `tests/mutation_gate.py` ДОБАВИТЬ (не править существующие) ровно три мутанта
-на новую логику: снять требование интерактивности в ветке `captcha`; заменить
-`status in (403, 429)` на `status >= 400`; сравнивать body-иглы по `text`
-вместо `lowered`. У каждого — свой тест из авторского набора, который его убивает.
+В `tests/mutation_gate.py` ДОБАВИТЬ ровно три мутанта на новую логику: снять
+требование интерактивности в ветке `captcha` (то есть `if captcha_names and
+captcha_confirmed:`); заменить `status in (403, 429)` на `status >= 400`;
+сравнивать body-иглы по `text` вместо `lowered`. У каждого — свой тест из
+авторского набора, который его убивает.
+
+Кроме того ровно три СУЩЕСТВУЮЩИХ мутанта ломаются этой правкой, потому что
+целятся в изменяемые строки и тесты. Их разрешено и НУЖНО пересадить, сохранив
+смысл (это не ослабление ворот, а перенос цели на новую форму кода — как
+мутант 27 на main 18.09.2026):
+
+- **46** — `old` был `    if captcha_names and captcha_confirmed:`. Новый `old` —
+  та же строка в новой форме; `new` — версия БЕЗ требования подтверждения
+  (`if "body_captcha_interactive" in captcha_names:`); убивающий тест — новый
+  «интерактивный виджет без меток CF на 200 даёт none».
+- **50** — `old` не меняется, но его тест
+  `test_captcha_with_403_is_captcha_and_named` больше не даёт `captcha`.
+  Переставить на новый тест «метка CF + интерактивный виджет на 200 даёт
+  captcha и называет обе метки».
+- **53** — ссылается на переименованный тест провенанса; поправить имя теста.
+
+Других существующих мутантов не трогать. Ворота обязаны остаться зелёными:
+`old` каждого мутанта должен встречаться в файле ровно один раз.
 
 `docs/research/04-phase1-verdict.md`: в раздел «Ложная captcha на 200 (M16a)»
 добавить подраздел «Интерактивный виджет (M16a-fix)» — находка Codex, ключ
@@ -122,7 +148,7 @@ Cloudflare, обычный title, без заголовка `cf-mitigated`) те
 ## Разрешения
 
 Правка `bench/providers/docker/probe.py`, `tests/test_detect.py`,
-`tests/mutation_gate.py` (только добавление трёх мутантов),
+`tests/mutation_gate.py` (три новых мутанта и пересадка мутантов 46, 50, 53),
 `docs/research/04-phase1-verdict.md`. Docker-прогоны образом из критериев.
 Commit в клоне.
 
@@ -151,7 +177,7 @@ Push и merge запрещены. Спека `docs/specs/m16a-fix-interactive-ca
 - **AC-119.** Заголовок и настоящий интерстишл не сломаны:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -c "import importlib.util,sys; s=importlib.util.spec_from_file_location(\"p\",\"bench/providers/docker/probe.py\"); m=importlib.util.module_from_spec(s); sys.modules[\"p\"]=m; s.loader.exec_module(m); i=open(\"tests/fixtures/cf_interstitial_200body_403.html\",encoding=\"utf-8\").read(); assert m.detect_challenge(403,{},i)[0]==\"suspected\", m.detect_challenge(403,{},i); assert m.detect_challenge(200,{\"cf-mitigated\":\"challenge\"},i)[0]==\"suspected\"; assert m.detect_challenge(200,{\"cf-mitigated\":\"interactive\"},i)[0]==\"interactive\""'`
 - **AC-120.** Мутационные ворота с тремя новыми мутантами:
-  `bash -c 'test "$(git diff 7cca18cfb21fce8a73540cc22631d2e37661a903 HEAD -- tests/mutation_gate.py | grep -c "^-[^-]")" -eq 0 && docker run --rm --network none --user 1002:1002 -v "$PWD":/work -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 tests/mutation_gate.py && test -z "$(git status --porcelain -- tests/mutation_gate.py bench/runner/execute.py bench/providers/docker/probe.py ":(exclude)report.json")"'`
+  `bash -c 'set -o pipefail; n=$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 tests/mutation_gate.py | grep -c убит) && test "$n" -eq 108 && test -z "$(git status --porcelain -- tests/mutation_gate.py bench/runner/execute.py bench/providers/docker/probe.py ":(exclude)report.json")"'`
 - **AC-121.** Документы и провенанс:
   `bash -c 'grep -q "Интерактивный виджет (M16a-fix)" docs/research/04-phase1-verdict.md && grep -q "render=" docs/research/04-phase1-verdict.md && git grep -q "\"body_captcha\": ASSUMED," -- bench/providers/docker/probe.py && git grep -q "_CAPTCHA_ATTR = re.compile" -- bench/providers/docker/probe.py'`
 - **AC-122.** Вне разрешённых путей ничего не изменено, дерево чистое:
