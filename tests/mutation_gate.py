@@ -821,6 +821,41 @@ MUTANTS = [
         "test": "tests.test_detect.DetectChallengeTests.test_uppercase_body_needles_are_suspected_and_named",
         "assert": 'self.assertEqual(verdict, "suspected")',
     },
+    {
+        "name": "109",
+        "file": "bench/providers/docker/probe.py",
+        "old": '                    not render_values or "explicit" in render_values\n',
+        "new": "                    not render_values\n",
+        "test": "tests.test_detect.DetectChallengeTests.test_explicit_render_with_cf_is_interactive",
+        "assert": 'self.assertEqual(verdict, "captcha")',
+    },
+    {
+        "name": "110",
+        "file": "bench/providers/docker/probe.py",
+        "old": (
+            "    try:\n"
+            "        widget.feed(text)\n"
+            "    except Exception:\n"
+            "        # Malformed markup must not discard evidence already recognized.\n"
+            "        pass\n"
+        ),
+        "new": "    widget.feed(text)\n",
+        "test": "tests.test_detect.DetectChallengeTests.test_parser_error_preserves_recognized_widget",
+        "assert": "self.assertEqual(self.detect(200, {}, body), expected)",
+    },
+    {
+        "name": "111",
+        "file": "bench/providers/docker/probe.py",
+        "old": (
+            '            if tag == "template":\n'
+            "                self.template_depth += 1\n"
+            "            if self.template_depth:\n"
+            "                return\n"
+        ),
+        "new": "",
+        "test": "tests.test_detect.DetectChallengeTests.test_template_widgets_with_cf_are_not_interactive",
+        "assert": 'self.assertEqual(verdict, "none")',
+    },
 ]
 
 

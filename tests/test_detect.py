@@ -393,6 +393,99 @@ class DetectChallengeTests(unittest.TestCase):
             "captcha", ("body_captcha", "body_captcha_interactive"),
         ))
 
+    def test_explicit_render_with_cf_is_interactive(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for query in (
+            "render=explicit", "onload=cb&render=explicit",
+            "onload=cb&amp;render=explicit", "render=KEY&render=explicit",
+            "render=explicit&render=KEY", "render=&render=explicit",
+        ):
+            with self.subTest(query=query):
+                body = cf + f'<script src="https://www.google.com/recaptcha/api.js?{query}"></script>'
+                verdict, markers = self.detect(200, {}, body)
+                self.assertEqual(verdict, "captcha")
+                self.assertEqual(markers, (
+                    "body_cf_challenge_platform", "body_captcha", "body_captcha_interactive",
+                ))
+
+    def test_nonexplicit_render_with_cf_is_not_interactive(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for query in (
+            "onload=cb&render=KEY", "render=KEY&render=OTHER",
+            "render=explicitKEY", "render=KEY&onload=explicit", "render=",
+        ):
+            with self.subTest(query=query):
+                body = cf + f'<script src="https://www.google.com/recaptcha/api.js?{query}"></script>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "none", ("body_cf_challenge_platform", "body_captcha"),
+                ))
+
+    def test_oversized_character_reference_does_not_raise(self):
+        bad = "&#" + "9" * 5000 + ";"
+        self.assertEqual(self.detect(200, {}, bad), ("none", ()))
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        widget = '<div data-sitekey="k"></div>'
+        for body in (cf + widget + bad, cf + bad + widget):
+            with self.subTest(widget_before_bad=body.endswith(bad)):
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha_interactive"),
+                ))
+
+    def test_parser_error_preserves_recognized_widget(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        widget = '<div data-sitekey="k"></div>'
+        # Attribute references are decoded even with convert_charrefs=False.
+        for bad in ('<span title="&#' + "9" * 5000 + ';">', '<![invalid]>'):
+            with self.subTest(bad_kind=bad[:6]):
+                body = cf + widget + bad
+                expected = (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha_interactive"),
+                )
+                self.assertEqual(self.detect(200, {}, body), expected)
+
+    def test_parser_error_preserves_header_and_status_verdicts(self):
+        bad = '<span title="&#' + "9" * 5000 + ';">'
+        for status, headers, expected in (
+            (200, {}, ("none", ())),
+            (403, {}, ("access_denied", ("status_403",))),
+            (429, {}, ("rate_limited", ("status_429",))),
+            (200, {"cf-mitigated": "interactive"}, ("interactive", ("header_cf_mitigated",))),
+        ):
+            with self.subTest(status=status, headers=headers):
+                self.assertEqual(self.detect(status, headers, bad), expected)
+
+    def test_template_widgets_with_cf_are_not_interactive(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for widget in (
+            '<div data-sitekey="k"></div>', '<div class="g-recaptcha"></div>',
+            '<div class="h-captcha"></div>', '<div class="cf-turnstile"></div>',
+            '<script src="https://www.google.com/recaptcha/api.js?render=explicit"></script>',
+        ):
+            for template in (
+                f'<template>{widget}</template>',
+                f'<template><template>{widget}</template></template>',
+                f'<template><template></template>{widget}</template>',
+                f'<template data-sitekey="k">{widget}</template>',
+            ):
+                with self.subTest(template=template):
+                    verdict, markers = self.detect(200, {}, cf + template)
+                    self.assertEqual(verdict, "none")
+                    self.assertIn("body_cf_challenge_platform", markers)
+                    self.assertNotIn("body_captcha_interactive", markers)
+
+    def test_widget_after_closed_templates_is_interactive(self):
+        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        for template in (
+            '<template><span></span></template>',
+            '<template><template></template></template>',
+            '</template><template></template>',
+        ):
+            with self.subTest(template=template):
+                body = cf + template + '<div data-sitekey="k"></div>'
+                self.assertEqual(self.detect(200, {}, body), (
+                    "captcha", ("body_cf_challenge_platform", "body_captcha_interactive"),
+                ))
+
     def test_uppercase_body_needles_are_suspected_and_named(self):
         verdict, markers = self.detect(200, {}, '<p>CHALLENGES.CLOUDFLARE.COM CF_CHL_OPT</p>')
         self.assertEqual(verdict, "suspected")

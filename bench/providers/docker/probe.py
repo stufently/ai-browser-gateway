@@ -327,11 +327,16 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
 
     # Widget markup is assumed evidence. Parse attributes so prose, comments
     # and script strings do not masquerade as widgets. Invisible v3 scripts
-    # (render=) and grecaptcha.ready/execute calls are not interactive evidence.
+    # (render=<site key>) and grecaptcha.ready/execute calls are not interactive evidence.
     class InteractiveCaptcha(HTMLParser):
         found = False
+        template_depth = 0
 
         def handle_starttag(self, tag, attrs):
+            if tag == "template":
+                self.template_depth += 1
+            if self.template_depth:
+                return
             attributes = dict(attrs)
             classes = (attributes.get("class") or "").split()
             if "data-sitekey" in attributes or _CAPTCHA_WIDGET_CLASSES.intersection(classes):
@@ -339,13 +344,25 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
             if tag == "script":
                 src = (attributes.get("src") or "").partition("#")[0]
                 path, _, query = src.partition("?")
-                if (path == "recaptcha/api.js" or path.endswith("/recaptcha/api.js")) and not any(
-                    part.startswith("render=") for part in query.split("&")
+                render_values = [
+                    part.partition("=")[2] for part in query.split("&")
+                    if part.startswith("render=")
+                ]
+                if (path == "recaptcha/api.js" or path.endswith("/recaptcha/api.js")) and (
+                    not render_values or "explicit" in render_values
                 ):
                     self.found = True
 
-    widget = InteractiveCaptcha()
-    widget.feed(text)
+        def handle_endtag(self, tag):
+            if tag == "template" and self.template_depth:
+                self.template_depth -= 1
+
+    widget = InteractiveCaptcha(convert_charrefs=False)
+    try:
+        widget.feed(text)
+    except Exception:
+        # Malformed markup must not discard evidence already recognized.
+        pass
     # CF body markers still win: the live interstitial remains suspected.
     captcha_names: list[str] = []
     if _CAPTCHA_ATTR.search(text):
