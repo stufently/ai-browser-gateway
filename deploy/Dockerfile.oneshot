@@ -1,0 +1,24 @@
+FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56
+
+ENV HOME=/opt/home \
+    PYTHONPATH=/opt/abg-src \
+    PYTHONDONTWRITEBYTECODE=1
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends xvfb xauth tini \
+ && mkdir -p /tmp/.X11-unix /opt/home \
+ && chmod 1777 /tmp/.X11-unix \
+ && chmod 0777 /opt/home \
+ && rm -rf /var/lib/apt/lists/*
+RUN pip install --no-cache-dir curl_cffi==0.16.3 patchright==1.62.3 \
+        playwright==1.62.0 "scrapling[fetchers]==0.4.15" \
+ && patchright install --with-deps chrome \
+ && chmod -R a+rwX /opt/home \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY bench/ /opt/abg-src/bench/
+COPY gateway/ /opt/abg-src/gateway/
+COPY bench/providers/docker/probe.py /opt/abg/probe.py
+RUN chmod -R a+rX /opt/abg-src /opt/abg
+WORKDIR /opt/abg-src
+ENTRYPOINT ["/usr/bin/tini","-g","--","python3","-m","gateway.oneshot"]
