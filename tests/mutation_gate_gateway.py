@@ -144,6 +144,39 @@ MUTANTS = (
         "test": "tests.test_mcp_stdio.MCPTests.test_structured_content_carries_page_text",
         "assert": "self.assertEqual(result['structuredContent'].get('content'), 'Page ✓')",
     },
+    {
+        "name": "MCP tool call blocks stdin",
+        "path": "gateway/mcp_stdio.py",
+        "old": "                pending.put(message)",
+        "new": "                emit(server.handle(message))",
+        "test": "tests.test_mcp_stdio.MCPTests.test_ping_answered_during_slow_call",
+        "assert": "self.assertEqual(first, dict(jsonrpc='2.0', id=3, result={}))",
+    },
+    {
+        "name": "MCP argument errors become protocol errors",
+        "path": "gateway/mcp_stdio.py",
+        "old": "                return dict(content=[dict(type='text', text='invalid_arguments')],\n"
+               "                            structuredContent=dict(content='invalid_arguments'), isError=True)",
+        "new": "                raise ValueError",
+        "test": "tests.test_mcp_stdio.MCPTests.test_argument_errors_are_tool_errors",
+        "assert": "self.assertNotIn('error', result)",
+    },
+    {
+        "name": "MCP unknown error id becomes null",
+        "path": "gateway/mcp_stdio.py",
+        "old": "    if ident is not None:",
+        "new": "    if True:",
+        "test": "tests.test_mcp_stdio.MCPTests.test_errors_without_id_omit_id",
+        "assert": "self.assertNotIn('id', result)",
+    },
+    {
+        "name": "MCP apostrophe password escapes redaction",
+        "path": "gateway/mcp_stdio.py",
+        "old": "r'https?://[^\\s<>\"/]*@",
+        "new": "r'https?://[^\\s<>\"\\'/]*@",
+        "test": "tests.test_mcp_stdio.MCPTests.test_redacts_apostrophe_in_password",
+        "assert": "self.assertEqual(mcp_stdio.redact(url, None), '[redacted-url]')",
+    },
 )
 
 

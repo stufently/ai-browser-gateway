@@ -187,6 +187,8 @@ The API URL above is the default. HTTP uses no system proxy or redirects.
 `max_age_hours` (default 0). Fetch options come from tool arguments.
 Results include page content plus provider/attempt metadata; gateway and
 transport failures are tool errors. Credentials are redacted from results.
+Tool calls run concurrently (up to 8), while ping is answered immediately.
+Invalid tool arguments are reported as tool errors with `isError: true`.
 Page text (or error text) appears in both the text content block and
 `structuredContent.content`, alongside the available provider/attempt metadata.
 The server negotiates MCP `2025-11-25` or `2025-06-18`, falling back to

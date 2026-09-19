@@ -4,9 +4,11 @@ import io
 import json
 import os
 from pathlib import Path
+import queue
 import subprocess
 import sys
 import tempfile
+import threading
 import tomllib
 import unittest
 from unittest.mock import patch
@@ -77,6 +79,139 @@ class MCPTests(unittest.TestCase):
 
     def stub(self, value, status=200):
         self.open.side_effect = lambda *a, **kw: Response(value, status)
+
+    @contextlib.contextmanager
+    def running_exchange(self, release):
+        incoming, outgoing, errors = queue.Queue(), queue.Queue(), queue.Queue()
+        eof = threading.Event()
+
+        def lines():
+            for message in iter(incoming.get, None):
+                yield json.dumps(message) + '\n'
+            eof.set()
+
+        class Output:
+            def write(self, line):
+                # Every write must contain exactly one complete JSON-RPC line.
+                if not line.endswith('\n') or len(line.splitlines()) != 1:
+                    raise AssertionError('partial or interleaved output')
+                outgoing.put(json.loads(line))
+
+            def flush(self):
+                pass
+
+        def run():
+            try:
+                mcp_stdio.serve(lines(), Output())
+            except Exception as exc:
+                errors.put(exc)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+        try:
+            yield incoming, outgoing, eof, thread
+        finally:
+            release.set()
+            incoming.put(None)
+            thread.join(10)
+            self.assertFalse(thread.is_alive(), 'stdio server did not finish')
+            if not errors.empty():
+                raise errors.get_nowait()
+
+    def test_ping_answered_during_slow_call(self):
+        started, release = threading.Event(), threading.Event()
+
+        def slow(*args, **kwargs):
+            started.set()
+            release.wait(10)
+            return Response(reply())
+
+        self.open.side_effect = slow
+        with self.running_exchange(release) as (incoming, outgoing, eof, thread):
+            incoming.put(request('tools/call', dict(name='fetch_page', arguments={
+                'url': 'https://example.org/'}), ident=2))
+            self.assertTrue(started.wait(5))
+            incoming.put(request('ping', ident=3))
+            try:
+                first = outgoing.get(timeout=1)
+            except queue.Empty:
+                first = None
+            self.assertEqual(first, dict(jsonrpc='2.0', id=3, result={}))
+            release.set()
+            self.assertEqual(outgoing.get(timeout=5)['id'], 2)
+
+    def test_tool_calls_run_concurrently_and_bounded(self):
+        started, release = queue.Queue(), threading.Event()
+        active = peak = 0
+        lock = threading.Lock()
+
+        def slow(*args, **kwargs):
+            nonlocal active, peak
+            with lock:
+                active += 1
+                peak = max(peak, active)
+            started.put(True)
+            try:
+                release.wait(10)
+                return Response(reply())
+            finally:
+                with lock:
+                    active -= 1
+
+        self.open.side_effect = slow
+        with self.running_exchange(release) as (incoming, outgoing, eof, thread):
+            for ident in range(20):
+                incoming.put(request('tools/call', dict(name='fetch_page', arguments={
+                    'url': 'https://example.org/'}), ident=ident))
+            count = 0
+            try:
+                for _ in range(8):
+                    started.get(timeout=5)
+                    count += 1
+            except queue.Empty:
+                pass
+            self.assertEqual(count, 8, 'tool calls did not run concurrently')
+            incoming.put(request('ping', ident='ping'))
+            incoming.put(request('tools/list', ident='list'))
+            self.assertEqual(outgoing.get(timeout=1), dict(jsonrpc='2.0', id='ping', result={}))
+            self.assertEqual(outgoing.get(timeout=1)['id'], 'list')
+            with self.assertRaises(queue.Empty):
+                started.get(timeout=0.1)
+            incoming.put(None)
+            self.assertTrue(eof.wait(5), 'queued calls blocked stdin')
+            release.set()
+            messages = [outgoing.get(timeout=5) for _ in range(20)]
+            self.assertEqual({m['id'] for m in messages}, set(range(20)))
+            self.assertTrue(all(m['result']['structuredContent']['content'] == 'Page ✓'
+                                for m in messages))
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(peak, 8)
+        self.assertEqual(self.open.call_count, 20)
+
+    def test_eof_waits_for_inflight_calls(self):
+        started, release = threading.Event(), threading.Event()
+
+        def slow(*args, **kwargs):
+            started.set()
+            release.wait(10)
+            return Response(reply())
+
+        self.open.side_effect = slow
+        with self.running_exchange(release) as (incoming, outgoing, eof, thread):
+            incoming.put(request('tools/call', dict(name='fetch_page', arguments={
+                'url': 'https://example.org/'}), ident=9))
+            self.assertTrue(started.wait(5))
+            incoming.put(None)
+            self.assertTrue(eof.wait(5))
+            self.assertTrue(thread.is_alive())
+            self.assertTrue(outgoing.empty())
+            release.set()
+            thread.join(5)
+            self.assertFalse(thread.is_alive())
+            result = outgoing.get(timeout=1)
+            self.assertEqual(result['id'], 9)
+            self.assertEqual(result['result']['structuredContent']['content'], 'Page ✓')
 
     def test_negotiates_requested_old_version(self):
         result = self.exchange(self.initialize('2025-06-18'))[0]['result']
@@ -218,18 +353,36 @@ class MCPTests(unittest.TestCase):
                     self.assertEqual(self.open.call_args.args[0].get_header('Authorization'),
                                      'Bearer ' + expected)
 
-    def test_invalid_arguments_are_rpc_errors_without_http(self):
+    def test_argument_errors_are_tool_errors(self):
+        message = request('tools/call', dict(name='fetch_page', arguments={}))
+        result = self.exchange(message)[0]
+        self.assertNotIn('error', result)
         cases = [{}, {'url': 1}, {'url': 'https://user:pass@example.org/'},
                  {'url': 'file:///tmp/a'}]
         for key, values in dict(format=['pdf', [], None], budget_ms=[0, 180001, True, 1.5],
                                 expected_text=[1, '', ' '], allow_browser=[0, 'true'],
                                 max_age_hours=[-1, True, '1'], unknown=[1]).items():
             cases.extend(dict(url='https://example.org/', **{key: v}) for v in values)
-        cases.extend([[], None, 'bad'])
         for args in cases:
             with self.subTest(args=args):
                 message = request('tools/call', dict(name='fetch_page', arguments=args))
-                self.assertEqual(self.exchange(message)[0]['error']['code'], -32602)
+                self.assertEqual(self.exchange(message)[0], dict(jsonrpc='2.0', id=1,
+                    result=dict(content=[dict(type='text', text='invalid_arguments')],
+                                structuredContent=dict(content='invalid_arguments'), isError=True)))
+        self.assertTrue(self.exchange(request('tools/call', dict(name='fetch_page')))[0]
+                        ['result']['isError'])
+        self.open.assert_not_called()
+
+    def test_invalid_call_envelopes_are_rpc_errors_without_http(self):
+        cases = [dict(name='fetch_page', arguments=args) for args in ([], None, 'bad', 1, True)]
+        cases.extend([[], 'bad', 1, True, dict(name='other', arguments={}), {}])
+        for params in cases:
+            with self.subTest(params=params):
+                result = self.exchange(request('tools/call', params))[0]
+                self.assertEqual(result['error']['code'], -32602)
+                self.assertEqual(result['id'], 1)
+        self.assertEqual(self.exchange(dict(request('tools/call'), params=None))[0]
+                         ['error']['code'], -32602)
         self.open.assert_not_called()
 
     def test_transport_status_and_invalid_responses_are_tool_errors(self):
@@ -300,8 +453,38 @@ class MCPTests(unittest.TestCase):
         wire = '\n{\n{"a":1,"a":2}\nNaN\n' + json.dumps(request('tools/list')) + '\n'
         output = self.exchange(raw=wire)
         self.assertEqual([m['error']['code'] for m in output[:3]], [-32700] * 3)
-        self.assertTrue(all(m['id'] is None for m in output[:3]))
+        self.assertTrue(all('id' not in m for m in output[:3]))
         self.assertIn('result', output[3])
+
+    def test_errors_without_id_omit_id(self):
+        result = self.exchange(raw='{not json\n')[0]
+        self.assertNotIn('id', result)
+        self.assertEqual(result['error']['code'], -32700)
+        for message in (request('ping', ident=None), request('ping', ident=True),
+                        request('ping', ident=1.5), request('ping', ident=[]),
+                        dict(jsonrpc='1.0', method='ping', id=7), {}, [], None):
+            with self.subTest(message=message):
+                result = self.exchange(message)[0]
+                self.assertFalse('id' in result)
+                self.assertEqual(result['error']['code'], -32600)
+        for ident in (0, 'request-1'):
+            result = self.exchange(request('missing', ident=ident))[0]
+            self.assertEqual(result['id'], ident)
+            self.assertEqual(result['error']['code'], -32601)
+        self.open.assert_not_called()
+
+    def test_redacts_apostrophe_in_password(self):
+        url = "https://user:pa'ss@example.org/x"
+        self.assertEqual(mcp_stdio.redact(url, None), '[redacted-url]')
+        value = reply()
+        value['content'] = url
+        value['final_url'] = url
+        value['attempts'][0]['extension'] = {url: [url]}
+        self.stub(value)
+        result = self.call()['result']
+        self.assertEqual(result['content'], [dict(type='text', text='[redacted-url]')])
+        self.assertEqual(result['structuredContent']['content'], '[redacted-url]')
+        self.assertNotIn("pa'ss", json.dumps(result))
 
     def test_unknown_method_and_invalid_envelopes(self):
         self.assertEqual(self.exchange(request('missing'))[0]['error']['code'], -32601)

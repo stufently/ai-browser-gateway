@@ -2,8 +2,10 @@
 import json
 import os
 from pathlib import Path
+import queue
 import re
 import sys
+import threading
 import tomllib
 from urllib.error import HTTPError
 from urllib.request import Request, build_opener, ProxyHandler
@@ -26,7 +28,7 @@ INPUT_SCHEMA = {
     },
 }
 # Redact userinfo wherever the API may reflect a URL, including page content.
-_CREDENTIAL_URL = re.compile(r'https?://[^\s<>"\'/]*@[^\s<>"\']*', re.IGNORECASE)
+_CREDENTIAL_URL = re.compile(r'https?://[^\s<>"/]*@[^\s<>"\']*', re.IGNORECASE)
 
 
 def redact(value, token):
@@ -132,14 +134,21 @@ class Server:
         if method == 'tools/call':
             if params.get('name') != 'fetch_page':
                 raise ValueError
-            body = arguments(params.get('arguments'))
+            value = params.get('arguments', {})
+            if not isinstance(value, dict):
+                raise ValueError
+            try:
+                body = arguments(value)
+            except (ValueError, TypeError, OverflowError):
+                return dict(content=[dict(type='text', text='invalid_arguments')],
+                            structuredContent=dict(content='invalid_arguments'), isError=True)
             return fetch_page(body)
         raise LookupError
 
     def handle(self, message):
         if (not isinstance(message, dict) or message.get('jsonrpc') != '2.0'
                 or not isinstance(message.get('method'), str)
-                or 'id' in message and type(message['id']) not in (str, int, type(None))):
+                or 'id' in message and type(message['id']) not in (str, int)):
             return rpc_error(None, -32600, 'Invalid Request')
         # Notifications have neither a reply nor an HTTP side effect.
         if 'id' not in message:
@@ -157,24 +166,63 @@ class Server:
 
 
 def rpc_error(ident, code, message):
-    return dict(jsonrpc='2.0', id=ident, error=dict(code=code, message=message))
+    result = dict(jsonrpc='2.0', error=dict(code=code, message=message))
+    if ident is not None:
+        result['id'] = ident
+    return result
 
 
 def serve(stdin, stdout):
     server = Server()
-    for line in stdin:
-        if not line.strip():
-            continue
-        try:
-            message = json.loads(line, object_pairs_hook=unique, parse_constant=reject)
-        except (ValueError, RecursionError):
-            result = rpc_error(None, -32700, 'Parse error')
-        else:
-            result = server.handle(message)
+    pending, failures = queue.Queue(), queue.Queue()
+    output_lock = threading.Lock()
+    workers = []
+
+    def emit(result):
         if result is not None:
             # ASCII escaping handles malformed Unicode without partial output.
-            stdout.write(json.dumps(result, allow_nan=False) + '\n')
-            stdout.flush()
+            line = json.dumps(result, allow_nan=False) + '\n'
+            with output_lock:
+                stdout.write(line)
+                stdout.flush()
+
+    def work():
+        for message in iter(pending.get, None):
+            try:
+                emit(server.handle(message))
+            except Exception as exc:
+                # Report output failures on the main thread, without a worker
+                # traceback or abandoning the remaining queued calls.
+                failures.put(exc)
+
+    try:
+        for line in stdin:
+            if not line.strip():
+                continue
+            try:
+                message = json.loads(line, object_pairs_hook=unique, parse_constant=reject)
+            except (ValueError, RecursionError):
+                emit(rpc_error(None, -32700, 'Parse error'))
+                continue
+            if isinstance(message, dict) and message.get('method') == 'tools/call':
+                if not workers:
+                    for _ in range(8):
+                        worker = threading.Thread(target=work)
+                        worker.start()
+                        workers.append(worker)
+                # An unbounded queue keeps stdin responsive when all eight
+                # workers are busy; only the workers execute tool calls.
+                pending.put(message)
+            else:
+                emit(server.handle(message))
+    finally:
+        # FIFO sentinels drain both active and waiting calls before EOF exits.
+        for _ in workers:
+            pending.put(None)
+        for worker in workers:
+            worker.join()
+    if not failures.empty():
+        raise failures.get_nowait()
 
 
 def main():
