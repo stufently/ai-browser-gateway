@@ -80,7 +80,7 @@ HTML/text; HTTP-ошибки и interactive challenge она не отменяе
 Trace с challenge — `outcome.attempts`; отказ: пустые html/text,
 причина `error_type`, решение `step`.
 Docker UID/GID `1002:1002`; live: `python3 tests/live_m10_product.py`.
-[Контракт M10](docs/specs/m10-product-contract.md).
+[Контракт M10](specs/m10-product-contract.md).
 HTTP API/CLI — M11, сервис — M12.
 
 Имена `profiles` и `entrances` у `BenchFetcher` обязаны совпадать с именами в
@@ -226,13 +226,13 @@ shutdown removes running providers while draining and finishes sooner.
 Stand-host runs release `db4fc359171c304470d7edae3d60cb13394e7881`
 under `/home/user/services/ai-browser-gateway`, with the API published at
 `127.0.0.1:8765`. Measured outcomes and image identity:
-[M16c deployment results](docs/research/04-phase1-verdict.md#после-выкладки-m16c).
+[M16c deployment results](research/04-phase1-verdict.md#после-выкладки-m16c).
 Deployment and target checks passed. The executor's AC-954 run hit
 `worker_internal_error`, a catch-all the harness reports for any worker failure
 — including a gateway HTTP 500 — so that one request stays unexplained. The
 coordinator reran the same egress-rotation check on this release and it passed;
 the release was accepted with AC-954 open.
-The [M12b report](docs/research/07-deployed-service.md) retains the original
+The [M12b report](research/07-deployed-service.md) retains the original
 profile-pool and target measurements.
 
 Start or stop the service using its explicit configuration:

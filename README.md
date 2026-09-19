@@ -28,11 +28,10 @@ For a site behind Cloudflare, allow a larger budget; the default 30 seconds
 leaves little room for the browser steps:
 
 ```sh
-docker run --rm ghcr.io/stufently/ai-browser-gateway-oneshot:latest https://www.bizprofile.net/ --format markdown --budget-ms 90000
+docker run --rm ghcr.io/stufently/ai-browser-gateway-oneshot:latest https://cloudflare-protected.example/ --format markdown --budget-ms 90000
 ```
 
-The GHCR image is scheduled for publication after this documentation milestone.
-Until it is available, build and run from the repository root:
+Or build and run from the repository root:
 
 ```sh
 docker build -f deploy/Dockerfile.oneshot -t ai-browser-gateway-oneshot .
@@ -164,12 +163,12 @@ integrated; interactive challenges can require human action.
 
 ## Development
 
-Run the unit suite and frozen probes from the repository root with the pinned
-Python image used for acceptance. Both containers run without network access:
+Run the unit suite and frozen probes from the repository root with the official
+Python image pinned by digest. Both containers run without network access:
 
 ```sh
-docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest discover -q -s tests -t .
-docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container
+docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t .
+docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container
 ```
 
 ## License
