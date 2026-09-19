@@ -46,10 +46,12 @@
   от аибраузергейтвей». CI check-sites в Kubernetes, API шлюза на stand-host закрыт, в
   поде нет docker. **M19 + fix1 + fix2 и M20 + fix1 влиты** (образ `deploy/Dockerfile.oneshot`,
   CLI `python3 -m gateway.oneshot`, 1,71 ГБ, тексты лицензий пакетов сохранены).
-  **IN_PROGRESS — чистка истории и открытие репо.** Дальше по решениям владельца 19.09.2026: чистка истории и
-  открытие репо на GitHub, веха SEO (лицензия MIT), публичный образ в GHCR
-  (Google Chrome внутри — решение владельца), затем веха в check-sites:
-  CF-челлендж по URL → перепроверка образом из GHCR, провал → «Url failed».
+  История вычищена и перезаписана 19.09.2026 (бэкап старой — git bundle вне репо),
+  образ `ghcr.io/stufently/ai-browser-gateway-oneshot:0.1.0` опубликован
+  (index `sha256:d744bcc2c71e3f7212231e540ccd82eeb844f9666f5c9352495817f091b2c3fc`),
+  **M21 + fix1 влиты**: английский README, MIT, SECURITY.md, метаданные.
+  **IN_PROGRESS — открытие репо и пакета**, затем веха в check-sites:
+  CF-челлендж по URL → перепроверка этим образом, провал → «Url failed».
 
 ## Готовность к использованию — поручение 14.09.2026
 

@@ -4,6 +4,14 @@
 
 ### Добавлено
 
+- **Публичный README и лицензия (M21, fix1).** README на английском для
+  людей из поиска: быстрый старт образом из GHCR, справочник CLI, как устроена
+  лестница, MCP-сервер, выводы замеров, ответственное использование. Лицензия
+  MIT, `SECURITY.md`, метаданные `pyproject.toml`. Прежний русский README —
+  `docs/README.ru.md` (развёртывание и эксплуатация).
+- **Образ в GHCR.** `ghcr.io/stufently/ai-browser-gateway-oneshot` —
+  теги `0.1.0`, `latest`, `sha-72448e0`.
+
 - **Самодостаточный one-shot образ (M19, fix1, fix2).** `deploy/Dockerfile.oneshot`
   собирает всю лестницу `curl_cffi → patchright → scrapling` в одном образе без
   Docker-демона и API: `docker run <образ> URL [--format …] [--expected-text …]
