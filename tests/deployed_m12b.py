@@ -209,7 +209,12 @@ def worker_call(action, **payload):
         data = json.loads(raw)
     except ValueError:
         raise CheckError('worker_invalid_json') from None
-    require(isinstance(data, dict) and 'internal_error' not in data, 'worker_internal_error')
+    require(isinstance(data, dict), 'worker_invalid_schema')
+    if 'internal_error' in data:
+        error = 'worker_internal_error:' + str(data['internal_error'])
+        if 'cause' in data:
+            error += ':' + str(data['cause'])
+        raise CheckError(redact(error))
     return data
 
 
@@ -270,7 +275,10 @@ def worker():
                 status, raw = exc.code, exc.read().decode()
                 exc.close()
             if is_api:
-                parsed = parse_api(status, raw)
+                try:
+                    parsed = parse_api(status, raw)
+                except CheckError as exc:
+                    raise CheckError(f'{exc}:{status}') from None
                 if action == 'bizprofile':
                     value = {'api_evidence': api_evidence(parsed),
                              'marker_found': data['marker'] in parsed['content']}
@@ -297,8 +305,10 @@ def worker():
         value = dict(status=None, ip=None, error='timeout') if echo_network else {'internal_error': 'worker_timeout'}
     except (OSError, http.client.HTTPException, URLError):
         value = dict(status=None, ip=None, error='connection_error') if echo_network else {'internal_error': 'worker_connection'}
-    except Exception:
-        value = {'internal_error': 'worker_failure'}
+    except CheckError as exc:
+        value = {'internal_error': 'worker_check', 'cause': str(exc)}
+    except Exception as exc:
+        value = {'internal_error': 'worker_failure', 'cause': type(exc).__name__}
     print(json.dumps(redact(value)))
 
 

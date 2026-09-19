@@ -96,6 +96,22 @@ MUTANTS = (
         "test": "tests.test_gateway_format.FormatTests.test_markdown_escapes_empty_numeric_reference",
         "assert": "self.assertEqual(render_content(obj, 'markdown'), r'\\&\\#;')",
     },
+    {
+        "name": "worker preserves check failure cause",
+        "path": "tests/deployed_m12b.py",
+        "old": "value = {'internal_error': 'worker_check', 'cause': str(exc)}",
+        "new": "value = {'internal_error': 'worker_failure'}",
+        "test": "tests.test_deployed_m12b.WorkerTests.test_api_http_error_preserves_status",
+        "assert": "self.assertEqual(result, expected)",
+    },
+    {
+        "name": "worker caller reports failure cause",
+        "path": "tests/deployed_m12b.py",
+        "old": "raise CheckError(redact(error))",
+        "new": "raise CheckError('worker_internal_error')",
+        "test": "tests.test_deployed_m12b.WorkerTests.test_worker_call_reports_failure_cause",
+        "assert": "self.assertEqual(results, expected)",
+    },
 )
 
 

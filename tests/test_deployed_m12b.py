@@ -616,6 +616,91 @@ class WorkerTests(unittest.TestCase):
         self.assertIn('internal_error', result)
         self.assertNotIn('fake-token', json.dumps(result))
 
+    def test_api_http_error_preserves_status(self):
+        from urllib.error import HTTPError
+        error = HTTPError('http://gateway.invalid/', 500, 'secret-tok', {},
+                          io.BytesIO(b'secret response body'))
+        with patch.object(Path, 'read_text', return_value='fake-token'), \
+             patch('urllib.request.OpenerDirector.open', side_effect=error):
+            result = self.invoke({'action': 'api', 'request': {}})
+        expected = {'internal_error': 'worker_check', 'cause': 'api_http_error:500'}
+        self.assertEqual(result, expected)
+
+    def test_api_parse_failures_preserve_code_and_status(self):
+        for action in ('api', 'bizprofile'):
+            for status, body, cause in (
+                    (500, b'private body', 'api_http_error:500'),
+                    (200, b'{"ok": true}', 'api_invalid_schema:200'),
+                    (200, b'invalid json', 'api_invalid_json:200')):
+                with self.subTest(action=action, cause=cause):
+                    response = MagicMock()
+                    response.__enter__.return_value = response
+                    response.status = status
+                    response.read.return_value = body
+                    with patch.object(Path, 'read_text', return_value='fake-token'), \
+                         patch('urllib.request.OpenerDirector.open', return_value=response):
+                        result = self.invoke({'action': action, 'request': {}})
+                    self.assertEqual(result, {'internal_error': 'worker_check', 'cause': cause})
+
+    def test_worker_transport_and_unexpected_failures(self):
+        for error, expected in (
+                (OSError('secret-tok'), {'internal_error': 'worker_connection'}),
+                (TimeoutError('secret-tok'), {'internal_error': 'worker_timeout'}),
+                (ValueError('secret-tok'),
+                 {'internal_error': 'worker_failure', 'cause': 'ValueError'})):
+            with self.subTest(error=type(error).__name__):
+                with patch.object(Path, 'read_text', return_value='fake-token'), \
+                     patch('urllib.request.OpenerDirector.open', side_effect=error):
+                    result = self.invoke({'action': 'api', 'request': {}})
+                self.assertEqual(result, expected)
+                self.assertNotIn('secret-tok', json.dumps(result))
+
+    def test_worker_check_outside_api_preserves_static_code(self):
+        self.assertEqual(self.invoke({'action': 'unknown'}),
+                         {'internal_error': 'worker_check', 'cause': 'unknown_worker_action'})
+
+    def test_worker_call_reports_failure_cause(self):
+        results = []
+        for payload in (
+                {'internal_error': 'worker_check', 'cause': 'api_http_error:500'},
+                {'internal_error': 'worker_connection'},
+                {'internal_error': 'worker_timeout'},
+                {'internal_error': 'worker_failure', 'cause': 'ValueError'}):
+            with patch.object(d, 'docker', return_value=json.dumps(payload)), \
+                 self.assertRaises(d.CheckError) as raised:
+                d.worker_call('api', request={})
+            results.append(str(raised.exception))
+        expected = [
+            'worker_internal_error:worker_check:api_http_error:500',
+            'worker_internal_error:worker_connection',
+            'worker_internal_error:worker_timeout',
+            'worker_internal_error:worker_failure:ValueError',
+        ]
+        self.assertEqual(results, expected)
+
+    def test_worker_call_redacts_secrets_in_cause(self):
+        for cause, redacted in (
+                ('token=secret-tok', 'token=[redacted]'),
+                ('https://user:secret-tok@example.invalid/path', '[url]'),
+                ('Bearer secret-tok', 'Bearer [redacted]'),
+                ('a' * 64, '[redacted]')):
+            with self.subTest(cause=cause):
+                payload = {'internal_error': 'worker_check', 'cause': cause}
+                with patch.object(d, 'docker', return_value=json.dumps(payload)), \
+                     self.assertRaises(d.CheckError) as raised:
+                    d.worker_call('api', request={})
+                message = str(raised.exception)
+                self.assertEqual(message, 'worker_internal_error:worker_check:' + redacted)
+                self.assertNotIn(cause, message)
+                self.assertNotIn('secret-tok', message)
+
+    def test_worker_call_rejects_non_dictionary_response(self):
+        for payload in ([], None, 'response', 42):
+            with self.subTest(payload=payload), \
+                 patch.object(d, 'docker', return_value=json.dumps(payload)), \
+                 self.assertRaisesRegex(d.CheckError, '^worker_invalid_schema$'):
+                d.worker_call('health')
+
     def test_http_actions_send_authorization_only_for_api_requests(self):
         for action, endpoint, authorization, status, body in (
                 ('bizprofile', '/v1/fetch', 'Bearer worker-token', 200, outcome(True)),
