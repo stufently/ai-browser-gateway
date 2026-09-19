@@ -1,5 +1,10 @@
 FROM python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56
 
+LABEL org.opencontainers.image.source="https://github.com/stufently/ai-browser-gateway" \
+      org.opencontainers.image.title="ai-browser-gateway one-shot" \
+      org.opencontainers.image.description="Fetch one web page through the curl_cffi → patchright → scrapling ladder and print API-identical JSON" \
+      org.opencontainers.image.licenses="MIT"
+
 ENV HOME=/opt/home \
     PYTHONPATH=/opt/abg-src \
     PYTHONDONTWRITEBYTECODE=1
@@ -13,6 +18,13 @@ RUN apt-get update \
 RUN pip install --no-cache-dir curl_cffi==0.16.3 patchright==1.62.3 \
         playwright==1.62.0 "scrapling[fetchers]==0.4.15" \
  && patchright install --with-deps chrome \
+ && apt-get purge -y mesa-vulkan-drivers \
+ && apt-get -o APT::AutoRemove::RecommendsImportant=false -o APT::AutoRemove::SuggestsImportant=false autoremove --purge -y \
+ && SP=/usr/local/lib/python3.14/site-packages \
+ && cmp $SP/playwright/driver/node $SP/patchright/driver/node \
+ && ln -f $SP/patchright/driver/node $SP/playwright/driver/node \
+ && pip uninstall -y pip \
+ && rm -rf /usr/share/doc /usr/share/man /var/cache/apt /var/log/apt /var/log/dpkg.log \
  && chmod -R a+rwX /opt/home \
  && rm -rf /var/lib/apt/lists/*
 
