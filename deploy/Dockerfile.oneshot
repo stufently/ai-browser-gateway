@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir curl_cffi==0.16.3 patchright==1.62.3 \
  && cmp $SP/playwright/driver/node $SP/patchright/driver/node \
  && ln -f $SP/patchright/driver/node $SP/playwright/driver/node \
  && pip uninstall -y pip \
- && rm -rf /usr/share/doc /usr/share/man /var/cache/apt /var/log/apt /var/log/dpkg.log \
+ && rm -rf /usr/share/man /var/cache/apt /var/log/apt /var/log/dpkg.log \
  && chmod -R a+rwX /opt/home \
  && rm -rf /var/lib/apt/lists/*
 
