@@ -44,14 +44,15 @@
 - [ ] **check-sites проверяет CF-сайты образом шлюза (поручение 19.09.2026).**
   Владелец: «чтобы он мог вызвать для сайтов с кладуфларе проверку через имейдж
   от аибраузергейтвей». CI check-sites в Kubernetes, API шлюза на stand-host закрыт, в
-  поде нет docker — поэтому две вехи. **IN_PROGRESS — M19** (`docs/specs/m19-oneshot-image.md`):
-  один образ со всей лестницей (curl_cffi → patchright → scrapling локальными
-  процессами) и CLI `python3 -m gateway.oneshot` с JSON как у API; панель
-  `cx-abg-m19-20260919`. Затем публикация образа в
-  `registry.gitlab.example.org:5005/stufently/check-sites/…` и **M20** в check-sites:
-  CF-челлендж по URL → перепроверка образом, «жив за CF» отличается от «лежит».
-  Проверено до спеки: в одном образе все три провайдера стартуют от root и с
-  дефолтным /dev/shm, `scrapling` берёт bizprofile (200, настоящий title).
+  поде нет docker. **M19 + fix1 + fix2 влиты** (образ `deploy/Dockerfile.oneshot`,
+  CLI `python3 -m gateway.oneshot`). **IN_PROGRESS — M20-fix1**
+  (`docs/specs/m20-fix1-keep-licenses.md`, панель `cx-abg-m20-fix1-20260919`):
+  M20 облегчила образ 2,13 → 1,71 ГБ (сжатый 579 → 477 МБ) и дала OCI-метки,
+  fix1 возвращает `/usr/share/doc` — образ публичный, тексты лицензий пакетов
+  обязаны остаться. Дальше по решениям владельца 19.09.2026: чистка истории и
+  открытие репо на GitHub, веха SEO (лицензия MIT), публичный образ в GHCR
+  (Google Chrome внутри — решение владельца), затем веха в check-sites:
+  CF-челлендж по URL → перепроверка образом из GHCR, провал → «Url failed».
 
 ## Готовность к использованию — поручение 14.09.2026
 
