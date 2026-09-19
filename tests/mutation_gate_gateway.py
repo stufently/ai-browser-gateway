@@ -153,6 +153,14 @@ MUTANTS = (
         "assert": "self.assertEqual(first, dict(jsonrpc='2.0', id=3, result={}))",
     },
     {
+        "name": "MCP worker output failure ignores handler",
+        "path": "gateway/mcp_stdio.py",
+        "old": "                    on_output_error()",
+        "new": "                    pass",
+        "test": "tests.test_mcp_stdio.MCPTests.test_worker_output_failure_triggers_handler",
+        "assert": "self.assertEqual(before_eof, [True])",
+    },
+    {
         "name": "MCP argument errors become protocol errors",
         "path": "gateway/mcp_stdio.py",
         "old": "                return dict(content=[dict(type='text', text='invalid_arguments')],\n"

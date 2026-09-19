@@ -172,7 +172,7 @@ def rpc_error(ident, code, message):
     return result
 
 
-def serve(stdin, stdout):
+def serve(stdin, stdout, *, on_output_error=None):
     server = Server()
     pending, failures = queue.Queue(), queue.Queue()
     output_lock = threading.Lock()
@@ -191,8 +191,10 @@ def serve(stdin, stdout):
             try:
                 emit(server.handle(message))
             except Exception as exc:
-                # Report output failures on the main thread, without a worker
-                # traceback or abandoning the remaining queued calls.
+                # The CLI must exit even while stdin is blocked. In-process
+                # callers can omit the handler and receive the error on EOF.
+                if on_output_error is not None:
+                    on_output_error()
                 failures.put(exc)
 
     try:
@@ -226,8 +228,19 @@ def serve(stdin, stdout):
 
 
 def main():
+    failure_lock = threading.Lock()
+
+    def output_failed():
+        # Only one worker reports the failure. Skip shutdown joins and stdout
+        # flushing: pending calls cannot deliver their responses anymore.
+        with failure_lock:
+            try:
+                print('MCP stdio error', file=sys.stderr, flush=True)
+            finally:
+                os._exit(1)
+
     try:
-        serve(sys.stdin, sys.stdout)
+        serve(sys.stdin, sys.stdout, on_output_error=output_failed)
     except (OSError, UnicodeError):
         print('MCP stdio error', file=sys.stderr)
         return 1

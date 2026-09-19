@@ -118,6 +118,34 @@ class MCPTests(unittest.TestCase):
             if not errors.empty():
                 raise errors.get_nowait()
 
+    def test_worker_output_failure_triggers_handler(self):
+        handled = threading.Event()
+        before_eof = []
+        writing_threads = []
+        serving_thread = threading.current_thread()
+
+        def lines():
+            yield json.dumps(request('tools/call', dict(
+                name='fetch_page', arguments={}))) + '\n'
+            # Keep stdin open until the handler runs; a missing handler must
+            # fail an assertion rather than leave the test runner hanging.
+            before_eof.append(handled.wait(2))
+
+        class Output:
+            def write(self, line):
+                writing_threads.append(threading.current_thread())
+                raise BrokenPipeError(TOKEN)
+
+            def flush(self):
+                pass
+
+        with self.assertRaises(BrokenPipeError):
+            mcp_stdio.serve(lines(), Output(), on_output_error=handled.set)
+        self.assertEqual(before_eof, [True])
+        self.assertEqual(len(writing_threads), 1)
+        self.assertIsNot(writing_threads[0], serving_thread)
+        self.open.assert_not_called()
+
     def test_ping_answered_during_slow_call(self):
         started, release = threading.Event(), threading.Event()
 
