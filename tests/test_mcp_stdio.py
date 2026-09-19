@@ -218,6 +218,15 @@ class MCPTests(unittest.TestCase):
                 self.assertNotIn('secret', json.dumps(result))
         self.open.assert_not_called()
 
+    def test_http_error_response_is_closed_without_secret_warning(self):
+        error = HTTPError('http://user:pass@host/', 403, TOKEN, {}, io.BytesIO(b'error'))
+        self.open.side_effect = error
+        try:
+            self.assertIs(self.call()['result']['isError'], True)
+            self.assertTrue(error.closed)
+        finally:
+            error.close()
+
     def test_nonfinite_extension_in_response_is_tool_error(self):
         value = reply()
         value['attempts'][0]['extension'] = float('inf')

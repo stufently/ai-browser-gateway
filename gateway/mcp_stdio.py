@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 import sys
 import tomllib
+from urllib.error import HTTPError
 from urllib.request import Request, build_opener, ProxyHandler
 
 from gateway.client import (MODES, NoRedirect, number, reject, unique,
@@ -96,7 +97,11 @@ def fetch_page(body):
         # Reject non-finite JSON numbers here, while failures are still tool errors.
         json.dumps(result, allow_nan=False)
         return result
-    except Exception:
+    except Exception as exc:
+        # urllib raises before entering the response context manager on HTTP
+        # failures. Close it explicitly: finalizer warnings can contain its URL.
+        if isinstance(exc, HTTPError):
+            exc.close()
         return dict(content=[dict(type='text', text=error)], isError=True)
 
 
