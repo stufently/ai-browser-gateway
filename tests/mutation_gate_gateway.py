@@ -14,6 +14,30 @@ ROOT = Path(__file__).resolve().parents[1]
 TEST_PREFIX = "tests.test_gateway_engine.EngineTests."
 MUTANTS = (
     {
+        "name": "one-shot failure exit status",
+        "path": "gateway/oneshot.py",
+        "old": "return 0 if result.ok else 1",
+        "new": "return 0 if result.ok else 0",
+        "test": "tests.test_oneshot.OneshotTests.test_exit_codes_and_output_contract",
+        "assert": "self.assertEqual(rc, 1)",
+    },
+    {
+        "name": "one-shot browser requires Xvfb",
+        "path": "gateway/oneshot.py",
+        "old": "if provider.kind == 'browser':",
+        "new": "if False:",
+        "test": "tests.test_oneshot.OneshotTests.test_launcher_maps_image_to_provider_and_xvfb",
+        "assert": "self.assertEqual(actual, expected)",
+    },
+    {
+        "name": "one-shot timeout kills descendants",
+        "path": "gateway/oneshot.py",
+        "old": "os.killpg(proc.pid, signal.SIGKILL)",
+        "new": "proc.kill()",
+        "test": "tests.test_oneshot.OneshotTests.test_launcher_timeout_kills_process_group",
+        "assert": "self.assertEqual(killpg.call_args_list, [call(proc.pid, signal.SIGKILL)])",
+    },
+    {
         "name": "entrance freshness boundary",
         "old": "and reply.age_hours <= request.max_age_hours)",
         "new": "and reply.age_hours < request.max_age_hours)",

@@ -327,3 +327,28 @@ The single additional M16c request to `https://lowendtalk.com/` omits
 `expected_text`; its full response is retained as `lowendtalk.json` in the
 M16c evidence directory. Keep that measurement separate from the target matrix,
 which supplies expected text, and do not repeat it during acceptance.
+
+## One-shot image
+
+Самодостаточный образ запускает лестницу `curl_cffi → patchright → scrapling`
+локальными процессами. Развёрнутый API и Docker-демон внутри контейнера не нужны.
+Внутри только direct: без прокси, входов RSS/Wayback, токенов и кэша.
+
+Сборка из корня репозитория и запуск:
+
+```sh
+docker build -f deploy/Dockerfile.oneshot -t abg-oneshot:m19 .
+docker run --rm abg-oneshot:m19 https://example.org/ --format meta
+```
+
+CLI: `python3 -m gateway.oneshot URL [--format text|html|markdown|links|meta]
+[--expected-text TEXT] [--budget-ms N] [--no-browser]`. По умолчанию формат
+`text`, бюджет 30000 мс; `--no-browser` оставляет только HTTP-провайдер.
+Для локального запуска нужны зависимости и probe из образа.
+
+stdout содержит одну строку JSON с теми же полями, что `/v1/fetch`, включая
+`content` и `attempts`. Коды возврата: `0` — `ok=true`; `1` — `ok=false`;
+`2` — неверные аргументы; `3` — внутренняя ошибка. При кодах `2` и `3` stdout
+пуст, stderr содержит одну строку `{"error": "invalid_request"}` или
+`{"error": "internal_error"}` соответственно. Образ работает от root и от
+UID 1002 без увеличения `/dev/shm`.
