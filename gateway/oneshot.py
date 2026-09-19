@@ -105,9 +105,10 @@ def main(argv=None):
         launcher = LocalLauncher()
 
         def interrupt(signum, frame):
+            first = not launcher._interrupted
             launcher._interrupted = True
             launcher.kill_active()
-            if not launcher._starting:
+            if first and not launcher._starting:
                 raise _Interrupted
 
         previous = {}

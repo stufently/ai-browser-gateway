@@ -14,6 +14,22 @@ ROOT = Path(__file__).resolve().parents[1]
 TEST_PREFIX = "tests.test_gateway_engine.EngineTests."
 MUTANTS = (
     {
+        "name": "one-shot repeated signal escapes interruption",
+        "path": "gateway/oneshot.py",
+        "old": "if first and not launcher._starting:",
+        "new": "if not launcher._starting:",
+        "test": "tests.test_oneshot.OneshotTests.test_repeated_signal_still_exits_interrupted",
+        "assert": "self.assertEqual(observed, expected)",
+    },
+    {
+        "name": "one-shot finished probe remains active",
+        "path": "gateway/oneshot.py",
+        "old": "self._active.discard(proc.pid)",
+        "new": "pass",
+        "test": "tests.test_oneshot.OneshotTests.test_finished_probe_not_killed_on_interrupt",
+        "assert": "self.assertEqual(killpg.call_args_list, [call(second.pid, signal.SIGKILL)])",
+    },
+    {
         "name": "one-shot forwards environment proxies",
         "path": "gateway/oneshot.py",
         "old": "if name.lower() not in {'http_proxy', 'https_proxy', 'all_proxy',",

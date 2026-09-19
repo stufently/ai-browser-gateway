@@ -209,6 +209,84 @@ class OneshotTests(unittest.TestCase):
             self.assertEqual(invoke([URL]), (4, '', '{"error": "interrupted"}\n'))
         self.assertEqual({s: signal.getsignal(s) for s in signals}, previous)
 
+    def test_repeated_signal_still_exits_interrupted(self):
+        signals = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+        previous = {sig: signal.getsignal(sig) for sig in signals}
+        install = signal.signal
+        observed = []
+        for phase in ('stderr', 'restore'):
+            for sig in signals:
+                proc = process()
+                launcher = oneshot.LocalLauncher()
+                out, err = io.StringIO(), io.StringIO()
+                write = err.write
+                repeated = []
+
+                def repeat():
+                    repeated.append(sig)
+                    signal.getsignal(sig)(sig, None)
+
+                def interrupt(**kwargs):
+                    signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+                def write_error(text):
+                    if phase == 'stderr' and 'interrupted' in text and not repeated:
+                        repeat()
+                    return write(text)
+
+                def restore(signum, handler):
+                    if (phase == 'restore' and signum == sig
+                            and handler is previous[sig] and not repeated):
+                        repeat()
+                    return install(signum, handler)
+
+                proc.communicate.side_effect = interrupt
+                try:
+                    with patch.object(oneshot, 'LocalLauncher', return_value=launcher), patch.object(
+                            oneshot.subprocess, 'Popen', return_value=proc), patch.object(
+                            oneshot.os, 'killpg'), patch.object(
+                            launcher, 'kill_active', wraps=launcher.kill_active) as kill_active, patch.object(
+                            oneshot.signal, 'signal', side_effect=restore), patch.object(
+                            err, 'write', side_effect=write_error), redirect_stdout(out), redirect_stderr(err):
+                        rc = None
+                        try:
+                            rc = oneshot.main([URL])
+                        except oneshot._Interrupted:
+                            pass  # Record an escaped interrupt as a contract failure below.
+                    observed.append((phase, sig, rc, out.getvalue(), err.getvalue().splitlines()[-1:],
+                                     {s: signal.getsignal(s) for s in signals},
+                                     repeated, kill_active.call_count))
+                finally:
+                    for signum, handler in previous.items():
+                        install(signum, handler)
+        expected = [(phase, sig, 4, '', ['{"error": "interrupted"}'], previous, [sig], 2)
+                    for phase in ('stderr', 'restore') for sig in signals]
+        self.assertEqual(observed, expected)
+
+    def test_finished_probe_not_killed_on_interrupt(self):
+        signals = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+        previous = {sig: signal.getsignal(sig) for sig in signals}
+        first, second = process(403), process()
+        second.pid = first.pid + 1
+
+        def interrupt(**kwargs):
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+
+        second.communicate.side_effect = interrupt
+        try:
+            with patch.object(oneshot.subprocess, 'Popen', side_effect=[first, second]) as spawn, patch.object(
+                    oneshot.os, 'killpg') as killpg:
+                result = invoke([URL])
+            self.assertEqual(result, (4, '', '{"error": "interrupted"}\n'))
+            self.assertEqual(spawn.call_count, 2)
+            first.communicate.assert_called_once()
+            second.communicate.assert_called_once()
+            self.assertEqual(killpg.call_args_list, [call(second.pid, signal.SIGKILL)])
+            self.assertEqual({s: signal.getsignal(s) for s in signals}, previous)
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
+
     def test_direct_only_request(self):
         for flags, allow, budget, expected in [([], True, 30000, None),
                 (['--no-browser', '--budget-ms', '120000', '--expected-text', 'Hello'],
