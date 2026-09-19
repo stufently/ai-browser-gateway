@@ -156,6 +156,40 @@ no proxy credentials/intermediate pages. Total budget includes shared browser-sl
 waiting; HTTP/RSS/Wayback/health bypass slots. M10 owns policy.
 Live JS/Docker assertions: `python3 tests/live_m11_api.py`.
 
+## MCP server
+
+`scripts/abg-mcp` (Python 3.12+, stdlib only) exposes one MCP tool, `fetch_page`,
+over stdio. It calls the existing gateway API and its full provider ladder.
+Add a stdio server to your MCP client's configuration, using absolute paths:
+
+```json
+{
+  "mcpServers": {
+    "ai-browser-gateway": {
+      "command": "/path/to/ai-browser-gateway/scripts/abg-mcp",
+      "env": {
+        "ABG_URL": "http://127.0.0.1:8765/v1/fetch",
+        "ABG_TOKEN_FILE": "/home/you/.config/abg/client-token"
+      }
+    }
+  }
+}
+```
+
+From the checkout, `python3 -m gateway.mcp_stdio` is equivalent. The API must
+already be running; the adapter opens no listening socket. `ABG_TOKEN` takes
+precedence over `ABG_TOKEN_FILE`, whose default is `~/.config/abg/client-token`.
+The API URL above is the default. HTTP uses no system proxy or redirects.
+
+`fetch_page` requires `url`; optional arguments are `format`
+(`text|html|markdown|links|meta`, default `text`), `expected_text` (default null),
+`budget_ms` (1–180000, default 30000), `allow_browser` (default true), and
+`max_age_hours` (default 0). Fetch options come from tool arguments.
+Results include page content plus provider/attempt metadata; gateway and
+transport failures are tool errors. Credentials are redacted from results.
+The server negotiates MCP `2026-07-28` or `2025-06-18`, falling back to the
+newer revision for an unsupported version. Stdout carries only JSON-RPC lines.
+
 ## M12a local service
 
 Local Docker API + profile pool + health sidecar. Production/15-proxy is M12b.

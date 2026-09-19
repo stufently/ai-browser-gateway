@@ -1,4 +1,4 @@
-"""Kill each M7 mutant at its own assertion and restore source bytes in finally."""
+"""Kill each gateway mutant at its own assertion and restore source bytes in finally."""
 
 from __future__ import annotations
 
@@ -111,6 +111,30 @@ MUTANTS = (
         "new": "raise CheckError('worker_internal_error')",
         "test": "tests.test_deployed_m12b.WorkerTests.test_worker_call_reports_failure_cause",
         "assert": "self.assertEqual(results, expected)",
+    },
+    {
+        "name": "MCP honors requested protocol version",
+        "path": "gateway/mcp_stdio.py",
+        "old": "self.version = requested if requested in SUPPORTED_VERSIONS else LATEST_VERSION",
+        "new": "self.version = LATEST_VERSION",
+        "test": "tests.test_mcp_stdio.MCPTests.test_negotiates_requested_old_version",
+        "assert": "self.assertEqual(result['protocolVersion'], '2025-06-18')",
+    },
+    {
+        "name": "MCP revision-specific result fields",
+        "path": "gateway/mcp_stdio.py",
+        "old": "if self.version == LATEST_VERSION:",
+        "new": "if True:",
+        "test": "tests.test_mcp_stdio.MCPTests.test_old_list_omits_new_fields",
+        "assert": "self.assertFalse({'resultType', 'cacheScope', 'ttlMs'} & result.keys())",
+    },
+    {
+        "name": "MCP reports gateway failure as tool error",
+        "path": "gateway/mcp_stdio.py",
+        "old": "result['isError'] = True",
+        "new": "result['isError'] = False",
+        "test": "tests.test_mcp_stdio.MCPTests.test_gateway_failure_is_tool_error",
+        "assert": "self.assertIs(result.get('isError'), True)",
     },
 )
 
