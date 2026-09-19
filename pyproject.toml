@@ -1,13 +1,36 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "ai-browser-gateway"
 version = "0.1.0"
-description = "Cheapest sufficient gateway for fetching web pages"
+description = "Web fetching for AI agents with HTTP, headless browsers, Cloudflare challenge handling, and MCP"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+keywords = [
+    "web-scraping",
+    "headless-browser",
+    "cloudflare",
+    "mcp",
+    "ai-agents",
+    "playwright",
+    "web-fetching",
+    "browser-automation",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Internet :: WWW/HTTP",
+]
 requires-python = ">=3.12"
 dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/stufently/ai-browser-gateway"
+Repository = "https://github.com/stufently/ai-browser-gateway"
+Issues = "https://github.com/stufently/ai-browser-gateway/issues"
 
 [tool.setuptools.packages.find]
 include = ["bench*", "gateway*"]
