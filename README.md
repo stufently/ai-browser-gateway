@@ -333,6 +333,8 @@ which supplies expected text, and do not repeat it during acceptance.
 Самодостаточный образ запускает лестницу `curl_cffi → patchright → scrapling`
 локальными процессами. Развёрнутый API и Docker-демон внутри контейнера не нужны.
 Внутри только direct: без прокси, входов RSS/Wayback, токенов и кэша.
+Переменные окружения `http_proxy`, `https_proxy`, `all_proxy`, `ftp_proxy` и
+`no_proxy` в любом регистре игнорируются: образ всегда ходит direct.
 
 Сборка из корня репозитория и запуск:
 
@@ -348,7 +350,9 @@ CLI: `python3 -m gateway.oneshot URL [--format text|html|markdown|links|meta]
 
 stdout содержит одну строку JSON с теми же полями, что `/v1/fetch`, включая
 `content` и `attempts`. Коды возврата: `0` — `ok=true`; `1` — `ok=false`;
-`2` — неверные аргументы; `3` — внутренняя ошибка. При кодах `2` и `3` stdout
-пуст, stderr содержит одну строку `{"error": "invalid_request"}` или
-`{"error": "internal_error"}` соответственно. Образ работает от root и от
-UID 1002 без увеличения `/dev/shm`.
+`2` — неверные аргументы; `3` — внутренняя ошибка; `4` — прерван сигналом
+SIGTERM, SIGINT или SIGHUP во время прогона лестницы. При кодах `2`, `3` и `4`
+stdout пуст, stderr содержит одну строку `{"error": "invalid_request"}`,
+`{"error": "internal_error"}` или `{"error": "interrupted"}` соответственно.
+При прерывании группы всех активных probe уничтожаются SIGKILL.
+Образ работает от root и от UID 1002 без увеличения `/dev/shm`.

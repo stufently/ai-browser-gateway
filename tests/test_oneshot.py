@@ -123,6 +123,92 @@ class OneshotTests(unittest.TestCase):
             with self.assertRaises(subprocess.TimeoutExpired):
                 oneshot.LocalLauncher().run(['docker', 'run', by_name('patchright').image, URL], 0.1)
 
+    def test_proxy_environment_not_forwarded(self):
+        proxies = {variant: 'http://127.0.0.1:9'
+                   for name in ('http_proxy', 'https_proxy', 'all_proxy', 'ftp_proxy', 'no_proxy')
+                   for variant in (name, name.upper(), name.title())}
+        env = dict(proxies, HOME='/custom', MARKER='kept', ABG_PROXY='http://gateway:8080')
+        expected = dict(HOME='/custom', MARKER='kept', ABG_PROXY='http://gateway:8080',
+                        ABG_PROVIDER='curl_cffi')
+        forwarded = []
+        argv = ['docker', 'run', by_name('curl_cffi').image, URL]
+        with patch.dict(os.environ, env, clear=True), patch.object(
+                oneshot.subprocess, 'Popen', return_value=process()) as spawn, patch.object(
+                oneshot.signal, 'signal') as install:
+            for supplied in (None, env):
+                oneshot.LocalLauncher().run(argv, 1, env=supplied)
+                forwarded.append(spawn.call_args.kwargs['env'])
+            install.assert_not_called()
+            self.assertEqual(dict(os.environ), env)
+        self.assertEqual(forwarded, [expected, expected])
+        self.assertTrue(all(env[name] == value for name, value in proxies.items()))
+
+    def test_signal_kills_active_probe_groups(self):
+        signals = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
+        previous = {sig: signal.getsignal(sig) for sig in signals}
+        observed, outcomes, restored = [], [], []
+        for sig in signals:
+            for missing in (False, True):
+                outer, inner = process(), process()
+                inner.pid = outer.pid + 1
+                payload = inner.communicate.return_value
+
+                def interrupt(**kwargs):
+                    handler = signal.getsignal(sig)
+                    if handler is not previous[sig] and callable(handler):
+                        handler(sig, None)
+                    return payload
+
+                def nested(**kwargs):
+                    return launcher.run(['docker', 'run', by_name('patchright').image, URL], 1)[1:]
+
+                launcher = oneshot.LocalLauncher()
+                outer.communicate.side_effect = nested
+                inner.communicate.side_effect = interrupt
+                with patch.object(oneshot, 'LocalLauncher', return_value=launcher), patch.object(
+                        oneshot.subprocess, 'Popen', side_effect=[outer, inner]), patch.object(
+                        oneshot.os, 'killpg', side_effect=ProcessLookupError if missing else None) as killpg:
+                    try:
+                        outcomes.append(invoke([URL]))
+                        observed.append(sorted(killpg.call_args_list, key=lambda c: c.args[0]))
+                        restored.append({s: signal.getsignal(s) for s in signals})
+                    finally:
+                        for signum, handler in previous.items():
+                            signal.signal(signum, handler)
+        expected = [call(12345, signal.SIGKILL), call(12346, signal.SIGKILL)]
+        self.assertEqual(observed, [expected] * 6)
+        self.assertEqual(outcomes, [(4, '', '{"error": "interrupted"}\n')] * 6)
+        self.assertEqual(restored, [previous] * 6)
+        with patch.object(oneshot.subprocess, 'Popen', return_value=process()):
+            self.assertEqual(invoke([URL])[0], 0)
+        self.assertEqual({s: signal.getsignal(s) for s in signals}, previous)
+        with patch.object(oneshot.subprocess, 'Popen', side_effect=RuntimeError):
+            self.assertEqual(invoke([URL])[0], 3)
+        self.assertEqual({s: signal.getsignal(s) for s in signals}, previous)
+
+        # A signal can arrive after fork, before Popen returns the child's PID.
+        proc = process()
+
+        def interrupted_spawn(*args, **kwargs):
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+            return proc
+
+        with patch.object(oneshot.subprocess, 'Popen', side_effect=interrupted_spawn), patch.object(
+                oneshot.os, 'killpg') as killpg:
+            self.assertEqual(invoke([URL]), (4, '', '{"error": "interrupted"}\n'))
+            killpg.assert_called_once_with(proc.pid, signal.SIGKILL)
+            proc.communicate.assert_not_called()
+            proc.wait.assert_called_once_with()
+        self.assertEqual({s: signal.getsignal(s) for s in signals}, previous)
+
+        def interrupted_spawn_failure(*args, **kwargs):
+            signal.getsignal(signal.SIGTERM)(signal.SIGTERM, None)
+            raise OSError('spawn failed after interruption')
+
+        with patch.object(oneshot.subprocess, 'Popen', side_effect=interrupted_spawn_failure):
+            self.assertEqual(invoke([URL]), (4, '', '{"error": "interrupted"}\n'))
+        self.assertEqual({s: signal.getsignal(s) for s in signals}, previous)
+
     def test_direct_only_request(self):
         for flags, allow, budget, expected in [([], True, 30000, None),
                 (['--no-browser', '--budget-ms', '120000', '--expected-text', 'Hello'],

@@ -13,8 +13,24 @@ from gateway.format import MODES, render_content
 from gateway.product import ProductRequest, plan_product, run_product
 
 
+class _Interrupted(BaseException):
+    """Unwind the provider ladder without becoming a provider error."""
+
+
 class LocalLauncher:
     """Translate the registry's Docker command into an isolated local probe."""
+
+    def __init__(self):
+        self._active = set()
+        self._starting = False
+        self._interrupted = False
+
+    def kill_active(self):
+        for pid in tuple(self._active):
+            try:
+                os.killpg(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
 
     def run(self, argv, timeout, *, env=None):
         images = {provider.image: provider for provider in PROVIDERS}
@@ -28,12 +44,29 @@ class LocalLauncher:
         if provider.kind == 'browser':
             command = ['xvfb-run', '-a', '-s', '-screen 0 1920x1080x24', *command]
         child_env = dict(os.environ if env is None else env)
+        child_env = {name: value for name, value in child_env.items()
+                     if name.lower() not in {'http_proxy', 'https_proxy', 'all_proxy',
+                                             'ftp_proxy', 'no_proxy'}}
         child_env['ABG_PROVIDER'] = provider.name
-        proc = subprocess.Popen(command, env=child_env, start_new_session=True,
-                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, text=True)
+        proc = None
         try:
+            # Defer interruption until Popen has returned the PID we must kill.
+            self._starting = True
+            try:
+                proc = subprocess.Popen(command, env=child_env, start_new_session=True,
+                                        stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE, text=True)
+                self._active.add(proc.pid)
+            finally:
+                self._starting = False
+                if self._interrupted:
+                    self.kill_active()
+                    raise _Interrupted
             stdout, stderr = proc.communicate(timeout=timeout)
+        except _Interrupted:
+            if proc is not None:
+                proc.wait()
+            raise
         except subprocess.TimeoutExpired:
             try:
                 os.killpg(proc.pid, signal.SIGKILL)
@@ -41,6 +74,9 @@ class LocalLauncher:
                 pass
             proc.communicate()
             raise
+        finally:
+            if proc is not None:
+                self._active.discard(proc.pid)
         return proc.returncode, stdout, stderr
 
 
@@ -66,7 +102,25 @@ def main(argv=None):
         except (ValueError, TypeError, OverflowError, RecursionError, OSError):
             print('{"error": "invalid_request"}', file=sys.stderr)
             return 2
-        result = run_product(request, ProductFetcher(request.url, launcher=LocalLauncher()))
+        launcher = LocalLauncher()
+
+        def interrupt(signum, frame):
+            launcher._interrupted = True
+            launcher.kill_active()
+            if not launcher._starting:
+                raise _Interrupted
+
+        previous = {}
+        try:
+            for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+                previous[signum] = signal.signal(signum, interrupt)
+            result = run_product(request, ProductFetcher(request.url, launcher=launcher))
+        except _Interrupted:
+            print('{"error": "interrupted"}', file=sys.stderr)
+            return 4
+        finally:
+            for signum, handler in previous.items():
+                signal.signal(signum, handler)
         value = {key: getattr(result, key) for key in ('ok', 'url', 'final_url', 'provider',
                  'age_hours', 'error_type', 'step', 'elapsed_ms')}
         value.update(format=args.format, content=render_content(result, args.format),

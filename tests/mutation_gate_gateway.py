@@ -14,6 +14,22 @@ ROOT = Path(__file__).resolve().parents[1]
 TEST_PREFIX = "tests.test_gateway_engine.EngineTests."
 MUTANTS = (
     {
+        "name": "one-shot forwards environment proxies",
+        "path": "gateway/oneshot.py",
+        "old": "if name.lower() not in {'http_proxy', 'https_proxy', 'all_proxy',",
+        "new": "if True or name.lower() not in {'http_proxy', 'https_proxy', 'all_proxy',",
+        "test": "tests.test_oneshot.OneshotTests.test_proxy_environment_not_forwarded",
+        "assert": "self.assertEqual(forwarded, [expected, expected])",
+    },
+    {
+        "name": "one-shot signal leaves active probe groups",
+        "path": "gateway/oneshot.py",
+        "old": "            launcher.kill_active()",
+        "new": "            pass",
+        "test": "tests.test_oneshot.OneshotTests.test_signal_kills_active_probe_groups",
+        "assert": "self.assertEqual(observed, [expected] * 6)",
+    },
+    {
         "name": "one-shot failure exit status",
         "path": "gateway/oneshot.py",
         "old": "return 0 if result.ok else 1",
