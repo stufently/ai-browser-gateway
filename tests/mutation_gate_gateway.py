@@ -121,12 +121,12 @@ MUTANTS = (
         "assert": "self.assertEqual(result['protocolVersion'], '2025-06-18')",
     },
     {
-        "name": "MCP revision-specific result fields",
+        "name": "MCP handles ping",
         "path": "gateway/mcp_stdio.py",
-        "old": "if self.version == LATEST_VERSION:",
-        "new": "if True:",
-        "test": "tests.test_mcp_stdio.MCPTests.test_old_list_omits_new_fields",
-        "assert": "self.assertFalse({'resultType', 'cacheScope', 'ttlMs'} & result.keys())",
+        "old": "        if method == 'ping':\n            return {}\n",
+        "new": "",
+        "test": "tests.test_mcp_stdio.MCPTests.test_ping_returns_empty_result",
+        "assert": "self.assertEqual(result, dict(jsonrpc='2.0', id=3, result={}))",
     },
     {
         "name": "MCP reports gateway failure as tool error",
@@ -135,6 +135,14 @@ MUTANTS = (
         "new": "result['isError'] = False",
         "test": "tests.test_mcp_stdio.MCPTests.test_gateway_failure_is_tool_error",
         "assert": "self.assertIs(result.get('isError'), True)",
+    },
+    {
+        "name": "MCP structured content carries page text",
+        "path": "gateway/mcp_stdio.py",
+        "old": "        result['structuredContent']['content'] = text\n",
+        "new": "",
+        "test": "tests.test_mcp_stdio.MCPTests.test_structured_content_carries_page_text",
+        "assert": "self.assertEqual(result['structuredContent'].get('content'), 'Page ✓')",
     },
 )
 

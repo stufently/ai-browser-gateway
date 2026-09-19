@@ -187,8 +187,10 @@ The API URL above is the default. HTTP uses no system proxy or redirects.
 `max_age_hours` (default 0). Fetch options come from tool arguments.
 Results include page content plus provider/attempt metadata; gateway and
 transport failures are tool errors. Credentials are redacted from results.
-The server negotiates MCP `2026-07-28` or `2025-06-18`, falling back to the
-newer revision for an unsupported version. Stdout carries only JSON-RPC lines.
+Page text (or error text) appears in both the text content block and
+`structuredContent.content`, alongside the available provider/attempt metadata.
+The server negotiates MCP `2025-11-25` or `2025-06-18`, falling back to
+`2025-11-25` for an unsupported version. Stdout carries only JSON-RPC lines.
 
 ## M12a local service
 

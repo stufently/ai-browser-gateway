@@ -30,10 +30,12 @@ def reply(mode='text', ok=True):
     content = {'text': 'Page ✓', 'html': '<h1>Page</h1>', 'markdown': '# Page',
                'links': [{'text': 'Page', 'href': 'https://example.org/'}],
                'meta': {'title': 'Page', 'h1': ['Page']}}[mode]
+    if not ok:
+        content = {'links': [], 'meta': {}}.get(mode, '')
     return dict(ok=ok, url='https://example.org/', final_url='https://example.org/final',
                 provider='curl' if ok else None, age_hours=None,
                 error_type='none' if ok else 'http_403', step='stop' if ok else 'human',
-                elapsed_ms=17, format=mode, content=content if ok else '',
+                elapsed_ms=17, format=mode, content=content,
                 attempts=[dict(provider='curl', egress_profile='direct', success=ok,
                                error_type='none' if ok else 'http_403', challenge='none',
                                elapsed_ms=17, status=200 if ok else 403, age_hours=None,
@@ -69,7 +71,7 @@ class MCPTests(unittest.TestCase):
         return request('initialize', dict(protocolVersion=version, capabilities={},
                                          clientInfo=dict(name='test', version='0')))
 
-    def call(self, args=None, version='2026-07-28'):
+    def call(self, args=None, version='2025-11-25'):
         return self.exchange(self.initialize(version), request('tools/call', dict(
             name='fetch_page', arguments={'url': 'https://example.org/'} if args is None else args)))[1]
 
@@ -81,24 +83,48 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(result['protocolVersion'], '2025-06-18')
 
     def test_negotiates_latest_and_unknown_versions(self):
-        for version in ('2026-07-28', '1999-01-01'):
+        for version in ('2025-11-25', '2026-07-28', '1999-01-01'):
             with self.subTest(version=version):
                 result = self.exchange(self.initialize(version))[0]['result']
-                self.assertEqual(result['protocolVersion'], '2026-07-28')
+                self.assertEqual(result['protocolVersion'], '2025-11-25')
                 self.assertTrue(result['capabilities']['tools'])
                 project = tomllib.loads((ROOT / 'pyproject.toml').read_text())['project']
                 self.assertEqual(result['serverInfo'], dict(name='ai-browser-gateway',
                                                            version=project['version']))
 
-    def test_old_list_omits_new_fields(self):
-        result = self.exchange(self.initialize('2025-06-18'), request('tools/list'))[1]['result']
-        self.assertFalse({'resultType', 'cacheScope', 'ttlMs'} & result.keys())
+    def test_supported_revisions_omit_new_fields(self):
+        for version in ('2025-11-25', '2025-06-18'):
+            with self.subTest(version=version):
+                results = self.exchange(self.initialize(version), request('tools/list'),
+                                        request('ping'))
+                for ok in (True, False):
+                    self.stub(reply(ok=ok))
+                    results.append(self.call(version=version))
+                for message in results:
+                    self.assertFalse({'resultType', 'cacheScope', 'ttlMs'} & message['result'].keys())
 
-    def test_new_list_and_schema(self):
-        result = self.exchange(self.initialize('2026-07-28'), request('tools/list'))[1]['result']
-        self.assertEqual(result['resultType'], 'complete')
-        self.assertEqual(result['cacheScope'], 'private')
-        self.assertIs(type(result['ttlMs']), int)
+    def test_ping_returns_empty_result(self):
+        result = self.exchange(self.initialize('2025-11-25'), request('ping', ident=3))[1]
+        self.assertEqual(result, dict(jsonrpc='2.0', id=3, result={}))
+        self.open.assert_not_called()
+
+    def test_claude_code_initialize_frame(self):
+        wire = ('{"method":"initialize","params":{"protocolVersion":"2025-11-25",'
+                '"capabilities":{"roots":{"listChanged":true},"elicitation":{}},'
+                '"clientInfo":{"name":"claude-code","title":"Claude Code",'
+                '"version":"2.1.278","description":"Anthropic agentic coding tool",'
+                '"websiteUrl":"https://claude.com/claude-code"}},"jsonrpc":"2.0","id":0}\n')
+        proc = subprocess.run([sys.executable, '-m', 'gateway.mcp_stdio'], input=wire,
+                              text=True, capture_output=True, cwd=ROOT, timeout=10)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stderr, '')
+        messages = [json.loads(line) for line in proc.stdout.splitlines()]
+        self.assertEqual(len(messages), 1)
+        self.assertEqual(messages[0]['id'], 0)
+        self.assertEqual(messages[0]['result']['protocolVersion'], '2025-11-25')
+
+    def test_list_and_schema(self):
+        result = self.exchange(self.initialize('2025-11-25'), request('tools/list'))[1]['result']
         self.assertEqual([t['name'] for t in result['tools']], ['fetch_page'])
         schema = result['tools'][0]['inputSchema']
         self.assertEqual(schema['type'], 'object')
@@ -110,7 +136,7 @@ class MCPTests(unittest.TestCase):
         self.assertEqual(props['format']['default'], 'text')
 
     def test_success_all_formats_and_revisions(self):
-        for version in ('2026-07-28', '2025-06-18'):
+        for version in ('2025-11-25', '2025-06-18'):
             for mode in ('text', 'html', 'markdown', 'links', 'meta'):
                 with self.subTest(version=version, mode=mode):
                     value = reply(mode)
@@ -121,10 +147,27 @@ class MCPTests(unittest.TestCase):
                     self.assertEqual(result['content'][0]['type'], 'text')
                     self.assertEqual(json.loads(text) if mode in ('links', 'meta') else text,
                                      value['content'])
-                    self.assertEqual(result['structuredContent'], {k: value[k] for k in (
-                        'ok', 'provider', 'step', 'error_type', 'elapsed_ms', 'final_url', 'attempts')})
-                    self.assertEqual(result.get('resultType'),
-                                     'complete' if version == '2026-07-28' else None)
+                    self.assertEqual(result['structuredContent'], dict(content=text, **{
+                        k: value[k] for k in ('ok', 'provider', 'step', 'error_type',
+                                              'elapsed_ms', 'final_url', 'attempts')}))
+
+    def test_structured_content_carries_page_text(self):
+        self.stub(reply())
+        result = self.call()['result']
+        self.assertEqual(result['structuredContent'].get('content'), 'Page ✓')
+        for version in ('2025-11-25', '2025-06-18'):
+            for mode in ('text', 'html', 'markdown', 'links', 'meta'):
+                for ok in (True, False):
+                    with self.subTest(version=version, mode=mode, ok=ok):
+                        value = reply(mode, ok)
+                        self.stub(value)
+                        result = self.call(dict(url='https://example.org/', format=mode), version)['result']
+                        expected = (json.dumps(value['content'], ensure_ascii=False)
+                                    if mode in ('links', 'meta') else value['content'])
+                        if not ok:
+                            expected = 'fetch_failed: http_403; step: human'
+                        self.assertEqual(result['content'], [dict(type='text', text=expected)])
+                        self.assertEqual(result['structuredContent']['content'], expected)
 
     def test_gateway_failure_is_tool_error(self):
         self.stub(reply(ok=False))
@@ -196,6 +239,8 @@ class MCPTests(unittest.TestCase):
                 self.open.side_effect = exc
                 result = self.call()
                 self.assertIs(result['result']['isError'], True)
+                self.assertEqual(result['result']['structuredContent']['content'],
+                                 result['result']['content'][0]['text'])
                 self.assertNotIn(TOKEN, json.dumps(result))
                 self.assertNotIn('user:pass', json.dumps(result))
         for value, status in ((reply(), 201), (reply(), 302), (b'bad ' + TOKEN.encode(), 200),
@@ -205,6 +250,7 @@ class MCPTests(unittest.TestCase):
                 self.stub(value, status)
                 result = self.call()['result']
                 self.assertIs(result['isError'], True)
+                self.assertEqual(result['structuredContent']['content'], result['content'][0]['text'])
                 self.assertNotIn(TOKEN, json.dumps(result))
 
     def test_invalid_configuration_does_not_leak(self):
@@ -214,6 +260,7 @@ class MCPTests(unittest.TestCase):
             with self.subTest(env=env), patch.dict(os.environ, env, clear=True):
                 result = self.call()['result']
                 self.assertIs(result['isError'], True)
+                self.assertEqual(result['structuredContent']['content'], result['content'][0]['text'])
                 self.assertNotIn('user:pass', json.dumps(result))
                 self.assertNotIn('secret', json.dumps(result))
         self.open.assert_not_called()
@@ -243,7 +290,9 @@ class MCPTests(unittest.TestCase):
             value['final_url'] = 'https://user:pass@host/'
             value['attempts'][0]['egress_profile'] = secret
             self.stub(value)
-            wire = json.dumps(self.call())
+            result = self.call()['result']
+            self.assertEqual(result['structuredContent']['content'], result['content'][0]['text'])
+            wire = json.dumps(result)
             self.assertNotIn(TOKEN, wire)
             self.assertNotIn('user:pass@', wire)
 
@@ -274,7 +323,7 @@ class MCPTests(unittest.TestCase):
     def test_process_entrypoints_emit_only_jsonrpc(self):
         wire = '\n' + json.dumps(self.initialize('2025-06-18')) + '\n' + json.dumps(
             dict(jsonrpc='2.0', method='notifications/initialized')) + '\n' + json.dumps(
-            request('tools/list', ident=2)) + '\n'
+            request('tools/list', ident=2)) + '\n' + json.dumps(request('ping', ident=3)) + '\n'
         for command in ([sys.executable, '-m', 'gateway.mcp_stdio'], [str(ROOT / 'scripts/abg-mcp')]):
             with self.subTest(command=command):
                 proc = subprocess.run(command, input=wire, text=True, capture_output=True,
@@ -282,10 +331,11 @@ class MCPTests(unittest.TestCase):
                 self.assertEqual(proc.returncode, 0, proc.stderr)
                 self.assertEqual(proc.stderr, '')
                 messages = [json.loads(line) for line in proc.stdout.splitlines()]
-                self.assertEqual([m['id'] for m in messages], [1, 2])
+                self.assertEqual([m['id'] for m in messages], [1, 2, 3])
                 self.assertTrue(all(m['jsonrpc'] == '2.0' for m in messages))
                 self.assertEqual(messages[0]['result']['protocolVersion'], '2025-06-18')
                 self.assertNotIn('resultType', messages[1]['result'])
+                self.assertEqual(messages[2], dict(jsonrpc='2.0', id=3, result={}))
 
 
 if __name__ == '__main__':

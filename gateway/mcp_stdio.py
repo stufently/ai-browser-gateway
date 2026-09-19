@@ -12,7 +12,7 @@ from gateway.client import (MODES, NoRedirect, number, reject, unique,
                             valid_url, validate_response)
 
 
-LATEST_VERSION = '2026-07-28'
+LATEST_VERSION = '2025-11-25'
 SUPPORTED_VERSIONS = (LATEST_VERSION, '2025-06-18')
 INPUT_SCHEMA = {
     'type': 'object', 'required': ['url'], 'additionalProperties': False,
@@ -90,6 +90,7 @@ def fetch_page(body):
         result = dict(content=[dict(type='text', text=text)],
                       structuredContent={key: value[key] for key in (
                           'ok', 'provider', 'step', 'error_type', 'elapsed_ms', 'final_url', 'attempts')})
+        result['structuredContent']['content'] = text
         if not value['ok']:
             result['isError'] = True
         result = redact(result, token)
@@ -102,18 +103,13 @@ def fetch_page(body):
         # failures. Close it explicitly: finalizer warnings can contain its URL.
         if isinstance(exc, HTTPError):
             exc.close()
-        return dict(content=[dict(type='text', text=error)], isError=True)
+        return dict(content=[dict(type='text', text=error)],
+                    structuredContent=dict(content=error), isError=True)
 
 
 class Server:
     def __init__(self):
         self.version = LATEST_VERSION
-
-    def result_fields(self, listing=False):
-        if self.version == LATEST_VERSION:
-            return (dict(resultType='complete', cacheScope='private', ttlMs=0)
-                    if listing else dict(resultType='complete'))
-        return {}
 
     def dispatch(self, method, params):
         if not isinstance(params, dict):
@@ -127,15 +123,17 @@ class Server:
                 version = tomllib.load(handle)['project']['version']
             return dict(protocolVersion=self.version, capabilities=dict(tools=dict(listChanged=False)),
                         serverInfo=dict(name='ai-browser-gateway', version=version))
+        if method == 'ping':
+            return {}
         if method == 'tools/list':
             return dict(tools=[dict(name='fetch_page',
                                    description='Fetch a page through the gateway provider ladder.',
-                                   inputSchema=INPUT_SCHEMA)], **self.result_fields(listing=True))
+                                   inputSchema=INPUT_SCHEMA)])
         if method == 'tools/call':
             if params.get('name') != 'fetch_page':
                 raise ValueError
             body = arguments(params.get('arguments'))
-            return dict(fetch_page(body), **self.result_fields())
+            return fetch_page(body)
         raise LookupError
 
     def handle(self, message):
