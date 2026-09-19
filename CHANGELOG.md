@@ -14,6 +14,13 @@
   Работает от root и от 1002 с дефолтным `/dev/shm`; живой
   `https://www.bizprofile.net/` — `ok`, `scrapling`, ~23 с.
 
+- **One-shot образ облегчён (M20, fix1).** 2,13 → 1,71 ГБ (сжатый 579 →
+  477 МБ): общий на playwright и patchright бинарь node, без pip, man-страниц,
+  vulkan-драйверов и пакетов, притянутых только рекомендациями (компилятор,
+  perl, системный python 3.11). Тексты лицензий пакетов в `/usr/share/doc`
+  остаются — образ публикуется. OCI-метки `source`/`title`/`description`/
+  `licenses`.
+
 - **Свой MCP-сервер поверх лестницы (M18, fix1–fix3).** `scripts/abg-mcp`
   (или `python3 -m gateway.mcp_stdio`) — MCP по stdio на одной stdlib, без
   зависимостей. Даёт агенту инструмент `fetch_page` (`url`, `format`
