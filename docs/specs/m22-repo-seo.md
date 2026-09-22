@@ -3,7 +3,7 @@
 ## Шапка и где работать
 
 Репозиторий ~/github/ai-browser-gateway, 22.09.2026.
-BASE_SHA `43f5f41293aa01010b8750da617753950140cd5d` — вершина `main`,
+BASE_SHA `ebec26c248feb8242b35a0db237c9af4fa130a8b` — вершина `main`,
 коммит «Record live CI run of CF verification».
 Клон ~/exec-clones/abg-m22-seo-20260922, ветка m22-repo-seo,
 origin push DISABLED. Исполнитель — gk (Grok). Владелец ведёт реализацию
@@ -186,15 +186,15 @@ Development, Documentation, License.
   `bash -c 'test "$(python3 docs/specs/checks/m22_no_new_domains.py)" = ok'`
 - **AC-302.** Изменены только README, русский README, спека и чекеры; спека и
   чекеры в истории; дерево чистое:
-  `bash -c 'git diff --exit-code 43f5f41293aa01010b8750da617753950140cd5d HEAD -- . ":(exclude)README.md" ":(exclude)docs/README.ru.md" ":(exclude)docs/specs/m22-repo-seo.md" ":(exclude)docs/specs/checks/m22_readme_seo.py" ":(exclude)docs/specs/checks/m22_no_new_domains.py" && git ls-files --error-unmatch docs/specs/m22-repo-seo.md docs/specs/checks/m22_readme_seo.py docs/specs/checks/m22_no_new_domains.py >/dev/null && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md" ":(exclude)tmp")"'`
+  `bash -c 'git diff --exit-code ebec26c248feb8242b35a0db237c9af4fa130a8b HEAD -- . ":(exclude)README.md" ":(exclude)docs/README.ru.md" ":(exclude)docs/specs/m22-repo-seo.md" ":(exclude)docs/specs/checks/m22_readme_seo.py" ":(exclude)docs/specs/checks/m22_no_new_domains.py" && git ls-files --error-unmatch docs/specs/m22-repo-seo.md docs/specs/checks/m22_readme_seo.py docs/specs/checks/m22_no_new_domains.py >/dev/null && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md" ":(exclude)tmp")"'`
 - **AC-303.** README вырос по существу, а не переименованием: в разделах FAQ и
   сравнения есть содержимое, и весь файл не короче прежнего:
-  `bash -c 'test "$(wc -l < README.md)" -gt "$(git show 43f5f41293aa01010b8750da617753950140cd5d:README.md | wc -l)" && test "$(git diff 43f5f41293aa01010b8750da617753950140cd5d HEAD -- README.md | grep -c "^+[^+]")" -ge 60'`
+  `bash -c 'test "$(wc -l < README.md)" -gt "$(git show ebec26c248feb8242b35a0db237c9af4fa130a8b:README.md | wc -l)" && test "$(git diff ebec26c248feb8242b35a0db237c9af4fa130a8b HEAD -- README.md | grep -c "^+[^+]")" -ge 60'`
 
 ## Авторевью
 
 Политика cross-review-v1: после commit REVIEW_SHA параллельно
-`bash ~/.claude/skills/executor-milestone/scripts/review_run.sh initial agy --clone ~/exec-clones/abg-m22-seo-20260922 --base 43f5f41293aa01010b8750da617753950140cd5d --range 43f5f41293aa01010b8750da617753950140cd5d..<REVIEW_SHA> --context "<эта спека; только чтение>"`
+`bash ~/.claude/skills/executor-milestone/scripts/review_run.sh initial agy --clone ~/exec-clones/abg-m22-seo-20260922 --base ebec26c248feb8242b35a0db237c9af4fa130a8b --range ebec26c248feb8242b35a0db237c9af4fa130a8b..<REVIEW_SHA> --context "<эта спека; только чтение>"`
 и тот же wrapper `initial codex`. 22.09.2026 у Codex исчерпан лимит до 24.09,
 agy 19.09.2026 отвечал кодом 3 и пустым ответом — при таких ошибках повторов
 не делать, записать в note и продолжать. Если `accept_run.py` вернёт
@@ -208,7 +208,7 @@ report.json v2 в корне клона, untracked, ровно 4 записи AC
 command посимвольно из спеки; blocked — rc=null и безопасный текст ошибки.
 ```json
 {"schema_version":2,"policy_id":"cross-review-v1","spec_sha256":"<SHA этой спеки>",
- "base_sha":"43f5f41293aa01010b8750da617753950140cd5d","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
+ "base_sha":"ebec26c248feb8242b35a0db237c9af4fa130a8b","reviewed_sha":"<REVIEW_SHA>","final_sha":"<FINAL_SHA>",
  "executor":{"backend":"grok","model":"<фактическая модель>"},
  "review":{"initial_receipts":[],"verification_receipts":[],"resolutions":[]},
  "handoff_status":"ready","criteria":[{"id":"AC-300","status":"pass|fail|blocked",
