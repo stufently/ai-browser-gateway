@@ -173,7 +173,7 @@ limits are in [Benchmarks](#benchmarks).
 
 | Approach | How it reaches the page | What it is for | When it runs | What you pay |
 | --- | --- | --- | --- | --- |
-| Ordinary HTTP client | HTTP with no TLS-fingerprint impersonation and no browser. | The lower bound. It reads a page only when the server already returns that page to a normal client. A challenge can end as HTTP 403 or an interstitial. | Not a ladder step. It is the request this project starts from. | One short request, and no browser process. |
+| Ordinary HTTP client | HTTP with no TLS-fingerprint impersonation and no browser. | The lower bound. It reads a page only when the server already returns that page to a normal client. A challenge can end as HTTP 403 or an interstitial. | Not a ladder step. It is the baseline the ladder is measured against. | One short request, and no browser process. |
 | `curl_cffi` | HTTP with browser headers and TLS impersonation. | The first attempt inside the ladder. | First. That attempt is capped at 15000 ms within the total budget. | The cheapest step that still speaks HTTP. |
 | `patchright` | A browser session that renders JavaScript. | An HTTP result that was not accepted: missing content, a suspected challenge, HTTP 403, or an HTTP timeout. | After an eligible HTTP failure, if browsers are allowed and budget remains. | A browser process, taken from the time that remains. |
 | `scrapling` | A stealthier browser session with `solve_cloudflare=True`. | A page the Patchright attempt did not accept. | After an eligible Patchright failure, if budget remains. | A second browser session, and only while budget remains. |
@@ -194,11 +194,12 @@ guarantee access to every Cloudflare-protected page.
   fetched the Cloudflare-protected Bizprofile target that Patchright failed to
   fetch, adding one unique target. See the
   [Scrapling measurements](docs/research/05-scrapling.md).
-- A class-level run on 18 targets, 12 of them kept off the repository, found
-  the same split: pages without protection were fetched by every provider,
-  the two challenged Cloudflare targets only by Scrapling, and login-wall
-  pages (public profile and post metadata) by both browsers but only three or
-  four of six by HTTP clients. Median time per request was 0.4 s for
+- A class-level run on 18 targets, 12 of them kept off the repository:
+  pages without protection were fetched by every provider; of the two
+  challenged Cloudflare targets, Scrapling took both, `curl_cffi` and
+  Patchright one each and plain `curl` none; login-wall pages (public profile
+  and post metadata) were taken by both browsers but only three or four of
+  six by HTTP clients. Median time per request was 0.4 s for
   `curl_cffi`, 2.1 s for Patchright and 7.4 s for Scrapling. See the
   [class-level results](docs/research/09-local-targets.md).
 
@@ -219,10 +220,15 @@ general success-rate promise.
 
 ### Why does a plain HTTP client get 403 when a browser does not?
 
-A plain client shows its own TLS fingerprint and does not run JavaScript,
-so a check can answer it with HTTP 403 or an interstitial. A browser is
-not an automatic win: on the measured set, browsers helped by rendering
-JavaScript and did not improve coverage over HTTP with browser headers. See [Benchmarks](#benchmarks).
+A plain client sends non-browser headers, shows its own TLS fingerprint and
+does not run JavaScript, so a check can answer it with HTTP 403 or an
+interstitial. On the public set, browser headers made the difference: TLS
+impersonation added no target on top of them. A browser is not an automatic
+win either: there Patchright added no coverage over HTTP with browser
+headers, and Scrapling added one challenged Cloudflare target. The later
+class-level run found browsers ahead on login walls (6/6 against 4/6) and
+Scrapling ahead on challenged Cloudflare (2/2 against 1/2), at a cost of
+seconds per request. See [Benchmarks](#benchmarks).
 
 ### Does this project solve CAPTCHA and interactive challenges?
 

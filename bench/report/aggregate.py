@@ -19,6 +19,7 @@ from bench.runner.record import from_jsonl_line
 # Lower-case words joined by '+' or '-'. No dots, so a class cannot carry a domain.
 CLASS_PATTERN = re.compile(r'^[a-z0-9]+(?:[+-][a-z0-9]+)*$')
 DEFAULT_ORDER = tuple(p.name for p in sorted(PROVIDERS, key=lambda p: p.tier))
+KNOWN_PROVIDERS = frozenset(DEFAULT_ORDER)
 NOT_MEASURED = 'not measured'
 
 
@@ -50,12 +51,15 @@ def build_aggregate(jsonl_path, target_paths, *, order=DEFAULT_ORDER) -> str:
     order = list(order)
     if len(set(order)) != len(order):
         raise ValueError('duplicate providers in order')
+    if not set(order) <= KNOWN_PROVIDERS:
+        raise ValueError('--order names providers outside the registry')
     classes = load_classes(target_paths)
     seen: set[str] = set()
     providers: set[str] = set()
     measured: dict[str, set[str]] = defaultdict(set)
     taken: dict[str, set[str]] = defaultdict(set)
     unknown = 0
+    foreign = 0
     with Path(jsonl_path).open(encoding='utf-8') as source:
         for line_number, line in enumerate(source, 1):
             if not line.strip():
@@ -69,6 +73,9 @@ def build_aggregate(jsonl_path, target_paths, *, order=DEFAULT_ORDER) -> str:
             if record.target not in classes:
                 unknown += 1
                 continue
+            if record.provider not in KNOWN_PROVIDERS:
+                foreign += 1
+                continue
             seen.add(record.target)
             providers.add(record.provider)
             if record.error_type == FailureReason.not_measured:
@@ -78,6 +85,8 @@ def build_aggregate(jsonl_path, target_paths, *, order=DEFAULT_ORDER) -> str:
                 taken[record.provider].add(record.target)
     if unknown:
         raise ValueError(f'{unknown} records reference targets missing from --targets')
+    if foreign:
+        raise ValueError(f'{foreign} records name providers outside the registry')
     missing = sorted(providers - set(order))
     if missing:
         raise ValueError('providers missing from --order: ' + ', '.join(missing))

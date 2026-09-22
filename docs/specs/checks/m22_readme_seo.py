@@ -75,9 +75,14 @@ def slug(text):
     return re.sub(r"\s+", "-", text)
 
 
+def anchors_of(path):
+    text = path.read_text(encoding="utf-8")
+    return {slug(m.group(2)) for m in re.finditer(r"^(#+)\s+(.*)$", text, re.M)}
+
+
 def check_links(path):
     text = path.read_text(encoding="utf-8")
-    anchors = {slug(m.group(2)) for m in re.finditer(r"^(#+)\s+(.*)$", text, re.M)}
+    anchors = anchors_of(path)
     for match in re.finditer(r"\]\(([^)\s]+)\)", text):
         target = match.group(1)
         if target.startswith(("http://", "https://", "mailto:")):
@@ -86,9 +91,12 @@ def check_links(path):
             if target[1:] not in anchors:
                 fail(f"{path.name}: якорь {target} не ведёт ни к одному заголовку")
             continue
-        head = target.split("#", 1)[0]
+        head, _, fragment = target.partition("#")
         if head and not (path.parent / head).exists():
             fail(f"{path.name}: ссылка {target} ведёт в несуществующий файл")
+        # Якорь в чужом markdown-файле тоже обязан вести к заголовку.
+        if head.endswith(".md") and fragment and fragment not in anchors_of(path.parent / head):
+            fail(f"{path.name}: ссылка {target} ведёт к несуществующему заголовку")
 
 
 def main():

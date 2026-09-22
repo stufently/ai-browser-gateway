@@ -180,6 +180,23 @@ class AggregateTests(unittest.TestCase):
         self.assertIn('line 2: invalid run record', err)
         self.assert_private(err)
 
+    def test_foreign_providers_rejected_without_echo(self):
+        # A provider value is JSONL data too: it must not reach the error or a header.
+        forged = json.loads(to_jsonl_line(RECORDS[0]))
+        forged['provider'] = 'alpha-shop.invalid'
+        runs = self.write('forged.jsonl', to_jsonl_line(RECORDS[0]) + json.dumps(forged) + '\n')
+        rc, out, err = self.cli('aggregate', str(runs), '--targets', str(self.targets))
+        self.assertEqual(rc, 2)
+        self.assertIn('1 records name providers outside the registry', err)
+        self.assert_private(err)
+        self.assertEqual(out, '')
+        rc, out, err = self.cli('aggregate', str(self.runs), '--targets', str(self.targets),
+                                '--order', 'curl_cffi', 'patchright', 'scrapling', 'forum-beta')
+        self.assertEqual(rc, 2)
+        self.assertIn('--order names providers outside the registry', err)
+        self.assert_private(err)
+        self.assertEqual(out, '')
+
     def test_output_is_exclusive(self):
         dest = self.root / 'summary.md'
         rc, out, _ = self.cli('aggregate', str(self.runs), '--targets', str(self.targets),
