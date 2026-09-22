@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 from bench.egress import load_profiles, profile_url
 from bench.models import FailureReason
 from bench.providers.registry import PROVIDERS, by_name
+from bench.report.aggregate import DEFAULT_ORDER, build_aggregate
 from bench.report.build import build_report
 from bench.runner.environment import collect
 from bench.runner.execute import DockerLauncher, execute_plan
@@ -31,7 +32,8 @@ def build_parser() -> argparse.ArgumentParser:
         cmd.add_argument('--providers', nargs='+', default=[p.name for p in PROVIDERS if p.kind != 'entrance'])
         cmd.add_argument('--cells', nargs='+', help='scenario:<id> or target:<id>; defaults to all selected inputs')
         cmd.add_argument('--base-url', '--stand-url', default='http://127.0.0.1:8000', help='stand A base URL')
-        cmd.add_argument('--targets', type=Path, help='explicit target TOML; invalid targets are skipped')
+        cmd.add_argument('--targets', type=Path, nargs='+',
+                         help='target TOML files, merged in order; invalid targets are skipped')
         cmd.add_argument('--cold', type=int, default=1)
         cmd.add_argument('--warm', type=int, default=None, help='browser warm attempts (default 1 for stand, 0 for targets)')
         if name == 'run':
@@ -47,6 +49,12 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument('--threshold', type=float, default=.05)
     report.add_argument('--unmeasured', nargs='*', default=[])
     report.add_argument('--output', '-o', type=Path)
+    aggregate = commands.add_parser('aggregate', help='JSONL to a class-level summary safe to publish')
+    aggregate.add_argument('jsonl_path')
+    aggregate.add_argument('--targets', type=Path, nargs='+', required=True,
+                           help='every target TOML the run used; each target needs a class')
+    aggregate.add_argument('--order', nargs='+', default=list(DEFAULT_ORDER))
+    aggregate.add_argument('--output', '-o', type=Path)
     return parser
 
 
@@ -55,8 +63,10 @@ def _cells_and_plan(args):
              for s in SCENARIOS}
     target_names = []
     if args.targets is not None:
-        with args.targets.open('rb') as source:
-            targets = tomllib.load(source).get('target', [])
+        targets = []
+        for path in args.targets:
+            with path.open('rb') as source:
+                targets.extend(tomllib.load(source).get('target', []))
         for target in targets:
             if target.get('valid', True) is False:
                 continue
@@ -109,9 +119,12 @@ def main(argv=None, *, launcher=None, reader=None, sleep=None) -> int:
             print('name\ttier\tkind\tneeds_network\timage')
             for p in PROVIDERS:
                 print(f'{p.name}\t{p.tier}\t{p.kind}\t{str(p.needs_network).lower()}\t{p.image}')
-        elif args.command == 'report':
-            result = build_report(args.jsonl_path, order=args.order, threshold=args.threshold,
-                                  unmeasured=args.unmeasured)
+        elif args.command in ('report', 'aggregate'):
+            if args.command == 'report':
+                result = build_report(args.jsonl_path, order=args.order, threshold=args.threshold,
+                                      unmeasured=args.unmeasured)
+            else:
+                result = build_aggregate(args.jsonl_path, args.targets, order=args.order)
             if args.output is None:
                 print(result, end='')
             else:
