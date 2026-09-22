@@ -202,6 +202,16 @@ guarantee access to every Cloudflare-protected page.
   `curl_cffi`, 2.1 s for Patchright and 7.4 s for Scrapling. See the
   [class-level results](docs/research/09-local-targets.md).
 
+Class-level summary of that run (targets fetched / targets measured):
+
+| Class | Targets | curl | curl_cffi | patchright | scrapling | Any provider |
+|---|---|---|---|---|---|---|
+| cloudflare | 2 | 0/2 | 1/2 | 1/2 | 2/2 | 2/2 |
+| cloudflare+spa | 1 | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
+| cloudflare-passive | 1 | 1/1 | 1/1 | 1/1 | 1/1 | 1/1 |
+| login-wall | 6 | 3/6 | 4/6 | 6/6 | 6/6 | 6/6 |
+| none | 8 | 8/8 | 8/8 | 8/8 | 8/8 | 8/8 |
+
 These are small samples from specific runs and network conditions, not a
 general success-rate promise.
 
