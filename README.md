@@ -194,6 +194,13 @@ guarantee access to every Cloudflare-protected page.
   fetched the Cloudflare-protected Bizprofile target that Patchright failed to
   fetch, adding one unique target. See the
   [Scrapling measurements](docs/research/05-scrapling.md).
+- A class-level run on 18 targets, 12 of them kept off the repository, found
+  the same split: pages without protection were fetched by every provider,
+  the two challenged Cloudflare targets only by Scrapling, and login-wall
+  pages (public profile and post metadata) by both browsers but only three or
+  four of six by HTTP clients. Median time per request was 0.4 s for
+  `curl_cffi`, 2.1 s for Patchright and 7.4 s for Scrapling. See the
+  [class-level results](docs/research/09-local-targets.md).
 
 These are small samples from specific runs and network conditions, not a
 general success-rate promise.
