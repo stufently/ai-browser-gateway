@@ -195,7 +195,8 @@ guarantee access to every Cloudflare-protected page.
   fetch, adding one unique target. See the
   [Scrapling measurements](docs/research/05-scrapling.md).
 
-These are small samples from specific runs and network conditions, not a general success-rate promise.
+These are small samples from specific runs and network conditions, not a
+general success-rate promise.
 
 ## FAQ
 
@@ -246,12 +247,12 @@ integrated; interactive challenges can require human action.
 
 ## Development
 
-Run the unit suite and frozen probes from the repository root with the Python
-image named in the commands below. Both containers run without network access:
+Run the unit suite and frozen probes from the repository root with the official
+Python image pinned by digest. Both containers run without network access:
 
 ```sh
-docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm python3 -m unittest discover -q -s tests -t .
-docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container
+docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t .
+docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container
 ```
 
 ## Documentation

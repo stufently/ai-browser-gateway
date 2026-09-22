@@ -157,7 +157,9 @@ def main():
             fail(f"вопрос FAQ без ответа: {question}")
 
     bench = "\n".join(body["Benchmarks"])
-    if BENCH_KEEP not in bench:
+    # Фраза живёт в тексте с переносами строк, поэтому сверяем по словам,
+    # а не дословно: иначе чекер заставляет склеивать абзац в одну строку.
+    if BENCH_KEEP not in " ".join(bench.split()):
         fail("из раздела Benchmarks пропала оговорка об ограниченности выборки")
     if "docs/research/" not in bench:
         fail("раздел Benchmarks не ссылается на исследования в docs/research/")
@@ -166,8 +168,8 @@ def main():
     if "docs/README.ru.md" not in docs:
         fail("раздел Documentation не ссылается на русский README")
 
-    if re.search(r"sha256:[0-9a-f]{64}", text):
-        fail("в README остался локальный id образа sha256:… — чужой его не скачает")
+    if re.search(r"(?<!@)sha256:[0-9a-f]{64}", text):
+        fail("в README голый id образа sha256:… — чужой его не скачает; пин публичного образа пишется как имя@sha256:…")
 
     check_links(README)
     check_links(RU)
