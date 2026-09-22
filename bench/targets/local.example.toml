@@ -1,0 +1,36 @@
+# Template for bench/targets/local.toml: targets that must stay off the
+# public repository (monitored sites, your own shops, anything you would not
+# publish by name). Copy this file to bench/targets/local.toml, which git
+# ignores, and replace the placeholder URLs. Publish results only through
+# `python3 -m bench aggregate`, which prints target classes and counts.
+#
+# Fields are the same as in targets.toml:
+#   id      unique across every --targets file of a run; stays local
+#   url     the page to fetch
+#   class   required by `aggregate`: lower-case words joined by "+" or "-",
+#           no dots. Classes in use: none, cloudflare, cloudflare-passive,
+#           cloudflare+spa, cloudflare-managed-challenge, login-wall
+#   expect  case-sensitive text that must be in the fetched content
+#   valid   optional; false skips the target
+#
+# Take `expect` from the real page (its <title> or unique text) and make sure
+# it does not appear on the challenge or error page: a Cloudflare interstitial
+# names the blocked host, so the bare host name is never a valid `expect`.
+
+[[target]]
+id = "shop-control"
+url = "https://own-shop.example/"
+class = "none"
+expect = "Own Shop - Catalog"
+
+[[target]]
+id = "cf-monitored"
+url = "https://cloudflare-protected.example/"
+class = "cloudflare"
+expect = "Monitored Site Home"
+
+[[target]]
+id = "social-profile"
+url = "https://social-network.example/@account"
+class = "login-wall"
+expect = "Account (@account)"
