@@ -71,5 +71,5 @@ url = "https://abg-cf.example.net/"
 class = "cloudflare-managed-challenge"
 owner = "self"
 valid = false
-note = "Свой стенд за Cloudflare. DNS выкачен 14.09.2026 через octodns (example.net.yaml, коммит 1d92667): abg-cf.example.net A 192.0.2.10 (stand-host), proxied=true. ОСТАЁТСЯ настроить (executor): поднять сервис на stand-host:443 под этот хост и включить WAF-правило Managed Challenge (+Turnstile на тестовых ключах). До этого valid=false: без правила CF пускает как обычный сайт. CF решает вердикт ПО НАВИГАЦИИ, а не по адресу (измерено в gpt-web-gateway 26.07.2026)."
+note = "Свой стенд за Cloudflare: DNS-запись abg-cf.example.net указывает на сервер стенда через прокси Cloudflare (с 14.09.2026). ОСТАЁТСЯ настроить: поднять сервис на порту 443 под этот хост и включить WAF-правило Managed Challenge (+Turnstile на тестовых ключах). До этого valid=false: без правила CF пускает как обычный сайт. CF решает вердикт ПО НАВИГАЦИИ, а не по адресу (измерено в gpt-web-gateway 26.07.2026)."
 expect = "cf-challenge-cleared"
