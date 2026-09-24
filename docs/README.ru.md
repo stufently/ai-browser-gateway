@@ -223,9 +223,12 @@ shutdown removes running providers while draining and finishes sooner.
 
 ## M12b deployed service
 
-Stand-host runs release `db4fc359171c304470d7edae3d60cb13394e7881`
-under `/home/user/services/ai-browser-gateway`, with the API published at
-`127.0.0.1:8765`. Measured outcomes and image identity:
+Stand-host runs release `2fa1b21e9e38e85542edd246e17aa6c9915366ac`
+(image `abg-runtime:2fa1b21e9e38`, deployed 2026-09-24) under
+`/home/user/services/ai-browser-gateway`, with the API published at
+`127.0.0.1:8765`. It differs from the M16c release `db4fc359171c` only by
+the detector fix for Cloudflare tokens inside encoded third-party URLs; the
+measurements below were taken on M16c. Measured outcomes and image identity:
 [M16c deployment results](research/04-phase1-verdict.md#после-выкладки-m16c).
 Deployment and target checks passed. The executor's AC-954 run hit
 `worker_internal_error`, a catch-all the harness reports for any worker failure
@@ -239,7 +242,7 @@ Start or stop the service using its explicit configuration:
 
 ```bash
 service_root=/home/user/services/ai-browser-gateway
-release_sha=db4fc359171c304470d7edae3d60cb13394e7881
+release_sha=2fa1b21e9e38e85542edd246e17aa6c9915366ac
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
@@ -260,21 +263,23 @@ The client reads `~/.config/abg/client-token`, a symlink to `secrets/token`:
 scripts/abg-fetch https://example.com/ text
 ```
 
-The retained rollback release is `ae72bfe1bae927a0297edfa273632df14ac89689`,
-with image `abg-runtime:ae72bfe1bae9`. M16c preserves the earlier releases,
+The retained rollback release is `db4fc359171c304470d7edae3d60cb13394e7881`
+(M16c), with image `abg-runtime:db4fc359171c`; the configuration before the
+2026-09-24 deployment is saved as `compose.env.pre-cftoken`. The older
+rollback release `ae72bfe1bae927a0297edfa273632df14ac89689` (image
+`abg-runtime:ae72bfe1bae9`) is kept as well. M16c preserves the earlier releases,
 their manifests and images, and `compose.env.pre-m13c` /
 `compose.env.pre-m14b` / `compose.env.pre-m15b` / `compose.env.pre-m16b`.
-The configuration before M16c is saved as `compose.env.pre-m16c`
-(mode `0600`, never overwritten). Restore that file byte for byte to roll back:
+The configuration before M16c is saved as `compose.env.pre-m16c`.
+Saved configurations are mode `0600` and never overwritten. Restore one byte
+for byte to roll back, here to M16c:
 
 ```bash
-cp "$service_root/compose.env.pre-m16c" "$service_root/compose.env"
-rollback_sha=ae72bfe1bae927a0297edfa273632df14ac89689
+cp "$service_root/compose.env.pre-cftoken" "$service_root/compose.env"
+rollback_sha=db4fc359171c304470d7edae3d60cb13394e7881
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$rollback_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
-python3 tests/deployed_m12b.py --check-deploy --release "$rollback_sha" \
-  --evidence /home/user/.cache/abg-coord-20260918/m16c-rollback
 ```
 
 Clearing these two variables prevents earlier shell exports from overriding

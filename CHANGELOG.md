@@ -16,6 +16,8 @@
   Образ `ghcr.io/stufently/ai-browser-gateway-oneshot` — теги `0.1.1`,
   `sha-bd2427c`, `latest`; check-sites переведён на него, первая
   `verify_challenged` открыла страницу через `scrapling` за 27,7 с.
+  Боевой сервис переведён на релиз `2fa1b21e9e38` (откат — M16c
+  `db4fc359171c`, конфигурация до выкладки — `compose.env.pre-cftoken`).
 
 ## 2026-09-23
 
