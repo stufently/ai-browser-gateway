@@ -13,6 +13,9 @@
   вхождения `%3F__cf_chl_…tk%3D` / `%26…` вырезаются до сопоставления в
   `detect_challenge` и в проверке строк челленджа адаптера Scrapling;
   открытый токен остаётся признаком.
+  Образ `ghcr.io/stufently/ai-browser-gateway-oneshot` — теги `0.1.1`,
+  `sha-bd2427c`, `latest`; check-sites переведён на него, первая
+  `verify_challenged` открыла страницу через `scrapling` за 27,7 с.
 
 ## 2026-09-23
 
