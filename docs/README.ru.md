@@ -292,21 +292,36 @@ docker build -t "abg-runtime:${release_sha:0:12}" \
   -f "$service_root/releases/$release_sha/deploy/Dockerfile" "$service_root/releases/$release_sha"
 ```
 
-For M16c, run these checks sequentially from the clone, with no other API clients:
+Run these checks sequentially from the clone, with no other API clients.
+The service root and the expected `ABG_INSTANCE` are arguments; the defaults
+are `$HOME/services/ai-browser-gateway` and `stand-host`:
 
 ```bash
-evidence=/home/user/.cache/abg-coord-20260918/m16c
-python3 tests/deployed_m12b.py --check-deploy --release "$release_sha" --evidence "$evidence"
-python3 tests/deployed_m12b.py --check-profiles --release "$release_sha" --evidence "$evidence"
-python3 tests/deployed_m12b.py --check-api-egress --release "$release_sha" --evidence "$evidence"
-python3 tests/deployed_m12b.py --check-bizprofile --release "$release_sha" --evidence "$evidence"
-python3 tests/deployed_m12b.py --run-targets --release "$release_sha" --evidence "$evidence"
+evidence=/home/user/.cache/abg-deploy-checks/$(date -u +%Y%m%d)
+host=(--release "$release_sha" --service-root "$service_root" --instance stand-host --evidence "$evidence")
+python3 tests/deployed_m12b.py --check-deploy "${host[@]}"
+python3 tests/deployed_m12b.py --check-profiles "${host[@]}"
+python3 tests/deployed_m12b.py --check-api-egress "${host[@]}"
+python3 tests/deployed_m12b.py --check-bizprofile "${host[@]}"
+python3 tests/deployed_m12b.py --run-targets "${host[@]}"
 ```
 
-`--release` requires 40 lowercase hex characters; `--evidence` requires an
-absolute path. Omitting them preserves the M12b defaults: release
-`929bded313e371808b0747fd9a400696a36638aa` and evidence directory
-`/home/user/.cache/abg-coord-20260917/m12b/`. The existing `--check-profiles`
+The 2026-09-24 deployment passed `--check-deploy` and `--check-bizprofile`.
+
+Proxy profiles are generated once into `secrets/proxies.toml` from a file with
+`PROXY_LOGIN` and `PROXY_PASSWORD`; the proxy domain is an argument, hosts are
+`ms1…ms15.<domain>`:
+
+```bash
+scripts/abg-provision --source <credentials-file> --output "$service_root/secrets/proxies.toml" \
+  --domain <proxy-domain>
+```
+
+`--release` requires 40 lowercase hex characters; `--evidence` and
+`--service-root` require absolute paths. Omitting them gives release
+`929bded313e371808b0747fd9a400696a36638aa` (M12b), evidence directory
+`~/.cache/abg-deploy-checks/m12b/`, service root
+`~/services/ai-browser-gateway` and instance `stand-host`. The existing `--check-profiles`
 and `--check-api-egress` modes accept the same options; run profiles first
 when measuring rotation. Profile checks take at least eight minutes.
 

@@ -24,9 +24,11 @@ from urllib.parse import urlsplit
 SHA = '929bded313e371808b0747fd9a400696a36638aa'
 DEFAULT_SHA = SHA
 ROOT = Path(__file__).resolve().parent.parent
-SERVICE = Path('/home/user/services/ai-browser-gateway')
+# Host specifics come from arguments, not code: --service-root, --instance.
+SERVICE = Path.home() / 'services/ai-browser-gateway'
+INSTANCE = 'stand-host'
 RELEASE = SERVICE / 'releases' / SHA
-EVIDENCE = Path('/home/user/.cache/abg-coord-20260917/m12b')
+EVIDENCE = Path.home() / '.cache/abg-deploy-checks/m12b'
 DEFAULT_EVIDENCE = EVIDENCE
 PY = 'sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6'
 IMAGE = 'abg-runtime:' + SHA[:12]
@@ -474,7 +476,7 @@ def check_deploy():
     gid = str(os.stat('/var/run/docker.sock').st_gid)
     expected = dict(ABG_RELEASE=str(RELEASE), ABG_TOKEN_FILE=str(SERVICE / 'secrets/token'),
                     ABG_PROFILES_FILE=str(SERVICE / 'secrets/proxies.toml'),
-                    ABG_PING_FILE=str(SERVICE / 'secrets/hc-ping'), ABG_INSTANCE='stand-host',
+                    ABG_PING_FILE=str(SERVICE / 'secrets/hc-ping'), ABG_INSTANCE=INSTANCE,
                     ABG_RUNTIME_IMAGE=IMAGE, ABG_DOCKER_GID=gid, ABG_HOST_PORT='8765',
                     ABG_COMPOSE_PROJECT='ai-browser-gateway')
     require(config == expected, 'compose_env_mismatch')
@@ -516,7 +518,7 @@ def check_deploy():
                                    '/run/abg/proxies.toml': (str(SERVICE / 'secrets/proxies.toml'), False)})
             require(entry['NetworkSettings']['Ports'] == {'8765/tcp': [{'HostIp': '127.0.0.1', 'HostPort': '8765'}]}, 'loopback_publish')
             require(entry['State'].get('Health', {}).get('Status') == 'healthy', 'api_unhealthy')
-            require(env.get('ABG_INSTANCE') == 'stand-host' and not env.get('ABG_PROVIDER_NETWORK'), 'provider_config')
+            require(env.get('ABG_INSTANCE') == INSTANCE and not env.get('ABG_PROVIDER_NETWORK'), 'provider_config')
             require(entry['Image'] == json.loads(docker('image', 'inspect', IMAGE))[0]['Id'], 'image_id_mismatch')
         else:
             expected_mounts['/run/abg/ping'] = (str(SERVICE / 'secrets/hc-ping'), False)
@@ -549,7 +551,7 @@ def check_deploy():
 
 
 def main():
-    global SHA, RELEASE, IMAGE, EVIDENCE
+    global SHA, RELEASE, IMAGE, EVIDENCE, SERVICE, INSTANCE
     parser = argparse.ArgumentParser(description=__doc__)
     group = parser.add_mutually_exclusive_group(required=True)
     modes = ('check-deploy', 'check-profiles', 'check-api-egress', 'run-targets', 'check-bizprofile')
@@ -557,11 +559,19 @@ def main():
         group.add_argument('--' + flag, action='store_true')
     parser.add_argument('--release', default=DEFAULT_SHA, help='release SHA (40 lowercase hex characters)')
     parser.add_argument('--evidence', default=str(DEFAULT_EVIDENCE), help='absolute evidence directory')
+    parser.add_argument('--service-root', default=str(SERVICE), help='absolute service directory')
+    parser.add_argument('--instance', default=INSTANCE, help='expected ABG_INSTANCE')
     args = parser.parse_args()
     if not re.fullmatch(r'[0-9a-f]{40}', args.release):
         parser.error('--release must be 40 lowercase hex characters')
     if not Path(args.evidence).is_absolute():
         parser.error('--evidence must be an absolute path')
+    if not Path(args.service_root).is_absolute():
+        parser.error('--service-root must be an absolute path')
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]*', args.instance):
+        parser.error('--instance must be a plain name')
+    SERVICE = Path(args.service_root)
+    INSTANCE = args.instance
     SHA = args.release
     RELEASE = SERVICE / 'releases' / SHA
     IMAGE = 'abg-runtime:' + SHA[:12]

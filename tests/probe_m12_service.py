@@ -504,7 +504,8 @@ class MonitorProbe(ProbeCase):
 
 class ProvisionProbe(ProbeCase):
     def provision(self, source, target):
-        return self.script('abg-provision', ['--source', source, '--output', target])
+        return self.script('abg-provision', ['--source', source, '--output', target,
+                                              '--domain', 'example.net'])
 
     def test_fifteen_encoded_profiles(self):
         login, password = 'u@:/?#%é', 'p@:/?#%é$HOME'

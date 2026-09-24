@@ -22,7 +22,8 @@ class ProvisionTests(unittest.TestCase):
         with os.fdopen(fd, 'w') as handle:
             handle.write('PROXY_LOGIN="%s"\nPROXY_PASSWORD=\'%s\'\n' % (login, password))
         target = base / 'out.toml'
-        cmd = [sys.executable, str(ROOT / 'scripts/abg-provision'), '--source', str(source), '--output']
+        cmd = [sys.executable, str(ROOT / 'scripts/abg-provision'), '--source', str(source),
+               '--domain', 'example.net', '--output']
         proc = subprocess.run(cmd + [str(target)], capture_output=True, text=True, timeout=8)
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)

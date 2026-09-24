@@ -20,8 +20,8 @@ class ProvisionContractTests(FileCase):
         self.source.chmod(0o600)
 
     def prepare(self, expected=0):
-        self.invoke(provision, ['--source', str(self.source), '--output', str(self.target)],
-                    expected, 'profiles=15\n')
+        self.invoke(provision, ['--source', str(self.source), '--output', str(self.target),
+                                '--domain', 'example.net'], expected, 'profiles=15\n')
 
     def clean(self, target_absent=False):
         if target_absent:
@@ -61,6 +61,21 @@ class ProvisionContractTests(FileCase):
                 self.clean(target_absent=True)
         self.source.write_bytes(VALID)
         self.prepare()
+
+    def test_domain_is_required_and_validated(self):
+        base = ['--source', str(self.source), '--output', str(self.target)]
+        too_long = '.'.join(['a'] * 121 + ['net'])
+        for extra in ([], ['--domain'], ['--domain', ''], ['--domain', 'example'],
+                      ['--domain', 'Example.net'], ['--domain', 'example.net:8126'],
+                      ['--domain', 'user@example.net'], ['--domain', '-example.net'],
+                      ['--domain', 'example..net'], ['--domain', too_long]):
+            with self.subTest(extra=extra):
+                self.invoke(provision, base + extra, 1, '')
+                self.clean(target_absent=True)
+        domain = 'example.org'
+        self.invoke(provision, base + ['--domain', domain], 0, 'profiles=15\n')
+        profiles = tomllib.loads(self.target.read_text())['profile']
+        self.assertEqual(urlsplit(profiles['ms7']['url']).hostname, 'ms7.' + domain)
 
     def test_existing_target_is_not_overwritten_or_repermissioned(self):
         self.target.write_bytes(b'foreign configuration')
@@ -103,7 +118,7 @@ class ProvisionContractTests(FileCase):
 
                 def publish(source, target):
                     self.assertFalse(self.target.exists())
-                    self.assertEqual(Path(source).read_bytes(), provision.body('user', 'password'))
+                    self.assertEqual(Path(source).read_bytes(), provision.body('user', 'password', 'example.net'))
                     self.assertEqual(mode(Path(source)), 0o600)
                     publications.append(target)
                     return real_link(source, target)
@@ -116,7 +131,7 @@ class ProvisionContractTests(FileCase):
                     self.assertEqual(len(writes), 2)
                 else:
                     self.assertGreater(len(writes), 1)
-                    self.assertEqual(self.target.read_bytes(), provision.body('user', 'password'))
+                    self.assertEqual(self.target.read_bytes(), provision.body('user', 'password', 'example.net'))
                     self.assertEqual(mode(self.target), 0o600)
                     self.target.unlink()
 

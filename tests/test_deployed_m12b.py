@@ -517,6 +517,41 @@ class MonitorLogTests(unittest.TestCase):
         self.assertTrue((evidence / 'runner.lock').exists())
         self.assertEqual(json.loads(self.evidence.read_text())['release_sha'], sha)
 
+    def test_service_root_and_instance_come_from_arguments(self):
+        moved = self.root / 'moved-service'
+        self.service.rename(moved)
+        config_path = moved / 'compose.env'
+        release = moved / 'releases' / d.SHA
+        config_path.write_text(config_path.read_text().replace(str(d.RELEASE), str(release))
+                               .replace(str(self.service), str(moved))
+                               .replace('ABG_INSTANCE=stand-host', 'ABG_INSTANCE=live-a'))
+        link = self.root / '.config/abg/client-token'
+        link.unlink()
+        link.symlink_to(moved / 'secrets/token')
+        self.entries['api']['Config']['Env'] = ['ABG_INSTANCE=live-a']
+        for entry in self.entries.values():
+            entry['Config']['WorkingDir'] = str(release)
+            entry['Mounts'][0].update(Source=str(release), Destination=str(release))
+            for mount in entry['Mounts'][1:]:
+                mount['Source'] = mount['Source'].replace(str(self.service), str(moved))
+        base = ['--check-deploy', '--release', d.SHA, '--evidence', str(self.root / 'ev'),
+                '--service-root', str(moved)]
+        with patch.object(d, 'SERVICE'), patch.object(d, 'INSTANCE'), patch.object(d, 'SHA'), \
+             patch.object(d, 'IMAGE'), patch.object(d, 'EVIDENCE'), \
+             patch.object(d.sys, 'stdout', io.StringIO()), \
+             patch.object(d.sys, 'stderr', io.StringIO()) as err:
+            self.assertEqual(run_main(base + ['--instance', 'live-a']), 0, err.getvalue())
+            self.assertEqual((d.SERVICE, d.INSTANCE), (moved, 'live-a'))
+            self.assertEqual(run_main(base + ['--instance', 'stand-host']), 1)
+            self.assertIn('compose_env_mismatch', err.getvalue())
+            self.entries['api']['Config']['Env'] = ['ABG_INSTANCE=other']
+            self.assertEqual(run_main(base + ['--instance', 'live-a']), 1)
+            self.assertIn('provider_config', err.getvalue())
+        for bad in (['--service-root', 'relative/dir'], ['--instance', '../x'], ['--instance', '']):
+            with self.subTest(bad=bad), patch.object(d.sys, 'stderr', io.StringIO()):
+                with self.assertRaises(SystemExit):
+                    run_main(base[:5] + bad)
+
     def sleep(self, seconds):
         self.slept += seconds
 
@@ -750,14 +785,16 @@ class ArgumentTests(unittest.TestCase):
     def test_defaults_remain_compatible_without_creating_default_evidence(self):
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
             folder = Path(tmp)
-            for name in ('SHA', 'RELEASE', 'IMAGE', 'EVIDENCE'):
+            for name in ('SHA', 'RELEASE', 'IMAGE', 'EVIDENCE', 'SERVICE', 'INSTANCE'):
                 stack.enter_context(patch.object(d, name, getattr(d, name)))
             stack.enter_context(patch.object(d.sys, 'stdout', io.StringIO()))
             def check():
                 self.assertEqual(d.SHA, '929bded313e371808b0747fd9a400696a36638aa')
                 self.assertEqual(d.IMAGE, 'abg-runtime:929bded313e3')
                 self.assertEqual(d.RELEASE, d.SERVICE / 'releases' / d.SHA)
-                self.assertEqual(d.EVIDENCE, Path('/home/user/.cache/abg-coord-20260917/m12b'))
+                self.assertEqual(d.EVIDENCE, Path.home() / '.cache/abg-deploy-checks/m12b')
+                self.assertEqual(d.SERVICE, Path.home() / 'services/ai-browser-gateway')
+                self.assertEqual(d.INSTANCE, 'stand-host')
             stack.enter_context(patch.object(d, 'check_deploy', side_effect=check))
             stack.enter_context(patch.object(Path, 'mkdir'))
             stack.enter_context(patch.object(d.os, 'chmod'))
