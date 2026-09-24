@@ -937,6 +937,25 @@ class ScraplingAdapterTests(unittest.TestCase):
                          ["body_cf_challenge_platform", "body_noindex_nofollow"])
         self.assertEqual(headers, {"cf-mitigated": "challenge"})
 
+    def test_scrapling_drops_stale_cf_header_with_ad_referrer_token(self):
+        # A solved page whose ad iframe carries the solver's redirect URL.
+        body = (b"<html><title>Directory</title><body>Real content"
+                b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+                b'<iframe src="https://ads.invalid/x?ref=https%3A%2F%2Fsite.invalid%2F'
+                b'%3F__cf_chl_tk%3DP.abc-1.0"></iframe></body></html>')
+        result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+        self.assertEqual(result["err"], "")
+        self.assertEqual(result["headers"], {})
+        self.assertEqual(result["challenge"], "none")
+        self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+
+    def test_scrapling_preserves_cf_header_with_raw_cf_token(self):
+        body = (b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+                b'<form action="/?__cf_chl_tk=P.abc"></form>')
+        result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+        self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
+        self.assertEqual(result["challenge"], "suspected")
+
     def test_scrapling_preserves_cf_header_on_non_jsd_platform_path(self):
         for path in (
             "/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=x",

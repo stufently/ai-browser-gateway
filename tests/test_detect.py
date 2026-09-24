@@ -183,6 +183,21 @@ class DetectChallengeTests(unittest.TestCase):
         self.assertEqual(verdict, "none")
         self.assertIn("body_cf_chl", markers)
 
+    def test_encoded_cf_token_in_foreign_url_is_not_a_marker(self):
+        for sep in ("%3F", "%3f", "%26"):
+            with self.subTest(sep=sep):
+                body = ('<iframe src="https://ads.invalid/x?ref=https%3A%2F%2Fsite.invalid'
+                        f'%2F{sep}__cf_chl_tk%3DP.abc-1.0"></iframe>')
+                verdict, markers = self.detect(200, {}, body)
+                self.assertEqual(verdict, "none")
+                self.assertNotIn("body_cf_chl", markers)
+
+    def test_raw_cf_token_stays_a_marker(self):
+        body = '<form action="/?__cf_chl_tk=P.abc"></form><p>__cf_chl_f_tk%3D</p>'
+        verdict, markers = self.detect(200, {}, body)
+        self.assertEqual(verdict, "none")
+        self.assertIn("body_cf_chl", markers)
+
     def test_single_body_cf_challenge_platform_is_not_suspected(self):
         verdict, markers = self.detect(
             200, {}, "<script src='/cdn-cgi/challenge-platform/x.js'></script>"

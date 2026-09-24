@@ -273,6 +273,16 @@ RULE_PROVENANCE = {
     "status_429": "protocol:HTTP 429",
 }
 
+# A solved challenge redirects to `?__cf_chl_tk=...`; third-party iframes on
+# the real page (ads) then carry that address percent-encoded in their own
+# query. The encoded token names where the page came from, not a challenge.
+_ENCODED_CF_TOKEN = re.compile(r"%(?:3f|26)__cf_chl_\w*tk%3d", re.IGNORECASE)
+
+
+def _drop_encoded_cf_tokens(text: str) -> str:
+    return _ENCODED_CF_TOKEN.sub("%3F", text)
+
+
 # Title "just a moment" is enough on its own. The other four needles need two
 # distinct body hits (title counts). noindex,nofollow is supporting only: it
 # also appears on ordinary pages.
@@ -316,7 +326,7 @@ def _normalize_headers(raw: Any) -> dict[str, str] | None:
 def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
     """Return (challenge type, names of rules that fired). Pure: no I/O."""
     text = body if isinstance(body, str) else body.decode("utf-8", "replace")
-    text = _clip_oversized_charrefs(text)
+    text = _drop_encoded_cf_tokens(_clip_oversized_charrefs(text))
     lowered = text.lower()
 
     header_names: list[str] = []
@@ -707,7 +717,8 @@ def _scrapling_only_jsd_platform_paths(body) -> bool:
 def _scrapling_has_challenge_strings(body) -> bool:
     """Check for challenge strings outside allowed passive JSD prefixes."""
     text = body if isinstance(body, str) else body.decode("utf-8", "replace")
-    remainder = text.lower().replace("/cdn-cgi/challenge-platform/scripts/jsd/", "")
+    remainder = _drop_encoded_cf_tokens(text).lower()
+    remainder = remainder.replace("/cdn-cgi/challenge-platform/scripts/jsd/", "")
     return any(marker in remainder for marker in _SCRAPLING_CHALLENGE_STRINGS)
 
 
