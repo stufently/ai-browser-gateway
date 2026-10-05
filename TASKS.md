@@ -6,6 +6,17 @@
 
 ## Сделано недавно
 
+- [x] **Оценка CloakBrowser (поручение владельца 05.10.2026, пункт бэклога
+  tg-claude-userbot про связку `curl_cffi` + `cloakbrowser`).** Готово
+  05.10.2026, вывод — **не внедрять**:
+  [docs/research/11-cloakbrowser.md](docs/research/11-cloakbrowser.md).
+  Два прогона по шести целям `targets.toml` против `curl_cffi`/`patchright`/
+  `scrapling`: CloakBrowser 0.5.12 (бесплатный Chromium 146) берёт те же 5 из 6,
+  что `patchright`, `cf-bizprofile` не берёт и с ожиданием 45 с, и с кликом по
+  Turnstile; incremental 0. Плюс — RSS ~1,3 ГиБ против ~1,9 ГиБ. Минусы —
+  проприетарный бинарник (распространять нельзя, публичный образ отпадает),
+  свежая ветка 152 только по ключу. Код шлюза не менялся.
+
 - [x] **M23 — цели замера вне гита (поручение владельца 22.09.2026).**
   Готово 22.09.2026. `bench/targets/local.toml` и `bench/local-runs/` под
   `.gitignore`, `--targets` на несколько файлов, команда `aggregate` без id,

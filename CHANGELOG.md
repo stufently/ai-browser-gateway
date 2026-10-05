@@ -1,5 +1,15 @@
 # CHANGELOG
 
+## 2026-10-05
+
+### Добавлено
+
+- **Оценка CloakBrowser** — `docs/research/11-cloakbrowser.md`, сырьё
+  `docs/research/data/cloakbrowser-r{1,2}.jsonl`, оценочный адаптер, образ и
+  запуск штатного `bench` с провайдером, зарегистрированным только в памяти
+  (`docs/research/scripts/cloakbrowser/`). Вывод — бэкендом не добавлять;
+  код шлюза и реестр `bench/` не менялись.
+
 ## 2026-09-24
 
 ### Исправлено
