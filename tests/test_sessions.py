@@ -116,6 +116,7 @@ class FileSessionStoreTests(unittest.TestCase):
         for host in ('../x', 'A.test', '.hidden', 'a/b', 'é.test', '', None, 'a' * 64 + '.t',
                      ('a' * 63 + '.') * 4 + 'aa'):
             with self.subTest(host=host):
+                self.assertIsNone(self.store._path(host))
                 self.store.put(host, SESSION)
                 self.assertIsNone(self.store.get(host))
         self.assertEqual(os.listdir(self.dir) if os.path.isdir(self.dir) else [], [])
