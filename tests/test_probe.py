@@ -1468,7 +1468,7 @@ class JsChallengeReloadTests(unittest.TestCase):
                 patch.object(self.probe.time, "monotonic",
                              side_effect=lambda: page.waited / 1000):
             result = self.navigate(page)
-        self.assertEqual(result["status"], 401)
+        self.assertEqual((result["status"], result["err"]), (401, "javascript_required"))
         self.assertIn("__qrator", result["body"])
         self.assertEqual(page.waited, 400)
         self.assertEqual(page.listeners, [])
@@ -1487,6 +1487,7 @@ class JsChallengeReloadTests(unittest.TestCase):
                              side_effect=lambda: page.waited / 1000):
             result = self.navigate(page)
         self.assertEqual((result["status"], result["body"], page.waited), (200, "", 300))
+        self.assertEqual(result["err"], "javascript_required")
 
     def test_dom_read_is_retried_a_bounded_number_of_times(self):
         page = self.make_page(endless_reload=True)
@@ -1504,14 +1505,24 @@ class JsChallengeReloadTests(unittest.TestCase):
         self.assertEqual((result["status"], page.waited), (200, 200))
         self.assertIn("real text", result["body"])
 
-    def test_unsettled_new_document_yields_no_body(self):
+    def test_unsettled_new_document_reports_the_challenge(self):
         page = self.make_page(reload_during_read=True, partial=True, body_lag=10_000,
                               ready_after=10_000)
         with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 300), \
                 patch.object(self.probe.time, "monotonic",
                              side_effect=lambda: page.waited / 1000):
             result = self.navigate(page)
-        self.assertEqual((result["status"], result["body"], page.waited), (200, "", 300))
+        self.assertEqual((result["status"], page.waited), (200, 300))
+        self.assertEqual(result["err"], "javascript_required")
+
+    def test_unsettled_second_challenge_is_not_a_plain_401(self):
+        page = self.make_page(reload_during_read=True, reload_status=401, body_lag=10_000,
+                              ready_after=10_000)
+        with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 300), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertEqual((result["status"], result["err"]), (401, "javascript_required"))
 
     def test_challenge_without_any_response_keeps_none_status(self):
         page = self.make_page()
@@ -1521,6 +1532,7 @@ class JsChallengeReloadTests(unittest.TestCase):
                              side_effect=lambda: page.waited / 1000):
             result = self.navigate(page)
         self.assertIsNone(result["status"])
+        self.assertEqual(result["err"], "javascript_required")
         self.assertIn("__qrator", result["body"])
 
     def test_document_arriving_during_wait_check_is_rechecked(self):
@@ -1559,6 +1571,7 @@ class JsChallengeReloadTests(unittest.TestCase):
                              side_effect=lambda: page.waited / 1000):
             result = self.navigate(page)
         self.assertEqual((result["status"], page.waited), (401, 600))
+        self.assertEqual(result["err"], "javascript_required")
 
     def test_only_foreign_documents_do_not_end_the_wait(self):
         page = self.make_page(reload_after=100, main_reload=False)
@@ -1566,13 +1579,14 @@ class JsChallengeReloadTests(unittest.TestCase):
                 patch.object(self.probe.time, "monotonic",
                              side_effect=lambda: page.waited / 1000):
             result = self.navigate(page)
-        self.assertEqual(result["status"], 401)
+        self.assertEqual((result["status"], result["err"]), (401, "javascript_required"))
         self.assertEqual(page.waited, 500)
 
     def test_ordinary_page_is_not_held(self):
         page = self.make_page(first_status=200, first_body=self.ARTICLE)
         result = self.navigate(page)
         self.assertEqual((result["status"], page.waited, page.content_calls), (200, 0, 1))
+        self.assertNotIn("err", result)
         page = self.make_page(first_status=401, first_body="<p>nope</p>")
         self.assertEqual((self.navigate(page)["status"], page.waited), (401, 0))
 
@@ -1586,6 +1600,7 @@ class JsChallengeReloadTests(unittest.TestCase):
         with patch.object(self.probe, "_bound_timeout_ms", side_effect=bound):
             result = self.navigate(page)
         self.assertEqual((result["status"], page.waited), (401, 0))
+        self.assertEqual(result["err"], "javascript_required")
 
     def test_listener_is_removed_when_goto_raises(self):
         page = self.make_page()

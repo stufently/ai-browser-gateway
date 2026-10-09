@@ -737,20 +737,26 @@ class PlaywrightAdapter:
             status = latest.status if latest is not None else None
             headers = None if latest is None else _normalize_headers(latest.headers)
             # A document after goto's own may still be loading: only a settled
-            # read past the challenge is trusted.
+            # read past the challenge is trusted. An unsettled one reports the
+            # challenge as such, so the ladder moves on instead of giving up.
+            unsettled = False
             if latest is not response or detect_challenge(
                     status, headers, body)[0] == "javascript_required":
                 settled = _await_reload(self.page, documents, sentinel)
-                if settled is not None:
+                if settled is None:
+                    unsettled = True
+                else:
                     latest, body = settled
-                elif latest is not response:
-                    body = ""
                 if latest is not None:
                     status = latest.status
                     headers = _normalize_headers(latest.headers)
         finally:
             self.page.remove_listener("response", record)
-        return _result(status, self.page.url, body.encode(), 0, self.page.title(), headers=headers)
+        result = _result(status, self.page.url, body.encode(), 0, self.page.title(),
+                         headers=headers)
+        if unsettled:
+            result["err"] = "javascript_required"
+        return result
 
     def close(self) -> None:
         if hasattr(self, "browser"):
