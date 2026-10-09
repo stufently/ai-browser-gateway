@@ -6,6 +6,12 @@
 
 ## Сделано недавно
 
+- [x] **Обзор приёмов конкурентов (поручение владельца 09.10.2026).**
+  Готово 09.10.2026: [docs/research/12-competitor-techniques.md](docs/research/12-competitor-techniques.md).
+  22 приёма из исходников Firecrawl, Crawl4AI, Jina, Spider, trawl, Byparr,
+  botasaurus, SeleniumBase, Crawlee, ftr-site-config; не замерены. Выбор
+  вех — за владельцем.
+
 - [x] **Сбои abg-fetch на rbc.ru и cnbc.com (поручение владельца
   09.10.2026).** Готово 09.10.2026. Причины: Qrator 401 не распознавался как
   JS-челлендж, а patchright не ждал его перезагрузки; CNBC/Akamai режет
