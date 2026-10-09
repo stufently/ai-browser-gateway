@@ -7,8 +7,9 @@
 - **PerimeterX 429 — не rate limit.** `wayfair.com` отвечает `curl_cffi`
   кодом 429 с блок-страницей PerimeterX, а браузеру сразу отдаёт настоящую
   страницу; лестница на 429 браузеры пропускала и сдавалась. Детектор
-  (заголовок «Access to this page has been denied» вне комментариев и
-  скриптов плюс `window._pxAppId`) даёт `suspected`, `accept_page` на 429
+  (статус 403/429, заголовок «Access to this page has been denied» вне
+  комментариев и скриптов, `window._pxAppId` внутри живого `<script>`) даёт
+  `suspected`, `accept_page` на 429
   с ним — `challenge_suspected`, дальше браузер. Фикстура
   `tests/fixtures/perimeterx_block_429.html`.
 

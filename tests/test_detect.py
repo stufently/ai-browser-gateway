@@ -84,13 +84,16 @@ class DetectChallengeTests(unittest.TestCase):
             with self.subTest(tag=tag):
                 self.assertEqual(self.detect(401, {}, tag)[0], "javascript_required")
 
-    def test_perimeterx_block_fixture_is_suspected_at_any_status(self):
+    def test_perimeterx_block_fixture_is_suspected_on_refusal_statuses(self):
         body = fixture("perimeterx_block_429.html")
-        for status in (429, 403, 200):
+        for status in (429, 403):
             with self.subTest(status=status):
                 verdict, markers = self.detect(status, {}, body)
                 self.assertEqual(verdict, "suspected")
                 self.assertEqual(markers[-1], "body_perimeterx_block")
+        for status in (200, 401, None):
+            with self.subTest(status=status):
+                self.assertNotIn("body_perimeterx_block", self.detect(status, {}, body)[1])
 
     def test_perimeterx_needs_both_title_and_app_id(self):
         title = "<title>Access to this page has been denied</title>"
@@ -98,7 +101,10 @@ class DetectChallengeTests(unittest.TestCase):
         for body in (title + "<p>slow down</p>",
                      "<title>Home</title>" + app_id,
                      "<!-- " + title + " -->" + app_id,
-                     "<title>Access to this page has been denied.</title>" + app_id):
+                     "<title>Access to this page has been denied.</title>" + app_id,
+                     title + "<p>window._pxAppId = 'PX1';</p>",
+                     title + "<!-- <script>window._pxAppId = 'PX1';</script> -->",
+                     title + "<template><script>window._pxAppId = 1;</script></template>"):
             with self.subTest(body=body):
                 self.assertEqual(self.detect(429, {}, body)[0], "rate_limited")
         self.assertEqual(self.detect(429, {}, title + app_id),

@@ -347,8 +347,18 @@ def _has_qrator_loader(text: str) -> bool:
 # gets the real page at once (wayfair.com, 2026-10-09): the 429 is bot
 # detection, not a rate limit. Both the block title and the PX app id are
 # required; PX-protected pages carry `_pxAppId` on every ordinary page too.
+# Only a refusal status counts, and the id only inside a live <script>: an
+# article quoting both at 200 is content, not a block.
 _PX_BLOCK_TITLE = "access to this page has been denied"
 _PX_APP_ID = "window._pxappid"
+_PX_STATUSES = frozenset({403, 429})
+_LIVE_SCRIPTS = re.compile(r"<script\b[^>]*>(.*?)</script\s*>", re.I | re.S)
+_DEAD_MARKUP = re.compile(r"<!--.*?-->|<template\b.*?</template\s*>", re.I | re.S)
+
+
+def _has_px_app_id(text: str) -> bool:
+    live = _DEAD_MARKUP.sub(" ", text)
+    return any(_PX_APP_ID in script.lower() for script in _LIVE_SCRIPTS.findall(live))
 # Akamai's edge "Access Denied" is a verdict on the address: both browsers got
 # the same 403 on homedepot.com and cnbc.com, a proxy got 200 on cnbc.com
 # (2026-10-09). The reference link is entity-encoded in the body.
@@ -481,7 +491,7 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
     if _has_qrator_loader(text):
         return "javascript_required", tuple(body_names + captcha_names + ["body_qrator_loader"])
     title = _decisive_title(text).lower()
-    if title == _PX_BLOCK_TITLE and _PX_APP_ID in lowered:
+    if status in _PX_STATUSES and title == _PX_BLOCK_TITLE and _has_px_app_id(text):
         return "suspected", tuple(body_names + captcha_names + ["body_perimeterx_block"])
     if (status == 403 and title == _AKAMAI_DENIED_TITLE
             and _AKAMAI_ERROR_HOST in html_module.unescape(lowered)):
