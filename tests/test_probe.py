@@ -1360,7 +1360,7 @@ class JsChallengeReloadTests(unittest.TestCase):
     def make_page(self, first_status=401, first_body=None, reload_after=None,
                   reload_status=200, redirect_first=True, main_reload=True,
                   ready_after=0, body_lag=0, reload_during_read=False,
-                  endless_reload=False, partial=False):
+                  endless_reload=False, partial=False, parsed_state="complete"):
         test = self
 
         class Request:
@@ -1438,7 +1438,7 @@ class JsChallengeReloadTests(unittest.TestCase):
                 assert script == "document.readyState"
                 if self.reloaded and self.waited - self.reloaded_at >= body_lag:
                     self.body = test.ARTICLE
-                return ("complete" if self.reloaded
+                return (parsed_state if self.reloaded
                         and self.waited - self.reloaded_at >= ready_after else "loading")
 
             def title(self):
@@ -1552,6 +1552,20 @@ class JsChallengeReloadTests(unittest.TestCase):
         self.assertEqual(result["status"], 200)
         # The mixed check is discarded; the next poll accepts the new document.
         self.assertEqual(calls, [200, 300])
+
+    def test_parsed_but_still_loading_subresources_is_accepted(self):
+        page = self.make_page(reload_after=100, parsed_state="interactive")
+        result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited), (200, 200))
+        self.assertNotIn("err", result)
+
+    def test_unknown_ready_state_is_not_accepted(self):
+        page = self.make_page(reload_after=100, parsed_state="uninitialized")
+        with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 400), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertEqual(result["err"], "javascript_required")
 
     def test_wait_continues_until_new_document_is_complete(self):
         page = self.make_page(reload_after=100, ready_after=300)
