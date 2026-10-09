@@ -223,12 +223,15 @@ shutdown removes running providers while draining and finishes sooner.
 
 ## M12b deployed service
 
-Stand-host runs release `ee898f0d531c5eee123ff7f52d06a27f1a2af45f`
-(image `abg-runtime:ee898f0d531c`, deployed 2026-10-09) under
+Stand-host runs release `407c1ba5b2657d01259c57a2bd7d2439e79907a4`
+(image `abg-runtime:407c1ba5b265`, deployed 2026-10-09) under
 `/home/user/services/ai-browser-gateway`, with the API published at
-`127.0.0.1:8765`. It adds PerimeterX 429 and Akamai `ip_blocked`
-detection (CHANGELOG 2026-10-09, 0.1.4) to release `6031421c3b0a` (the
-rollback; its configuration is kept as `compose.env.pre-vendor`), which
+`127.0.0.1:8765`. It adds the per-host session cache (CHANGELOG
+2026-10-09, 0.1.5; sessions live in the API process memory and vanish on
+restart) to release `ee898f0d531c` (the rollback; its configuration is
+kept as `compose.env.pre-sessions`), which added PerimeterX 429 and Akamai `ip_blocked`
+detection (CHANGELOG 2026-10-09, 0.1.4) to release `6031421c3b0a` (its
+configuration is kept as `compose.env.pre-vendor`), which
 added the Qrator JS-challenge handling (CHANGELOG 2026-10-09) to release `2fa1b21e9e38` (2026-09-24; its
 configuration is kept as `compose.env.pre-qrator`), which in turn differs
 from the M16c release `db4fc359171c` only by the detector fix for Cloudflare
@@ -247,7 +250,7 @@ Start or stop the service using its explicit configuration:
 
 ```bash
 service_root=/home/user/services/ai-browser-gateway
-release_sha=ee898f0d531c5eee123ff7f52d06a27f1a2af45f
+release_sha=407c1ba5b2657d01259c57a2bd7d2439e79907a4
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d

@@ -2,6 +2,17 @@
 
 ## 2026-10-09 (0.1.5)
 
+### Выпуск
+
+- Образ `ghcr.io/stufently/ai-browser-gateway-oneshot` — теги `0.1.5`,
+  `sha-407c1ba`, `latest` (`sha256:9555a5bc…`); на него переведены
+  check-sites и `abg-fetch` (ансибль), который теперь монтирует
+  `~/.cache/abg-sessions` (`ABG_SESSION_DIR=` отключает): bizprofile через
+  скил 22,6 с → 2,1 с. Боевой сервис переведён на релиз `407c1ba5b265`
+  (откат — `ee898f0d531c`, конфигурация `compose.env.pre-sessions`);
+  прошли `--check-deploy`, `--check-bizprofile`, через API bizprofile
+  21,4 с → 1,7 с, rbc 6,6 с → 2,2 с, wayfair, cnbc.
+
 ### Добавлено
 
 - **Повтор решённого вызова (кэш сессий по хосту).** Браузерная ступень,
