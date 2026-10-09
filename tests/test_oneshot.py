@@ -143,6 +143,44 @@ class OneshotTests(unittest.TestCase):
         self.assertEqual(forwarded, [expected, expected])
         self.assertTrue(all(env[name] == value for name, value in proxies.items()))
 
+    def test_egress_proxy_from_environment(self):
+        self.assertEqual(oneshot.egress_profiles({}), {})
+        self.assertEqual(oneshot.egress_profiles({'ABG_EGRESS_PROXY': '  '}), {})
+        for proxy in ('http://u:p@proxy.test:8080', 'socks5h://proxy.test:1080',
+                      'HTTPS://proxy.test'):
+            with self.subTest(proxy=proxy):
+                self.assertEqual(oneshot.egress_profiles({'ABG_EGRESS_PROXY': proxy}),
+                                 {'proxy': proxy})
+        for proxy in ('proxy.test:8080', 'ftp://proxy.test', 'http://', 'http://h:port'):
+            with self.subTest(proxy=proxy), self.assertRaises(ValueError):
+                oneshot.egress_profiles({'ABG_EGRESS_PROXY': proxy})
+
+    def test_invalid_egress_proxy_is_invalid_request(self):
+        with patch.dict(os.environ, {'ABG_EGRESS_PROXY': 'ftp://proxy.test'}), patch.object(
+                oneshot.subprocess, 'Popen') as spawn:
+            self.assertEqual(invoke([URL]), (2, '', '{"error": "invalid_request"}\n'))
+        spawn.assert_not_called()
+
+    def test_403_everywhere_falls_back_to_egress_proxy(self):
+        proxy = 'http://user:secret@proxy.test:8080'
+        spawned = []
+
+        def spawn(command, env, **kwargs):
+            spawned.append(env)
+            return process(200 if 'ABG_PROXY' in env else 403)
+
+        with patch.dict(os.environ, {'ABG_EGRESS_PROXY': proxy}), patch.object(
+                oneshot.subprocess, 'Popen', side_effect=spawn):
+            rc, out, err = invoke([URL])
+        self.assertEqual((rc, err), (0, ''))
+        value = json.loads(out)
+        self.assertNotIn('secret', out)
+        self.assertEqual([(a['provider'], a['egress_profile']) for a in value['attempts']],
+                         [('curl_cffi', 'direct'), ('patchright', 'direct'),
+                          ('scrapling', 'direct'), ('curl_cffi', 'proxy')])
+        self.assertEqual([env.get('ABG_PROXY') for env in spawned], [None, None, None, proxy])
+        self.assertTrue(all('ABG_EGRESS_PROXY' not in env for env in spawned))
+
     def test_signal_kills_active_probe_groups(self):
         signals = (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)
         previous = {sig: signal.getsignal(sig) for sig in signals}

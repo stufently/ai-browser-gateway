@@ -30,7 +30,7 @@ def egress_profiles(environ=os.environ):
     if not proxy:
         return {}
     parts = urlsplit(proxy)
-    if parts.scheme.lower() not in _PROXY_SCHEMES or not parts.hostname:
+    if parts.scheme not in _PROXY_SCHEMES or not parts.hostname:
         raise ValueError('invalid egress proxy')
     parts.port  # ValueError on a malformed port.
     return {EGRESS_PROFILE: proxy}
