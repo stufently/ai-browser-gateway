@@ -354,8 +354,11 @@ class ProbeSessionTests(unittest.TestCase):
             captured.update(kwargs)
             return Response()
 
+        plain_get = get
+
         class Session:
-            get = staticmethod(get)
+            def get(self, url, **kwargs):
+                return plain_get(url, **kwargs)
 
             def close(self):
                 pass
