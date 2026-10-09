@@ -773,6 +773,12 @@ class AdapterContractTests(unittest.TestCase):
             def goto(self, url, wait_until="load", timeout=0):
                 return self._response
 
+            def on(self, event, handler):
+                pass
+
+            def remove_listener(self, event, handler):
+                pass
+
             def title(self):
                 return "Observed"
 
@@ -1339,6 +1345,147 @@ class DockerDescriptorTests(unittest.TestCase):
         self.assertIn("patchright install --with-deps chrome", text)
         self.assertIn("ENV ABG_PROVIDER=scrapling", text)
         self.assertIn("chmod a+rX /opt/abg/probe.py", text)
+
+
+class JsChallengeReloadTests(unittest.TestCase):
+    """Playwright adapters wait for a JS challenge to reload the page."""
+
+    LOADER = '<html><head><script src="/__qrator/l.js"></script></head><body></body></html>'
+    ARTICLE = '<html><body><article>real text</article></body></html>'
+
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def make_page(self, first_status=401, first_body=None, reload_after=None,
+                  reload_status=200, redirect_first=True, main_reload=True):
+        test = self
+
+        class Request:
+            def __init__(self, kind):
+                self.resource_type = kind
+
+        class Response:
+            def __init__(self, status, frame, kind="document"):
+                self.status = status
+                self.frame = frame
+                self.request = Request(kind)
+                self.headers = {"x-status": str(status)}
+
+        class Frame:
+            def content(self):
+                return page.body
+
+        class Page:
+            def __init__(self):
+                self.main_frame = Frame()
+                self.frames = [self.main_frame]
+                self.listeners = []
+                self.body = test.LOADER if first_body is None else first_body
+                self.url = "https://a.test/news/1"
+                self.waited = 0
+                self.load_states = []
+
+            def on(self, event, handler):
+                self.listeners.append((event, handler))
+
+            def remove_listener(self, event, handler):
+                self.listeners.remove((event, handler))
+
+            def emit(self, response):
+                for event, handler in list(self.listeners):
+                    if event == "response":
+                        handler(response)
+
+            def goto(self, url, **kwargs):
+                first = Response(first_status, self.main_frame)
+                self.emit(first)
+                return first
+
+            def wait_for_timeout(self, milliseconds):
+                self.waited += milliseconds
+                if reload_after is None:
+                    return
+                if self.waited == reload_after:
+                    # Subresource, foreign-frame and redirect responses never count.
+                    self.emit(Response(200, self.main_frame, kind="script"))
+                    self.emit(Response(200, Frame()))
+                    if redirect_first:
+                        self.emit(Response(301, self.main_frame))
+                elif self.waited == reload_after + 100 and main_reload:
+                    self.emit(Response(reload_status, self.main_frame))
+                    self.body = test.ARTICLE
+                    self.url = "https://a.test/education/1"
+
+            def wait_for_load_state(self, state, timeout):
+                self.load_states.append(state)
+
+            def title(self):
+                return ""
+
+        page = Page()
+        return page
+
+    def navigate(self, page):
+        adapter = self.probe.PatchrightAdapter()
+        adapter.page = page
+        return adapter.navigate("https://a.test/news/1")
+
+    def test_reload_after_challenge_returns_the_real_page(self):
+        page = self.make_page(reload_after=300)
+        result = self.navigate(page)
+        self.assertEqual(page.waited, 400)
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result["headers"], {"x-status": "200"})
+        self.assertIn("real text", result["body"])
+        self.assertEqual(result["final_url"], "https://a.test/education/1")
+        self.assertEqual(page.load_states, ["load"])
+        self.assertEqual(page.listeners, [])
+
+    def test_no_reload_keeps_the_challenge_within_the_wait_limit(self):
+        page = self.make_page()
+        with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 400), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertEqual(result["status"], 401)
+        self.assertIn("__qrator", result["body"])
+        self.assertEqual(page.waited, 400)
+        self.assertEqual(page.listeners, [])
+
+    def test_only_foreign_documents_do_not_end_the_wait(self):
+        page = self.make_page(reload_after=100, main_reload=False)
+        with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 500), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertEqual(result["status"], 401)
+        self.assertEqual(page.waited, 500)
+
+    def test_ordinary_page_is_not_held(self):
+        page = self.make_page(first_status=200, first_body=self.ARTICLE)
+        result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited, page.load_states), (200, 0, []))
+        page = self.make_page(first_status=401, first_body="<p>nope</p>")
+        self.assertEqual((self.navigate(page)["status"], page.waited), (401, 0))
+
+    def test_expired_deadline_skips_the_wait(self):
+        page = self.make_page(reload_after=100)
+        def bound(default):
+            if default == self.probe.JS_CHALLENGE_WAIT_MS:
+                raise TimeoutError("budget exceeded")
+            return default
+
+        with patch.object(self.probe, "_bound_timeout_ms", side_effect=bound):
+            result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited), (401, 0))
+
+    def test_listener_is_removed_when_goto_raises(self):
+        page = self.make_page()
+        page.goto = lambda url, **kwargs: (_ for _ in ()).throw(RuntimeError("boom"))
+        with self.assertRaises(RuntimeError):
+            self.navigate(page)
+        self.assertEqual(page.listeners, [])
 
 
 if __name__ == "__main__":

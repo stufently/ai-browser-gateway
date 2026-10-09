@@ -52,6 +52,32 @@ class DetectChallengeTests(unittest.TestCase):
         self.assertEqual(verdict, "none")
         self.assertEqual(markers, ())
 
+    def test_qrator_loader_fixture_is_javascript_required(self):
+        for status in (401, 200, None):
+            with self.subTest(status=status):
+                verdict, markers = self.detect(status, {}, fixture("qrator_loader_401.html"))
+                self.assertEqual(verdict, "javascript_required")
+                self.assertEqual(markers, ("body_qrator_loader",))
+
+    def test_qrator_loader_outranks_status_but_not_cf_header(self):
+        body = fixture("qrator_loader_401.html")
+        self.assertEqual(self.detect(403, {}, body)[0], "javascript_required")
+        self.assertEqual(self.detect(401, {"cf-mitigated": "challenge"}, body)[0], "suspected")
+
+    def test_qrator_mention_outside_script_src_is_none(self):
+        for body in ('<p>/__qrator/ldr.js</p>',
+                     '<!-- <script src="/__qrator/ldr.js"></script> -->',
+                     '<script src="https://cdn.test/__qrator/x.js"></script>',
+                     '<img src="/__qrator/x.png">'):
+            with self.subTest(body=body):
+                self.assertEqual(self.detect(401, {}, body), ("none", ()))
+
+    def test_qrator_loader_attribute_variants(self):
+        for tag in ("<SCRIPT charset=utf-8 SRC='/__qrator/l.js'>",
+                    "<script src=/__qrator/l.js>"):
+            with self.subTest(tag=tag):
+                self.assertEqual(self.detect(401, {}, tag)[0], "javascript_required")
+
     def test_cf_mitigated_header_outranks_clean_body(self):
         verdict, markers = self.detect(
             200, {"cf-mitigated": "challenge"}, "<html><body>hello</body></html>"
@@ -985,7 +1011,7 @@ class RuleProvenanceTests(unittest.TestCase):
         named = {name for name, _ in self.probe._BODY_RULES}
         named |= {name for name, _ in self.probe._SUPPORTING_BODY_RULES}
         named |= {"header_cf_mitigated", "body_captcha", "status_403", "status_429"}
-        named.add("body_captcha_interactive")
+        named |= {"body_captcha_interactive", "body_qrator_loader"}
         self.assertEqual(set(self.probe.RULE_PROVENANCE), named)
 
     def test_measured_rules_name_a_fixture_that_exists(self):

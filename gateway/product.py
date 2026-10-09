@@ -67,6 +67,9 @@ def accept_page(result: FetchResult, expected_text=None) -> tuple[bool, F]:
     if 500 <= status <= 599:
         return False, F.http_5xx
     if not 200 <= status <= 299:
+        # Qrator serves its JS challenge as 401; a browser passes it.
+        if 400 <= status <= 499 and result.challenge == C.javascript_required:
+            return False, F.javascript_required
         return False, F.content_mismatch
     challenge_reason = {
         C.interactive: F.interactive_challenge, C.rate_limited: F.http_429,

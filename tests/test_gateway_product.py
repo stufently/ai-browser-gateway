@@ -52,6 +52,39 @@ class ProductTests(unittest.TestCase):
             with self.subTest(changes=changes):
                 self.assertEqual(accept_page(page(**changes), 'actual'), (False, reason))
 
+    def test_js_challenge_on_4xx_is_javascript_required(self):
+        js = C.javascript_required
+        self.assertEqual(accept_page(page(status=401, challenge=js)), (False, F.javascript_required))
+        self.assertEqual(accept_page(page(status=499, challenge=js)), (False, F.javascript_required))
+        for changes in (dict(status=401), dict(status=302, challenge=js),
+                        dict(status=400, challenge=C.suspected)):
+            with self.subTest(changes=changes):
+                self.assertEqual(accept_page(page(**changes)), (False, F.content_mismatch))
+
+    def test_qrator_401_escalates_to_browser(self):
+        replies = [page(status=401, challenge=C.javascript_required, text=''),
+                   page(provider='patchright')]
+        calls = []
+        def fetch(step, budget):
+            calls.append(step.provider)
+            return ProviderReply(replies[len(calls) - 1])
+        result = run_product(ProductRequest('https://a.test'), fetch)
+        self.assertTrue(result.ok)
+        self.assertEqual(calls, ['curl_cffi', 'patchright'])
+        self.assertEqual([a.next_step for a in result.attempts], [Step.browser, Step.stop])
+
+    def test_403_after_browsers_changes_egress(self):
+        calls = []
+        def fetch(step, budget):
+            calls.append((step.provider, step.egress_profile))
+            return ProviderReply(page(status=200 if step.purpose == 'egress' else 403))
+        result = run_product(ProductRequest('https://a.test', egress_profiles=('proxy',)), fetch)
+        self.assertTrue(result.ok)
+        self.assertEqual(calls, [('curl_cffi', 'direct'), ('patchright', 'direct'),
+                                 ('scrapling', 'direct'), ('curl_cffi', 'proxy')])
+        self.assertEqual([a.next_step for a in result.attempts],
+                         [Step.browser, Step.browser, Step.change_egress, Step.stop])
+
     def test_expectation_does_not_replace_visible_text(self):
         self.assertEqual(accept_page(page(text='  '), 'actual'), (False, F.content_missing))
         self.assertEqual(accept_page(page(text='x', html=''), None), (True, F.none))

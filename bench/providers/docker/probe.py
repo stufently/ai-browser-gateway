@@ -246,6 +246,9 @@ _INERT_MARKUP = re.compile(
 )
 
 
+_INERT_COMMENTS = re.compile(r"<!--.*?-->", re.S)
+
+
 def _decisive_title(body: str) -> str:
     """Title used for RULE decisions: comments, scripts and templates removed."""
     return _title(_INERT_MARKUP.sub(" ", body))
@@ -269,6 +272,7 @@ RULE_PROVENANCE = {
     "body_noindex_nofollow": CF_INTERSTITIAL,
     "body_captcha": ASSUMED,
     "body_captcha_interactive": ASSUMED,
+    "body_qrator_loader": "fixture:qrator_loader_401.html",
     "status_403": "protocol:HTTP 403",
     "status_429": "protocol:HTTP 429",
 }
@@ -301,6 +305,13 @@ _SUPPORTING_BODY_RULES = (
 # is not enough.
 _CAPTCHA_ATTR = re.compile(
     r'(?:src|class|id|name)\s*=\s*["\'][^"\']*captcha',
+    re.I,
+)
+# Qrator answers 401 with an empty page whose only content is its loader
+# script; the script sets a cookie and reloads to the real page (rbc.ru,
+# 2026-10-09). The passed page carries no `/__qrator/` reference.
+_QRATOR_LOADER = re.compile(
+    r'<script\b[^>]*\bsrc\s*=\s*["\']?/__qrator/',
     re.I,
 )
 _CAPTCHA_WIDGET_CLASSES = frozenset({"g-recaptcha", "h-captcha", "cf-turnstile"})
@@ -425,6 +436,8 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
         return "suspected", tuple(body_names + captcha_names)
     if "body_captcha_interactive" in captcha_names and captcha_confirmed:
         return "captcha", tuple(body_names + captcha_names)
+    if _QRATOR_LOADER.search(_INERT_COMMENTS.sub(" ", text)):
+        return "javascript_required", tuple(body_names + captcha_names + ["body_qrator_loader"])
     if status_verdict is not None:
         return status_verdict, tuple(body_names + captcha_names + status_names)
     return "none", tuple(body_names + captcha_names)
@@ -680,10 +693,29 @@ class PlaywrightAdapter:
         self.page = self.browser.new_page()
 
     def navigate(self, url: str) -> dict[str, Any]:
-        response = self.page.goto(url, wait_until="load", timeout=_bound_timeout_ms(120_000))
-        body = _playwright_body(self.page, getattr(self, "sentinel", ""))
-        status = response.status if response is not None else None
-        headers = None if response is None else _normalize_headers(response.headers)
+        documents: list[Any] = []
+
+        def record(response):
+            if (response.request.resource_type == "document"
+                    and response.frame == self.page.main_frame
+                    and not 300 <= response.status < 400):
+                documents.append(response)
+
+        # Registered before goto: a JS challenge may reload before goto returns.
+        self.page.on("response", record)
+        try:
+            response = self.page.goto(url, wait_until="load", timeout=_bound_timeout_ms(120_000))
+            body = _playwright_body(self.page, getattr(self, "sentinel", ""))
+            status = response.status if response is not None else None
+            headers = None if response is None else _normalize_headers(response.headers)
+            if detect_challenge(status, headers, body)[0] == "javascript_required":
+                reloaded = _await_reload(self.page, documents, len(documents))
+                if reloaded is not None:
+                    body = _playwright_body(self.page, getattr(self, "sentinel", ""))
+                    status = reloaded.status
+                    headers = _normalize_headers(reloaded.headers)
+        finally:
+            self.page.remove_listener("response", record)
         return _result(status, self.page.url, body.encode(), 0, self.page.title(), headers=headers)
 
     def close(self) -> None:
@@ -691,6 +723,29 @@ class PlaywrightAdapter:
             self.browser.close()
         if hasattr(self, "runtime"):
             self.runtime.stop()
+
+
+# Measured: the Qrator loader reloads rbc.ru 1.4–3.3 s after the 401.
+JS_CHALLENGE_WAIT_MS = 15_000
+
+
+def _await_reload(page: Any, documents: list[Any], seen: int) -> Any:
+    """Wait for the main frame's next final document after a JS challenge."""
+    try:
+        timeout_ms = _bound_timeout_ms(JS_CHALLENGE_WAIT_MS)
+    except TimeoutError:
+        return None
+    deadline = time.monotonic() + timeout_ms / 1000
+    while len(documents) <= seen:
+        if time.monotonic() >= deadline:
+            return None
+        page.wait_for_timeout(100)
+    left = max(1, int((deadline - time.monotonic()) * 1000))
+    try:
+        page.wait_for_load_state("load", timeout=left)
+    except Exception:
+        pass
+    return documents[-1]
 
 
 class PatchrightAdapter(PlaywrightAdapter):

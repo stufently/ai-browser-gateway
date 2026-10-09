@@ -1,4 +1,9 @@
-"""Direct-only, self-contained product CLI with local provider processes."""
+"""Self-contained product CLI with local provider processes.
+
+The ladder runs direct; ABG_EGRESS_PROXY (a proxy URL, read from the
+environment so credentials stay out of argv) adds one curl_cffi step through
+that proxy after the browsers, for sites that block the host's address.
+"""
 import argparse
 from dataclasses import asdict
 import json
@@ -6,11 +11,29 @@ import os
 import signal
 import subprocess
 import sys
+from urllib.parse import urlsplit
 
 from bench.providers.registry import PROVIDERS
 from gateway.fetch import ProductFetcher
 from gateway.format import MODES, render_content
 from gateway.product import ProductRequest, plan_product, run_product
+
+
+EGRESS_ENV = 'ABG_EGRESS_PROXY'
+EGRESS_PROFILE = 'proxy'
+_PROXY_SCHEMES = frozenset({'http', 'https', 'socks5', 'socks5h'})
+
+
+def egress_profiles(environ=os.environ):
+    """{profile: proxy URL} from the environment; empty when unset or blank."""
+    proxy = environ.get(EGRESS_ENV, '').strip()
+    if not proxy:
+        return {}
+    parts = urlsplit(proxy)
+    if parts.scheme.lower() not in _PROXY_SCHEMES or not parts.hostname:
+        raise ValueError('invalid egress proxy')
+    parts.port  # ValueError on a malformed port.
+    return {EGRESS_PROFILE: proxy}
 
 
 class _Interrupted(BaseException):
@@ -46,7 +69,8 @@ class LocalLauncher:
         child_env = dict(os.environ if env is None else env)
         child_env = {name: value for name, value in child_env.items()
                      if name.lower() not in {'http_proxy', 'https_proxy', 'all_proxy',
-                                             'ftp_proxy', 'no_proxy'}}
+                                             'ftp_proxy', 'no_proxy'}
+                     and name != EGRESS_ENV}
         child_env['ABG_PROVIDER'] = provider.name
         proc = None
         try:
@@ -95,7 +119,8 @@ def main(argv=None):
             parser.add_argument('--budget-ms', type=int, default=30000)
             parser.add_argument('--no-browser', action='store_true')
             args = parser.parse_args(argv)
-            request = ProductRequest(args.url, max_age_hours=0, egress_profiles=(),
+            profiles = egress_profiles()
+            request = ProductRequest(args.url, max_age_hours=0, egress_profiles=tuple(profiles),
                                      budget_ms=args.budget_ms, allow_browser=not args.no_browser,
                                      expected_text=args.expected_text)
             plan_product(request)
@@ -115,7 +140,8 @@ def main(argv=None):
         try:
             for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
                 previous[signum] = signal.signal(signum, interrupt)
-            result = run_product(request, ProductFetcher(request.url, launcher=launcher))
+            result = run_product(request, ProductFetcher(
+                request.url, profiles=profiles, launcher=launcher))
         except _Interrupted:
             print('{"error": "interrupted"}', file=sys.stderr)
             return 4
