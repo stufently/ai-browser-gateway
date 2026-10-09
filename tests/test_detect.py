@@ -115,6 +115,7 @@ class DetectChallengeTests(unittest.TestCase):
         for body in (title + app_id, title + "<template></template>" + app_id,
                      title + "<SCRIPT type=module>window._pxAppId='X'</SCRIPT>",
                      title + '<script type="text/javascript">window._pxAppId=1</script>',
+                     title + '<script type="text/x-javascript">window._pxAppId=1</script>',
                      title + "<script/>window._pxAppId = 1;</script>"):
             with self.subTest(body=body):
                 self.assertEqual(self.detect(429, {}, body),
