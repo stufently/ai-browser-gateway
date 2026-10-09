@@ -4,15 +4,14 @@
 `CHANGELOG.md`, сюда не дублируются. Записи старше ~30–60 дней уезжают в
 `docs/worklog-archive/YYYY-MM.md`.
 
-- [ ] **Веха: детект вендоров антибот-защит (выбор владельца 09.10.2026).**
-  Ресерч сделан, замер — в конце
-  [docs/research/12-competitor-techniques.md](docs/research/12-competitor-techniques.md).
-  Найдена ошибка: wayfair (PerimeterX) отдаёт curl'у 429, а браузеру сразу
-  200, но лестница при 429 браузеры не запускает. Дальше: собрать фикстуры
-  блок-страниц (IP из тела вычистить), написать спеку, прогнать предполёт,
-  отдать исполнителю.
-
-## Сделано недавно
+- [x] **Детект вендоров антибот-защит (выбор владельца 09.10.2026).**
+  Готово 09.10.2026, выпуск `0.1.4` (CHANGELOG). PerimeterX 429 теперь
+  ведёт в браузер (wayfair 6/6), Akamai «Access Denied» помечается
+  `ip_blocked`. Открыто: DataDome и Kasada с нашего IP браузером не
+  проходятся; `<script/>` внутри строки JS — известное ограничение
+  PX-правила; остальные приёмы из
+  [docs/research/12-competitor-techniques.md](docs/research/12-competitor-techniques.md)
+  (кэш сессии по домену, JSON-LD, WP REST) — следующие вехи.
 
 - [x] **Обзор приёмов конкурентов (поручение владельца 09.10.2026).**
   Готово 09.10.2026: [docs/research/12-competitor-techniques.md](docs/research/12-competitor-techniques.md).

@@ -25,6 +25,22 @@
   `tests/fixtures/akamai_access_denied_403.html`. Замер по вендорам —
   `docs/research/12-competitor-techniques.md`.
 
+### Выпуск
+
+- Образ `ghcr.io/stufently/ai-browser-gateway-oneshot` — теги `0.1.4`,
+  `sha-ee898f0`, `latest` (`sha256:a7c4cc14…`); на него переведены
+  `abg-fetch` (ансибль) и check-sites. Перед выпуском — серия по шесть
+  прогонов на `wayfair.com` и `rbc.ru`, все 12 зелёные. Боевой сервис
+  переведён на релиз `ee898f0d531c` (откат — `6031421c3b0a`, конфигурация
+  `compose.env.pre-vendor`); прошли `--check-deploy`, `--check-bizprofile`,
+  `wayfair.com`, `rbc.ru`, `cnbc.com` через API.
+- Ревью: Codex — пять кругов (пропуск браузеров при `ip_blocked` убран,
+  PX-правило сужено до живых исполняемых `<script>`); последний круг ещё
+  находил пограничные случаи разбора HTML — `<script/>` внутри строки JS
+  остаётся известным ограничением (цена — одна лишняя или пропущенная
+  браузерная попытка на 429). agy — те же находки плюс тест `escalate`.
+  Мутации по всем новым веткам убиты.
+
 ## 2026-10-09
 
 ### Исправлено

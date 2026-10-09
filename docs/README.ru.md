@@ -223,11 +223,13 @@ shutdown removes running providers while draining and finishes sooner.
 
 ## M12b deployed service
 
-Stand-host runs release `6031421c3b0a0e04a263440437cdbd9a08e7e3c8`
-(image `abg-runtime:6031421c3b0a`, deployed 2026-10-09) under
+Stand-host runs release `ee898f0d531c5eee123ff7f52d06a27f1a2af45f`
+(image `abg-runtime:ee898f0d531c`, deployed 2026-10-09) under
 `/home/user/services/ai-browser-gateway`, with the API published at
-`127.0.0.1:8765`. It adds the Qrator JS-challenge handling (CHANGELOG
-2026-10-09) to release `2fa1b21e9e38` (2026-09-24, the rollback; its
+`127.0.0.1:8765`. It adds PerimeterX 429 and Akamai `ip_blocked`
+detection (CHANGELOG 2026-10-09, 0.1.4) to release `6031421c3b0a` (the
+rollback; its configuration is kept as `compose.env.pre-vendor`), which
+added the Qrator JS-challenge handling (CHANGELOG 2026-10-09) to release `2fa1b21e9e38` (2026-09-24; its
 configuration is kept as `compose.env.pre-qrator`), which in turn differs
 from the M16c release `db4fc359171c` only by the detector fix for Cloudflare
 tokens inside encoded third-party URLs; the measurements below were taken on
@@ -245,7 +247,7 @@ Start or stop the service using its explicit configuration:
 
 ```bash
 service_root=/home/user/services/ai-browser-gateway
-release_sha=6031421c3b0a0e04a263440437cdbd9a08e7e3c8
+release_sha=ee898f0d531c5eee123ff7f52d06a27f1a2af45f
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
