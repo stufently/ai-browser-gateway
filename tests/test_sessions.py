@@ -146,6 +146,17 @@ class FileSessionStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.get('a.test'))
         self.store.drop('missing.test')
 
+    def test_replace_and_checked_drop_run_under_the_lock(self):
+        import fcntl
+        events = []
+        real_replace, real_unlink = os.replace, os.unlink
+        with patch('fcntl.flock', lambda fd, op: events.append('lock' if op == fcntl.LOCK_EX else op)), \
+                patch('os.replace', lambda *a: events.append('replace') or real_replace(*a)):
+            self.store.put('a.test', SESSION)
+            self.store.drop('a.test', SESSION)
+        self.assertEqual(events, ['lock', 'replace', 'lock'])
+        self.assertIsNone(self.store.get('a.test'))
+
     def test_late_drop_keeps_a_newer_session(self):
         newer = {'ua': 'UA2', 'cookies': [{'name': 'cf_clearance', 'value': 'v2'}]}
         self.store.put('a.test', newer)
@@ -177,7 +188,7 @@ class FileSessionStoreTests(unittest.TestCase):
         with open(outside) as stream:
             self.assertEqual(json.loads(stream.read())['session'], SESSION)
         self.assertFalse(os.path.islink(os.path.join(self.dir, 'a.test.json')))
-        self.assertEqual([n for n in os.listdir(self.dir) if n.startswith('.')], [])
+        self.assertEqual([n for n in os.listdir(self.dir) if n.startswith('.session-')], [])
 
 
 class ProductFetcherSessionTests(unittest.TestCase):
@@ -346,6 +357,60 @@ class ProbeSessionTests(unittest.TestCase):
                     os.environ.pop(name, None)
             self.probe.CurlCffiAdapter().navigate('https://a.test/')
         return captured
+
+    def curl_chain(self, environ, responses):
+        calls = []
+
+        class Response:
+            content, history = b'<p>x</p>', []
+
+            def __init__(self, status, url, location=None):
+                self.status_code, self.url = status, url
+                self.headers = {'Location': location} if location else {}
+
+        chain = iter(Response(*item) for item in responses)
+
+        def get(url, **kwargs):
+            calls.append((url, kwargs))
+            return next(chain)
+        curl_cffi = types.ModuleType('curl_cffi')
+        requests_mod = types.ModuleType('curl_cffi.requests')
+        requests_mod.get = get
+        curl_cffi.requests = requests_mod
+        with patch.dict(sys.modules, {'curl_cffi': curl_cffi, 'curl_cffi.requests': requests_mod}), \
+                patch.dict(os.environ, environ, clear=False):
+            if 'ABG_SESSION' not in environ:
+                os.environ.pop('ABG_SESSION', None)
+            os.environ.pop('ABG_PROXY', None)
+            value = self.probe.CurlCffiAdapter().navigate('https://a.test/')
+        return calls, value
+
+    def test_replay_follows_only_https_redirects_on_the_same_host(self):
+        env = {'ABG_SESSION': json.dumps(SESSION)}
+        calls, value = self.curl_chain(env, [(302, 'https://a.test/', '/next'),
+                                              (200, 'https://a.test/next')])
+        self.assertEqual([url for url, _ in calls], ['https://a.test/', 'https://a.test/next'])
+        self.assertTrue(all(kw['allow_redirects'] is False and kw['cookies'] == {'cf_clearance': 'v1'}
+                            for _, kw in calls))
+        self.assertEqual((value['status'], value['final_url'], value['redirects']),
+                         (200, 'https://a.test/next', 1))
+        for location in ('http://a.test/plain', 'https://b.test/x', '//b.test/x'):
+            with self.subTest(location=location):
+                calls, value = self.curl_chain(env, [(301, 'https://a.test/', location)])
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(value['status'], 301)
+
+    def test_replay_redirects_are_capped(self):
+        env = {'ABG_SESSION': json.dumps(SESSION)}
+        loop = [(307, 'https://a.test/', '/again')] * 12
+        calls, value = self.curl_chain(env, loop)
+        self.assertEqual(len(calls), 11)
+        self.assertEqual(value['redirects'], 10)
+
+    def test_without_session_curl_follows_redirects_itself(self):
+        calls, value = self.curl_chain({}, [(200, 'https://b.test/')])
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][1]['allow_redirects'])
 
     def test_curl_replays_cookies_and_user_agent(self):
         captured = self.curl({'ABG_SESSION': json.dumps(SESSION)})

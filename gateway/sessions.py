@@ -5,6 +5,8 @@ the real page from rbc.ru (Qrator) and bizprofile.net (Cloudflare
 cf_clearance) instead of the challenge. Cookies are bound to the address that
 solved them, so only direct steps share a session.
 """
+from contextlib import contextmanager
+import fcntl
 import json
 import os
 from pathlib import Path
@@ -106,6 +108,16 @@ class FileSessionStore:
         return (stat.S_ISDIR(info.st_mode) and info.st_uid == os.getuid()
                 and not info.st_mode & 0o077)
 
+    @contextmanager
+    def _locked(self):
+        """One writer at a time across processes: put and a checked drop."""
+        fd = os.open(self._dir / '.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
     def _read(self, path):
         try:
             fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -144,7 +156,8 @@ class FileSessionStore:
             try:
                 with os.fdopen(fd, 'w', encoding='utf-8') as stream:
                     stream.write(data)
-                os.replace(temporary, path)
+                with self._locked():
+                    os.replace(temporary, path)
             except OSError:
                 os.unlink(temporary)
                 raise
@@ -156,11 +169,12 @@ class FileSessionStore:
         path = self._path(host)
         if path is None or not self._private():
             return
-        if session is not None:
-            item = self._read(path)
-            if item is None or not _same(item[1], session):
-                return
         try:
-            path.unlink()
+            with self._locked():
+                if session is not None:
+                    item = self._read(path)
+                    if item is None or not _same(item[1], session):
+                        return
+                path.unlink()
         except OSError:
             pass

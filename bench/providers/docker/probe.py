@@ -24,7 +24,7 @@ from email.utils import parsedate_to_datetime
 from html.parser import HTMLParser
 from typing import Any
 from urllib.error import HTTPError
-from urllib.parse import unquote, urlencode, urlparse, urlunparse
+from urllib.parse import unquote, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import ProxyHandler, Request, build_opener
 from urllib.request import urlopen as _stdlib_urlopen
 from xml.etree import ElementTree
@@ -147,6 +147,7 @@ def _proxy_url() -> str:
 # Measured 2026-10-09: rbc.ru (Qrator) and bizprofile.net (cf_clearance) then
 # answer curl_cffi with the real page. The values never reach argv or logs.
 SESSION_MAX_COOKIES = 64
+SESSION_MAX_REDIRECTS = 10
 
 
 def _session_in() -> dict[str, Any] | None:
@@ -783,17 +784,31 @@ class CurlCffiAdapter:
             kwargs["proxy"] = proxy
         session = _session_in()
         if session is not None:
-            kwargs["headers"] = {"User-Agent": session["ua"]}
-            kwargs["cookies"] = session["cookies"]
+            # The replayed cookies keep no Secure flag or domain, so redirects
+            # are followed by hand and only to https on the same host; any
+            # other hop ends the replay at its 3xx.
+            kwargs.update(headers={"User-Agent": session["ua"]}, cookies=session["cookies"],
+                          allow_redirects=False)
         try:
             response = requests.get(url, **kwargs)
+            hops = len(response.history)
+            while (session is not None and hops < SESSION_MAX_REDIRECTS
+                   and response.status_code in (301, 302, 303, 307, 308)):
+                target = urljoin(str(response.url), _header_value(
+                    _normalize_headers(response.headers).get("location", "")))
+                parsed = urlparse(target)
+                if parsed.scheme != "https" or parsed.hostname != urlparse(url).hostname:
+                    break
+                kwargs["timeout"] = _bound_timeout_s(120)
+                response = requests.get(target, **kwargs)
+                hops += 1
         except Exception as exc:
             if any(cls.__name__ == "Timeout" and cls.__module__ == "curl_cffi.requests.exceptions"
                    for cls in type(exc).__mro__):
                 raise TimeoutError("curl_cffi request timed out") from exc
             raise
         return _result(
-            response.status_code, str(response.url), response.content, len(response.history),
+            response.status_code, str(response.url), response.content, hops,
             headers=_normalize_headers(response.headers),
         )
 
