@@ -38,6 +38,9 @@ def result(status=200, challenge=C.none, error=F.none, provider='curl_cffi'):
 
 
 class SessionShapeTests(unittest.TestCase):
+    def test_sessions_last_thirty_minutes(self):
+        self.assertEqual(MAX_AGE_S, 1800)
+
     def test_valid_and_invalid_shapes(self):
         self.assertTrue(valid_session(SESSION))
         cookie = {'name': 'n', 'value': 'v'}
@@ -58,10 +61,11 @@ class SessionStoreTests(unittest.TestCase):
     def test_round_trip_copies_and_expiry(self):
         clock = Clock()
         store = SessionStore(clock=clock)
-        store.put('a.test', SESSION)
+        store.put('a.test', json.loads(json.dumps(SESSION)))
         got = store.get('a.test')
         self.assertEqual(got, SESSION)
         got['cookies'][0]['value'] = 'changed'
+        got['ua'] = 'changed'
         self.assertEqual(store.get('a.test'), SESSION)
         self.assertIsNone(store.get('b.test'))
         clock.now += MAX_AGE_S - 1
@@ -74,6 +78,7 @@ class SessionStoreTests(unittest.TestCase):
         store.put('a.test', {'ua': 'x', 'cookies': []})
         store.put('', SESSION)
         self.assertIsNone(store.get('a.test'))
+        self.assertIsNone(store.get(''))
         store.put('a.test', SESSION)
         store.drop('a.test')
         self.assertIsNone(store.get('a.test'))
@@ -108,7 +113,8 @@ class FileSessionStoreTests(unittest.TestCase):
         self.assertFalse(os.path.exists(path))
 
     def test_unsafe_hosts_are_never_paths(self):
-        for host in ('../x', 'A.test', '.hidden', 'a/b', 'é.test', '', None, 'a' * 64 + '.t'):
+        for host in ('../x', 'A.test', '.hidden', 'a/b', 'é.test', '', None, 'a' * 64 + '.t',
+                     ('a' * 63 + '.') * 4 + 'aa'):
             with self.subTest(host=host):
                 self.store.put(host, SESSION)
                 self.assertIsNone(self.store.get(host))
@@ -154,7 +160,8 @@ class ProductFetcherSessionTests(unittest.TestCase):
 
     def test_failed_replay_drops_the_session(self):
         for reply in (result(status=403), result(challenge=C.suspected),
-                      result(status=None, error=F.timeout), result(status=302)):
+                      result(status=None, error=F.timeout), result(status=302),
+                      result(status=200, error=F.provider_error)):
             with self.subTest(reply=reply):
                 store = SessionStore()
                 store.put('a.test', SESSION)
@@ -177,7 +184,8 @@ class ProductFetcherSessionTests(unittest.TestCase):
     def test_egress_and_entrance_steps_never_touch_sessions(self):
         store = SessionStore()
         store.put('a.test', SESSION)
-        for step in (PlanStep('curl_cffi', 'proxy', 'egress'), PlanStep('wayback', 'direct', 'entrance')):
+        for step in (PlanStep('curl_cffi', 'proxy', 'egress'), PlanStep('wayback', 'direct', 'entrance'),
+                     PlanStep('patchright', 'proxy', 'browser')):
             with self.subTest(step=step):
                 kwargs = self.run_step(step, result(status=403), store, report=SESSION)
                 self.assertNotIn('session', kwargs)
@@ -277,7 +285,9 @@ class ProbeSessionTests(unittest.TestCase):
         self.assertEqual(captured['impersonate'], 'chrome')
 
     def test_curl_ignores_absent_or_broken_session(self):
+        cookie = [{'name': 'n', 'value': 'v'}]
         for raw in (None, '', 'not json', '{}', json.dumps({'ua': '', 'cookies': []}),
+                    json.dumps({'ua': '', 'cookies': cookie}), json.dumps({'ua': 7, 'cookies': cookie}),
                     json.dumps({'ua': 'x', 'cookies': [{'name': 1, 'value': 'v'}]}),
                     json.dumps({'ua': 'x', 'cookies': 'c'})):
             with self.subTest(raw=raw):
