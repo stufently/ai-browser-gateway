@@ -111,7 +111,8 @@ class DetectChallengeTests(unittest.TestCase):
                      title + '<script type="application/json">{"k": "window._pxAppId"}</script>',
                      title + "<template/><script>window._pxAppId = 1;</script></template>",
                      title + '<script type="application/notjavascript">window._pxAppId=1</script>',
-                     title + '<script src="/px.js">window._pxAppId = 1;</script>'):
+                     title + '<script src="/px.js">window._pxAppId = 1;</script>',
+                     title + '<script type="application/json"/>"<script>window._pxAppId"</script>'):
             with self.subTest(body=body):
                 self.assertEqual(self.detect(429, {}, body)[0], "rate_limited")
         for body in (title + app_id, title + "<template></template>" + app_id,
@@ -120,7 +121,9 @@ class DetectChallengeTests(unittest.TestCase):
                      title + '<script type="text/x-javascript">window._pxAppId=1</script>',
                      title + '<script type="text/ecmascript">window._pxAppId=1</script>',
                      title + '<script type="Text/JavaScript1.5; charset=utf-8">window._pxAppId=1</script>',
-                     title + "<script/>window._pxAppId = 1;</script>"):
+                     title + "<script/>window._pxAppId = 1;</script>",
+                     title + '<script/>var s = "<script type=application/json>";'
+                             ' window._pxAppId = 1;</script>'):
             with self.subTest(body=body):
                 self.assertEqual(self.detect(429, {}, body),
                                  ("suspected", ("body_perimeterx_block",)))

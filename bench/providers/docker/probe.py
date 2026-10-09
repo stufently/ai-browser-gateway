@@ -384,8 +384,11 @@ class _LiveScripts(HTMLParser):
             self._in_script = runs and not self._template_depth
 
     def handle_startendtag(self, tag, attrs):
-        # HTML ignores the self-closing slash on non-void elements.
+        # HTML ignores the self-closing slash on non-void elements; <script/>
+        # still opens raw script text, which HTMLParser only enters on <script>.
         self.handle_starttag(tag, attrs)
+        if tag == "script":
+            self.set_cdata_mode("script")
 
     def handle_endtag(self, tag):
         if tag == "template" and self._template_depth:
