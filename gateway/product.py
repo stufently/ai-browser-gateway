@@ -61,7 +61,8 @@ def accept_page(result: FetchResult, expected_text=None) -> tuple[bool, F]:
     if type(status) is not int:
         return False, F.provider_error
     if status == 403:
-        # Akamai's edge denial is about the address, not the client.
+        # Akamai's edge denial names the likely cause; it routes like any 403,
+        # since Akamai can also deny on headers or cookies a browser would fix.
         return False, F.ip_blocked if result.challenge == C.ip_blocked else F.http_403
     if status == 429:
         # PerimeterX blocks curl with 429 while a browser is let through.
@@ -167,15 +168,7 @@ def run_product(request, fetcher, *, clock=_clock_ms) -> GatewayOutcome:
             decision = Step.give_up
         elif reason == F.interactive_challenge or step.purpose == 'egress':
             decision = Step.human
-        elif reason == F.ip_blocked:
-            # Another address is the cure; browsers only when no egress is left.
-            egress = next((i for i in range(cursor + 1, len(plan))
-                           if plan[i].purpose == 'egress'), None)
-            following = egress if egress is not None else next(
-                (i for i in range(cursor + 1, len(plan)) if plan[i].purpose == 'browser'), None)
-            decision = (Step.human if following is None else
-                        Step.browser if plan[following].purpose == 'browser' else Step.change_egress)
-        elif reason in (F.http_403, F.challenge_suspected, F.content_missing,
+        elif reason in (F.http_403, F.ip_blocked, F.challenge_suspected, F.content_missing,
                         F.javascript_required, F.http_429):
             # A 429 bypasses browsers; other delivery failures exhaust them first.
             purposes = ('egress',) if reason == F.http_429 else ('browser', 'egress')

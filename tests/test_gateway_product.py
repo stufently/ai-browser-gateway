@@ -98,7 +98,7 @@ class ProductTests(unittest.TestCase):
         self.assertEqual([a.error_type for a in result.attempts], [F.challenge_suspected, F.none])
         self.assertEqual([a.next_step for a in result.attempts], [Step.browser, Step.stop])
 
-    def test_ip_blocked_skips_browsers_when_egress_remains(self):
+    def test_ip_blocked_routes_like_403_through_browsers_then_egress(self):
         calls = []
         def fetch(step, budget):
             calls.append((step.provider, step.egress_profile))
@@ -107,10 +107,14 @@ class ProductTests(unittest.TestCase):
             return ProviderReply(page(status=403, challenge=C.ip_blocked, text=''))
         result = run_product(ProductRequest('https://a.test', egress_profiles=('proxy',)), fetch)
         self.assertTrue(result.ok)
-        self.assertEqual(calls, [('curl_cffi', 'direct'), ('curl_cffi', 'proxy')])
-        self.assertEqual([a.next_step for a in result.attempts], [Step.change_egress, Step.stop])
+        self.assertEqual(calls, [('curl_cffi', 'direct'), ('patchright', 'direct'),
+                                 ('scrapling', 'direct'), ('curl_cffi', 'proxy')])
+        self.assertEqual([a.error_type for a in result.attempts],
+                         [F.ip_blocked, F.ip_blocked, F.ip_blocked, F.none])
+        self.assertEqual([a.next_step for a in result.attempts],
+                         [Step.browser, Step.browser, Step.change_egress, Step.stop])
 
-    def test_ip_blocked_without_egress_still_tries_browsers(self):
+    def test_ip_blocked_without_egress_ends_with_its_reason(self):
         calls = []
         def fetch(step, budget):
             calls.append(step.provider)
@@ -119,8 +123,6 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(calls, ['curl_cffi', 'patchright', 'scrapling'])
         self.assertEqual((result.ok, result.step, result.error_type),
                          (False, Step.human, F.ip_blocked))
-        self.assertEqual([a.next_step for a in result.attempts],
-                         [Step.browser, Step.browser, Step.human])
 
     def test_ip_blocked_on_egress_asks_human(self):
         calls = []

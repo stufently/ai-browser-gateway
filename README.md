@@ -110,8 +110,8 @@ the gateway also checks content and challenge signals.
 Some outcomes stop escalation: interactive challenges need human action;
 HTTP 429 skips browser attempts, unless the body is a PerimeterX block page
 (then it is a suspected challenge, and a browser is tried); Akamai's edge
-"Access Denied" is reported as `ip_blocked` and goes straight to the egress
-proxy step when there is one; connection errors and browser timeouts do not
+"Access Denied" is reported as `ip_blocked` (it routes like any HTTP 403);
+connection errors and browser timeouts do not
 automatically advance to the next browser. The ladder does not guarantee access
 to every Cloudflare-protected page.
 
@@ -187,7 +187,7 @@ limits are in [Benchmarks](#benchmarks).
 
 Some outcomes never reach the next row. An interactive challenge needs a
 person. HTTP 429 skips the browser steps, except for a PerimeterX block
-page. An `ip_blocked` result skips them when an egress step remains. A connection error or a browser
+page. A connection error or a browser
 timeout does not by itself move to the next browser. `--no-browser` removes
 both browser providers and leaves the HTTP provider. The ladder does not
 guarantee access to every Cloudflare-protected page.
