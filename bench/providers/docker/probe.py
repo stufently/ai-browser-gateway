@@ -322,6 +322,10 @@ class _QratorLoader(HTMLParser):
             if src.strip().startswith("/__qrator/"):
                 self.found = True
 
+    def handle_startendtag(self, tag, attrs):
+        # HTML ignores the self-closing slash on non-void elements.
+        self.handle_starttag(tag, attrs)
+
     def handle_endtag(self, tag):
         if tag == "template" and self._template_depth:
             self._template_depth -= 1
@@ -728,17 +732,15 @@ class PlaywrightAdapter:
         self.page.on("response", record)
         try:
             response = self.page.goto(url, wait_until="load", timeout=_bound_timeout_ms(120_000))
-            body = _playwright_body(self.page, getattr(self, "sentinel", ""))
-            # The DOM just read may already belong to a later document.
-            latest = documents[-1] if documents else response
+            sentinel = getattr(self, "sentinel", "")
+            latest, body = _document_and_body(self.page, documents, response, sentinel)
             status = latest.status if latest is not None else None
             headers = None if latest is None else _normalize_headers(latest.headers)
-            if detect_challenge(status, headers, body)[0] == "javascript_required":
-                reloaded = _await_reload(self.page, documents)
-                if reloaded is not None:
-                    body = _playwright_body(self.page, getattr(self, "sentinel", ""))
-                    status = reloaded.status
-                    headers = _normalize_headers(reloaded.headers)
+            if (detect_challenge(status, headers, body)[0] == "javascript_required"
+                    and _await_reload(self.page, documents)):
+                latest, body = _document_and_body(self.page, documents, response, sentinel)
+                status = latest.status
+                headers = _normalize_headers(latest.headers)
         finally:
             self.page.remove_listener("response", record)
         return _result(status, self.page.url, body.encode(), 0, self.page.title(), headers=headers)
@@ -752,10 +754,28 @@ class PlaywrightAdapter:
 
 # Measured: the Qrator loader reloads rbc.ru 1.4–3.3 s after the 401.
 JS_CHALLENGE_WAIT_MS = 15_000
+DOM_READ_ATTEMPTS = 5
 
 
-def _await_reload(page: Any, documents: list[Any]) -> Any:
-    """Wait until a later main-frame document has loaded past the challenge.
+def _document_and_body(page: Any, documents: list[Any], response: Any,
+                       sentinel: str) -> tuple[Any, str]:
+    """Read the DOM together with the main-frame response it belongs to.
+
+    A JS challenge can reload the page at any moment, so the DOM read is
+    repeated until no newer document arrived during it (a page that keeps
+    reloading gets the last pair after a few reads).
+    """
+    for _ in range(DOM_READ_ATTEMPTS):
+        before = documents[-1] if documents else response
+        body = _playwright_body(page, sentinel)
+        after = documents[-1] if documents else response
+        if after is before:
+            break
+    return after, body
+
+
+def _await_reload(page: Any, documents: list[Any]) -> bool:
+    """Wait until the latest main-frame document has loaded past the challenge.
 
     A load-state wait could resolve on the challenge document itself, so the
     loop checks the latest document's readiness and DOM instead; the
@@ -764,7 +784,7 @@ def _await_reload(page: Any, documents: list[Any]) -> Any:
     try:
         timeout_ms = _bound_timeout_ms(JS_CHALLENGE_WAIT_MS)
     except TimeoutError:
-        return None
+        return False
     deadline = time.monotonic() + timeout_ms / 1000
     while True:
         if documents:
@@ -774,12 +794,12 @@ def _await_reload(page: Any, documents: list[Any]) -> Any:
                 body = "\n".join(frame.content() for frame in page.frames)
             except Exception:
                 ready = False
-            if ready and detect_challenge(
+            if ready and documents[-1] is latest and detect_challenge(
                     latest.status, _normalize_headers(latest.headers), body
             )[0] != "javascript_required":
-                return latest
+                return True
         if time.monotonic() >= deadline:
-            return None
+            return False
         page.wait_for_timeout(100)
 
 

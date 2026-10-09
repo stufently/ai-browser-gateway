@@ -71,7 +71,8 @@ class DetectChallengeTests(unittest.TestCase):
                      '<img src="/__qrator/x.png">',
                      '<script data-src="/__qrator/l.js"></script>',
                      '<script>var s = \'<script src="/__qrator/l.js">\';</script>',
-                     '<template><script src="/__qrator/l.js"></script></template>'):
+                     '<template><script src="/__qrator/l.js"></script></template>',
+                     '<template/><script src="/__qrator/l.js"></script></template>'):
             with self.subTest(body=body):
                 self.assertEqual(self.detect(401, {}, body), ("none", ()))
 

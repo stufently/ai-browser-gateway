@@ -1359,7 +1359,8 @@ class JsChallengeReloadTests(unittest.TestCase):
 
     def make_page(self, first_status=401, first_body=None, reload_after=None,
                   reload_status=200, redirect_first=True, main_reload=True,
-                  ready_after=0, body_lag=0, reload_during_read=False):
+                  ready_after=0, body_lag=0, reload_during_read=False,
+                  endless_reload=False):
         test = self
 
         class Request:
@@ -1375,8 +1376,10 @@ class JsChallengeReloadTests(unittest.TestCase):
 
         class Frame:
             def content(self):
-                if reload_during_read and not page.reloaded:
+                page.content_calls += 1
+                if (reload_during_read and not page.reloaded) or endless_reload:
                     page.reload()
+                    page.reads += 1
                 return page.body
 
         class Page:
@@ -1389,6 +1392,8 @@ class JsChallengeReloadTests(unittest.TestCase):
                 self.waited = 0
                 self.reloaded_at = None
                 self.reloaded = False
+                self.reads = 0
+                self.content_calls = 0
 
             def on(self, event, handler):
                 self.listeners.append((event, handler))
@@ -1473,6 +1478,30 @@ class JsChallengeReloadTests(unittest.TestCase):
         self.assertEqual(result["headers"], {"x-status": "200"})
         self.assertIn("real text", result["body"])
 
+    def test_dom_read_is_retried_a_bounded_number_of_times(self):
+        page = self.make_page(endless_reload=True)
+        result = self.navigate(page)
+        self.assertEqual(page.reads, self.probe.DOM_READ_ATTEMPTS)
+        self.assertEqual((result["status"], page.waited), (200, 0))
+
+    def test_document_arriving_during_wait_check_is_rechecked(self):
+        page = self.make_page(reload_after=100)
+        original = page.evaluate
+        calls = []
+
+        def evaluate(script):
+            if page.reloaded:
+                calls.append(page.waited)
+                if len(calls) == 1:
+                    page.reload()  # A newer document lands mid-check.
+            return original(script)
+
+        page.evaluate = evaluate
+        result = self.navigate(page)
+        self.assertEqual(result["status"], 200)
+        # The mixed check is discarded; the next poll accepts the new document.
+        self.assertEqual(calls, [200, 300])
+
     def test_wait_continues_until_new_document_is_complete(self):
         page = self.make_page(reload_after=100, ready_after=300)
         result = self.navigate(page)
@@ -1504,7 +1533,7 @@ class JsChallengeReloadTests(unittest.TestCase):
     def test_ordinary_page_is_not_held(self):
         page = self.make_page(first_status=200, first_body=self.ARTICLE)
         result = self.navigate(page)
-        self.assertEqual((result["status"], page.waited), (200, 0))
+        self.assertEqual((result["status"], page.waited, page.content_calls), (200, 0, 1))
         page = self.make_page(first_status=401, first_body="<p>nope</p>")
         self.assertEqual((self.navigate(page)["status"], page.waited), (401, 0))
 
