@@ -159,11 +159,20 @@ def _session_in() -> dict[str, Any] | None:
         ua, cookies = value["ua"], value["cookies"]
         if not isinstance(ua, str) or not ua or not isinstance(cookies, list):
             return None
-        jar = {c["name"]: c["value"] for c in cookies[:SESSION_MAX_COOKIES]
-               if isinstance(c["name"], str) and isinstance(c["value"], str)}
-    except (ValueError, KeyError, TypeError):
+        jar = [(c["name"], c["value"], c.get("domain", "")) for c in cookies[:SESSION_MAX_COOKIES]
+               if isinstance(c["name"], str) and isinstance(c["value"], str)
+               and isinstance(c.get("domain", ""), str)]
+    except (ValueError, KeyError, TypeError, AttributeError):
         return None
     return {"ua": ua, "cookies": jar} if jar else None
+
+
+def _cookie_domain(domain: str, host: str) -> str:
+    """The browser's own Domain when it covers host, else host itself."""
+    bare = domain.lstrip(".").lower()
+    if bare and (host == bare or host.endswith("." + bare)):
+        return domain
+    return host
 
 
 def _exporting_session() -> bool:
@@ -185,7 +194,8 @@ def _browser_session(context: Any, page: Any, url: str,
         return None
     if not cookies or not isinstance(ua, str) or not ua:
         return None
-    return {"ua": ua, "cookies": [{"name": c["name"], "value": c["value"]}
+    return {"ua": ua, "cookies": [{"name": c["name"], "value": c["value"],
+                                   "domain": c.get("domain") or ""}
                                   for c in cookies[:SESSION_MAX_COOKIES]]}
 
 
@@ -793,8 +803,11 @@ class CurlCffiAdapter:
         client = None
         if session is not None:
             client = requests.Session()
-            for name, value in session["cookies"].items():
-                client.cookies.set(name, value, domain=urlparse(url).hostname or "")
+            host = urlparse(url).hostname or ""
+            # The original Domain lets a later Set-Cookie replace the value
+            # instead of adding a second cookie of the same name.
+            for name, value, domain in session["cookies"]:
+                client.cookies.set(name, value, domain=_cookie_domain(domain, host))
         try:
             get = client.get if client is not None else requests.get
             response = get(url, **kwargs)

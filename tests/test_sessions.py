@@ -49,12 +49,15 @@ class SessionShapeTests(unittest.TestCase):
                     {'ua': 'x', 'cookies': []}, {'ua': 'x', 'cookies': [cookie] * 65},
                     {'ua': 'x', 'cookies': [{'name': '', 'value': 'v'}]},
                     {'ua': 'x', 'cookies': [{'name': 'n', 'value': 1}]},
-                    {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'domain': 'd'}]},
+                    {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'path': '/'}]},
+                    {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'domain': 1}]},
+                    {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'domain': 'd' * 256}]},
                     {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v' * 4097}]},
                     {'ua': 'x', 'cookies': [cookie], 'extra': 1}):
             with self.subTest(bad=bad):
                 self.assertFalse(valid_session(bad))
         self.assertTrue(valid_session({'ua': 'x', 'cookies': [cookie] * 64}))
+        self.assertTrue(valid_session({'ua': 'x', 'cookies': [dict(cookie, domain='.a.test')]}))
 
 
 class SessionStoreTests(unittest.TestCase):
@@ -418,6 +421,18 @@ class ProbeSessionTests(unittest.TestCase):
                                                 (200, 'https://a.test/n')])
                 self.assertEqual(len(hops), 2)
 
+    def test_replay_keeps_the_browser_cookie_domain_when_it_covers_the_host(self):
+        cookies = [{'name': 'a', 'value': '1', 'domain': '.a.test'},
+                   {'name': 'b', 'value': '2', 'domain': 'a.test'},
+                   {'name': 'c', 'value': '3', 'domain': '.other.test'},
+                   {'name': 'd', 'value': '4', 'domain': 'xa.test'},
+                   {'name': 'e', 'value': '5'}]
+        env = {'ABG_SESSION': json.dumps({'ua': 'UA', 'cookies': cookies})}
+        self.curl_chain(env, [(200, 'https://a.test/')])
+        self.assertEqual(self.clients[0].cookies.set_calls, [
+            ('a', '1', '.a.test'), ('b', '2', 'a.test'), ('c', '3', 'a.test'),
+            ('d', '4', 'a.test'), ('e', '5', 'a.test')])
+
     def test_leaving_the_host_falls_back_to_an_ordinary_request(self):
         env = {'ABG_SESSION': json.dumps(SESSION)}
         for location in ('http://a.test/plain', 'https://b.test/x', '//b.test/x'):
@@ -484,7 +499,7 @@ class ProbeSessionTests(unittest.TestCase):
                                               'https://a.test/')
         self.assertEqual(session['ua'], 'UA')
         self.assertEqual(len(session['cookies']), 64)
-        self.assertEqual(session['cookies'][0], {'name': 'n0', 'value': 'v'})
+        self.assertEqual(session['cookies'][0], {'name': 'n0', 'value': 'v', 'domain': 'a.test'})
         self.assertIsNone(self.probe._browser_session(Context([]), None, 'https://a.test/',
                                                       'https://a.test/'))
         self.assertIsNone(self.probe._browser_session(None, None, 'https://a.test/', 'https://a.test/'))

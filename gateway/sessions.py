@@ -29,7 +29,7 @@ def _same(stored, session):
 
 
 def valid_session(value):
-    """The probe's session shape: {"ua": str, "cookies": [{"name", "value"}...]}."""
+    """The probe's session shape: {"ua": str, "cookies": [{"name", "value"[, "domain"]}...]}."""
     if not isinstance(value, dict) or set(value) != {'ua', 'cookies'}:
         return False
     ua, cookies = value.get('ua'), value.get('cookies')
@@ -38,10 +38,14 @@ def valid_session(value):
     if not isinstance(cookies, list) or not 0 < len(cookies) <= MAX_COOKIES:
         return False
     for cookie in cookies:
-        if not isinstance(cookie, dict) or set(cookie) != {'name', 'value'}:
+        if not isinstance(cookie, dict) or set(cookie) not in ({'name', 'value'},
+                                                               {'name', 'value', 'domain'}):
             return False
         if not all(isinstance(cookie[key], str) and len(cookie[key]) <= MAX_TEXT
                    for key in ('name', 'value')) or not cookie['name']:
+            return False
+        domain = cookie.get('domain', '')
+        if not isinstance(domain, str) or len(domain) > 255:
             return False
     return True
 
