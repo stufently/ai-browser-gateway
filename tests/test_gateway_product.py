@@ -73,6 +73,65 @@ class ProductTests(unittest.TestCase):
         self.assertEqual(calls, ['curl_cffi', 'patchright'])
         self.assertEqual([a.next_step for a in result.attempts], [Step.browser, Step.stop])
 
+    def test_vendor_verdicts_override_status_reason(self):
+        cases = [(dict(status=429, challenge=C.suspected), F.challenge_suspected),
+                 (dict(status=429, challenge=C.rate_limited), F.http_429),
+                 (dict(status=403, challenge=C.ip_blocked), F.ip_blocked),
+                 (dict(status=403, challenge=C.access_denied), F.http_403),
+                 (dict(status=403, challenge=C.suspected), F.http_403),
+                 (dict(status=429, challenge=C.ip_blocked), F.http_429),
+                 (dict(challenge=C.ip_blocked), F.ip_blocked)]
+        for changes, reason in cases:
+            with self.subTest(changes=changes):
+                self.assertEqual(accept_page(page(**changes)), (False, reason))
+
+    def test_perimeterx_429_goes_to_browser(self):
+        replies = [page(status=429, challenge=C.suspected, text=''),
+                   page(provider='patchright')]
+        calls = []
+        def fetch(step, budget):
+            calls.append(step.provider)
+            return ProviderReply(replies[len(calls) - 1])
+        result = run_product(ProductRequest('https://a.test', egress_profiles=('proxy',)), fetch)
+        self.assertTrue(result.ok)
+        self.assertEqual(calls, ['curl_cffi', 'patchright'])
+        self.assertEqual([a.error_type for a in result.attempts], [F.challenge_suspected, F.none])
+        self.assertEqual([a.next_step for a in result.attempts], [Step.browser, Step.stop])
+
+    def test_ip_blocked_skips_browsers_when_egress_remains(self):
+        calls = []
+        def fetch(step, budget):
+            calls.append((step.provider, step.egress_profile))
+            if step.purpose == 'egress':
+                return ProviderReply(page(provider='curl_cffi'))
+            return ProviderReply(page(status=403, challenge=C.ip_blocked, text=''))
+        result = run_product(ProductRequest('https://a.test', egress_profiles=('proxy',)), fetch)
+        self.assertTrue(result.ok)
+        self.assertEqual(calls, [('curl_cffi', 'direct'), ('curl_cffi', 'proxy')])
+        self.assertEqual([a.next_step for a in result.attempts], [Step.change_egress, Step.stop])
+
+    def test_ip_blocked_without_egress_still_tries_browsers(self):
+        calls = []
+        def fetch(step, budget):
+            calls.append(step.provider)
+            return ProviderReply(page(status=403, challenge=C.ip_blocked, text=''))
+        result = run_product(ProductRequest('https://a.test'), fetch)
+        self.assertEqual(calls, ['curl_cffi', 'patchright', 'scrapling'])
+        self.assertEqual((result.ok, result.step, result.error_type),
+                         (False, Step.human, F.ip_blocked))
+        self.assertEqual([a.next_step for a in result.attempts],
+                         [Step.browser, Step.browser, Step.human])
+
+    def test_ip_blocked_on_egress_asks_human(self):
+        calls = []
+        def fetch(step, budget):
+            calls.append((step.provider, step.egress_profile))
+            return ProviderReply(page(status=403, challenge=C.ip_blocked, text=''))
+        result = run_product(ProductRequest('https://a.test', allow_browser=False,
+                                            egress_profiles=('p', 'q')), fetch)
+        self.assertEqual(calls, [('curl_cffi', 'direct'), ('curl_cffi', 'p')])
+        self.assertEqual([a.next_step for a in result.attempts], [Step.change_egress, Step.human])
+
     def test_403_after_browsers_changes_egress(self):
         calls = []
         def fetch(step, budget):

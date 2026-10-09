@@ -23,6 +23,7 @@ class FailureReason(StrEnum):
     provider_error = "provider_error"
     not_measured = "not_measured"
     environment_error = "environment_error"
+    ip_blocked = "ip_blocked"
 
 
 class ChallengeType(StrEnum):
@@ -33,6 +34,7 @@ class ChallengeType(StrEnum):
     captcha = "captcha"
     rate_limited = "rate_limited"
     access_denied = "access_denied"
+    ip_blocked = "ip_blocked"
 
 
 @dataclass(frozen=True, slots=True)

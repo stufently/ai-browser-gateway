@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-10-09 (0.1.4)
+
+### Исправлено
+
+- **PerimeterX 429 — не rate limit.** `wayfair.com` отвечает `curl_cffi`
+  кодом 429 с блок-страницей PerimeterX, а браузеру сразу отдаёт настоящую
+  страницу; лестница на 429 браузеры пропускала и сдавалась. Детектор
+  (заголовок «Access to this page has been denied» вне комментариев и
+  скриптов плюс `window._pxAppId`) даёт `suspected`, `accept_page` на 429
+  с ним — `challenge_suspected`, дальше браузер. Фикстура
+  `tests/fixtures/perimeterx_block_429.html`.
+
+### Добавлено
+
+- **`ip_blocked`: отказ Akamai по адресу.** 403 с заголовком «Access Denied»
+  и ссылкой на `errors.edgesuite.net` (`homedepot.com`, `cnbc.com`: оба
+  браузера получают тот же 403, прокси — 200) — новый тип вызова и причина
+  `ip_blocked`. Лестница идёт сразу на шаг egress, а без него — в браузеры,
+  как прежде с 403. Значение добавлено в перечисления API-клиента. Фикстура
+  `tests/fixtures/akamai_access_denied_403.html`. Замер по вендорам —
+  `docs/research/12-competitor-techniques.md`.
+
 ## 2026-10-09
 
 ### Исправлено

@@ -84,6 +84,51 @@ class DetectChallengeTests(unittest.TestCase):
             with self.subTest(tag=tag):
                 self.assertEqual(self.detect(401, {}, tag)[0], "javascript_required")
 
+    def test_perimeterx_block_fixture_is_suspected_at_any_status(self):
+        body = fixture("perimeterx_block_429.html")
+        for status in (429, 403, 200):
+            with self.subTest(status=status):
+                verdict, markers = self.detect(status, {}, body)
+                self.assertEqual(verdict, "suspected")
+                self.assertEqual(markers[-1], "body_perimeterx_block")
+
+    def test_perimeterx_needs_both_title_and_app_id(self):
+        title = "<title>Access to this page has been denied</title>"
+        app_id = "<script>window._pxAppId = 'PX1';</script>"
+        for body in (title + "<p>slow down</p>",
+                     "<title>Home</title>" + app_id,
+                     "<!-- " + title + " -->" + app_id,
+                     "<title>Access to this page has been denied.</title>" + app_id):
+            with self.subTest(body=body):
+                self.assertEqual(self.detect(429, {}, body)[0], "rate_limited")
+        self.assertEqual(self.detect(429, {}, title + app_id),
+                         ("suspected", ("body_perimeterx_block",)))
+
+    def test_akamai_denial_fixture_is_ip_blocked_only_on_403(self):
+        body = fixture("akamai_access_denied_403.html")
+        self.assertEqual(self.detect(403, {}, body), ("ip_blocked", ("body_akamai_denied",)))
+        self.assertEqual(self.detect(200, {}, body), ("none", ()))
+        self.assertEqual(self.detect(429, {}, body)[0], "rate_limited")
+
+    def test_akamai_needs_title_and_edge_error_host(self):
+        for body in ("<title>Access Denied</title><p>nope</p>",
+                     "<title>Denied</title><p>errors.edgesuite.net</p>",
+                     "<!-- <title>Access Denied</title> --><p>errors.edgesuite.net</p>"):
+            with self.subTest(body=body):
+                self.assertEqual(self.detect(403, {}, body)[0], "access_denied")
+        self.assertEqual(
+            self.detect(403, {}, "<TITLE> Access  Denied </TITLE>errors&#46;edgesuite&#46;net")[0],
+            "ip_blocked")
+
+    def test_cf_header_outranks_vendor_block_pages(self):
+        for name, status in (("perimeterx_block_429.html", 429),
+                             ("akamai_access_denied_403.html", 403)):
+            with self.subTest(name=name):
+                verdict, markers = self.detect(
+                    status, {"cf-mitigated": "challenge"}, fixture(name))
+                self.assertEqual(verdict, "suspected")
+                self.assertEqual(markers[0], "header_cf_mitigated")
+
     def test_cf_mitigated_header_outranks_clean_body(self):
         verdict, markers = self.detect(
             200, {"cf-mitigated": "challenge"}, "<html><body>hello</body></html>"
@@ -1018,6 +1063,7 @@ class RuleProvenanceTests(unittest.TestCase):
         named |= {name for name, _ in self.probe._SUPPORTING_BODY_RULES}
         named |= {"header_cf_mitigated", "body_captcha", "status_403", "status_429"}
         named |= {"body_captcha_interactive", "body_qrator_loader"}
+        named |= {"body_perimeterx_block", "body_akamai_denied"}
         self.assertEqual(set(self.probe.RULE_PROVENANCE), named)
 
     def test_measured_rules_name_a_fixture_that_exists(self):

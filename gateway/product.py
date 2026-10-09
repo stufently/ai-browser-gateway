@@ -61,9 +61,11 @@ def accept_page(result: FetchResult, expected_text=None) -> tuple[bool, F]:
     if type(status) is not int:
         return False, F.provider_error
     if status == 403:
-        return False, F.http_403
+        # Akamai's edge denial is about the address, not the client.
+        return False, F.ip_blocked if result.challenge == C.ip_blocked else F.http_403
     if status == 429:
-        return False, F.http_429
+        # PerimeterX blocks curl with 429 while a browser is let through.
+        return False, F.challenge_suspected if result.challenge == C.suspected else F.http_429
     if 500 <= status <= 599:
         return False, F.http_5xx
     if not 200 <= status <= 299:
@@ -74,6 +76,7 @@ def accept_page(result: FetchResult, expected_text=None) -> tuple[bool, F]:
     challenge_reason = {
         C.interactive: F.interactive_challenge, C.rate_limited: F.http_429,
         C.access_denied: F.http_403, C.javascript_required: F.javascript_required,
+        C.ip_blocked: F.ip_blocked,
     }.get(result.challenge)
     if challenge_reason is not None:
         return False, challenge_reason
@@ -164,6 +167,14 @@ def run_product(request, fetcher, *, clock=_clock_ms) -> GatewayOutcome:
             decision = Step.give_up
         elif reason == F.interactive_challenge or step.purpose == 'egress':
             decision = Step.human
+        elif reason == F.ip_blocked:
+            # Another address is the cure; browsers only when no egress is left.
+            egress = next((i for i in range(cursor + 1, len(plan))
+                           if plan[i].purpose == 'egress'), None)
+            following = egress if egress is not None else next(
+                (i for i in range(cursor + 1, len(plan)) if plan[i].purpose == 'browser'), None)
+            decision = (Step.human if following is None else
+                        Step.browser if plan[following].purpose == 'browser' else Step.change_egress)
         elif reason in (F.http_403, F.challenge_suspected, F.content_missing,
                         F.javascript_required, F.http_429):
             # A 429 bypasses browsers; other delivery failures exhaust them first.

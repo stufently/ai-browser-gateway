@@ -270,6 +270,8 @@ RULE_PROVENANCE = {
     "body_captcha": ASSUMED,
     "body_captcha_interactive": ASSUMED,
     "body_qrator_loader": "fixture:qrator_loader_401.html",
+    "body_perimeterx_block": "fixture:perimeterx_block_429.html",
+    "body_akamai_denied": "fixture:akamai_access_denied_403.html",
     "status_403": "protocol:HTTP 403",
     "status_429": "protocol:HTTP 429",
 }
@@ -339,6 +341,19 @@ def _has_qrator_loader(text: str) -> bool:
     except Exception:
         pass
     return parser.found
+
+
+# PerimeterX answers curl_cffi with 429 and its block page, while a browser
+# gets the real page at once (wayfair.com, 2026-10-09): the 429 is bot
+# detection, not a rate limit. Both the block title and the PX app id are
+# required; PX-protected pages carry `_pxAppId` on every ordinary page too.
+_PX_BLOCK_TITLE = "access to this page has been denied"
+_PX_APP_ID = "window._pxappid"
+# Akamai's edge "Access Denied" is a verdict on the address: both browsers got
+# the same 403 on homedepot.com and cnbc.com, a proxy got 200 on cnbc.com
+# (2026-10-09). The reference link is entity-encoded in the body.
+_AKAMAI_DENIED_TITLE = "access denied"
+_AKAMAI_ERROR_HOST = "errors.edgesuite.net"
 
 
 _CAPTCHA_WIDGET_CLASSES = frozenset({"g-recaptcha", "h-captcha", "cf-turnstile"})
@@ -465,6 +480,12 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
         return "captcha", tuple(body_names + captcha_names)
     if _has_qrator_loader(text):
         return "javascript_required", tuple(body_names + captcha_names + ["body_qrator_loader"])
+    title = _decisive_title(text).lower()
+    if title == _PX_BLOCK_TITLE and _PX_APP_ID in lowered:
+        return "suspected", tuple(body_names + captcha_names + ["body_perimeterx_block"])
+    if (status == 403 and title == _AKAMAI_DENIED_TITLE
+            and _AKAMAI_ERROR_HOST in html_module.unescape(lowered)):
+        return "ip_blocked", tuple(body_names + captcha_names + ["body_akamai_denied"])
     if status_verdict is not None:
         return status_verdict, tuple(body_names + captcha_names + status_names)
     return "none", tuple(body_names + captcha_names)

@@ -32,7 +32,7 @@ def next_step(error_type, challenge, *, egress_changed: bool) -> Step:
             step = Step.browser
         else:
             step = Step.change_egress
-    elif reason is FailureReason.http_403 or reason is FailureReason.http_429:
+    elif reason in (FailureReason.http_403, FailureReason.http_429, FailureReason.ip_blocked):
         step = Step.change_egress
     elif reason in (
         FailureReason.timeout,

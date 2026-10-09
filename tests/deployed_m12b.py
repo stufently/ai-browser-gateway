@@ -41,9 +41,10 @@ ATTEMPT_KEYS = ('provider', 'egress_profile', 'status', 'success', 'challenge',
 FAILURE_REASONS = ('none', 'dns_error', 'timeout', 'connection_error', 'tls_error',
                    'http_403', 'http_429', 'http_5xx', 'javascript_required',
                    'challenge_suspected', 'interactive_challenge', 'content_missing',
-                   'content_mismatch', 'provider_error', 'not_measured', 'environment_error')
+                   'content_mismatch', 'provider_error', 'not_measured', 'environment_error',
+                   'ip_blocked')
 CHALLENGE_TYPES = ('none', 'suspected', 'javascript_required', 'interactive',
-                   'captcha', 'rate_limited', 'access_denied')
+                   'captcha', 'rate_limited', 'access_denied', 'ip_blocked')
 STEPS = ('stop', 'browser', 'change_egress', 'retry_later', 'give_up', 'human', 'investigate')
 
 

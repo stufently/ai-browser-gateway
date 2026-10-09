@@ -10,9 +10,9 @@ from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHand
 MODES = ('text', 'html', 'markdown', 'links', 'meta')
 FAILURES = set(('none dns_error timeout connection_error tls_error http_403 http_429 http_5xx '
                 'javascript_required challenge_suspected interactive_challenge content_missing '
-                'content_mismatch provider_error not_measured environment_error').split())
+                'content_mismatch provider_error not_measured environment_error ip_blocked').split())
 STEPS = set('stop retry_later investigate give_up human browser change_egress'.split())
-CHALLENGES = set('none suspected javascript_required interactive captcha rate_limited access_denied'.split())
+CHALLENGES = set('none suspected javascript_required interactive captcha rate_limited access_denied ip_blocked'.split())
 
 
 def valid_url(url):
