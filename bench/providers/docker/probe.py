@@ -767,9 +767,10 @@ class PlaywrightAdapter:
 
 # Measured: the Qrator loader reloads rbc.ru 1.4–3.3 s after the 401.
 JS_CHALLENGE_WAIT_MS = 15_000
-# A parsed DOM is enough: rbc.ru reaches "interactive" ~0.1 s after the
-# reload, while ads hold "complete" back 3 s or (once in four) over 30 s.
-_PARSED_STATES = frozenset({"interactive", "complete"})
+# rbc.ru reaches "interactive" ~0.1 s after the reload, while ads hold
+# "complete" back 3 s or (once in four) over 30 s. "interactive" comes before
+# deferred scripts run, so a parsed DOM is trusted only after a grace period.
+INTERACTIVE_GRACE_MS = 2_000
 DOM_READ_ATTEMPTS = 5
 
 
@@ -803,11 +804,17 @@ def _await_reload(page: Any, documents: list[Any], sentinel: str) -> tuple[Any, 
     except TimeoutError:
         return None
     deadline = time.monotonic() + timeout_ms / 1000
+    parsed = None  # (document, monotonic time it was first seen parsed)
     while True:
         if documents:
             latest = documents[-1]
             try:
-                ready = page.evaluate("document.readyState") in _PARSED_STATES
+                state = page.evaluate("document.readyState")
+                if state == "interactive" and (parsed is None or parsed[0] is not latest):
+                    parsed = (latest, time.monotonic())
+                ready = state == "complete" or (
+                    state == "interactive"
+                    and time.monotonic() - parsed[1] >= INTERACTIVE_GRACE_MS / 1000)
                 body = _playwright_body(page, sentinel) if ready else ""
             except Exception:
                 ready = False

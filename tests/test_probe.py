@@ -1553,11 +1553,39 @@ class JsChallengeReloadTests(unittest.TestCase):
         # The mixed check is discarded; the next poll accepts the new document.
         self.assertEqual(calls, [200, 300])
 
-    def test_parsed_but_still_loading_subresources_is_accepted(self):
+    def test_parsed_dom_is_accepted_after_the_grace_period(self):
         page = self.make_page(reload_after=100, parsed_state="interactive")
-        result = self.navigate(page)
-        self.assertEqual((result["status"], page.waited), (200, 200))
+        with patch.object(self.probe, "INTERACTIVE_GRACE_MS", 450), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        # Parsed from 200 on; the first poll 450+ ms later on that document wins.
+        self.assertEqual((result["status"], page.waited), (200, 700))
         self.assertNotIn("err", result)
+
+    def test_grace_period_restarts_for_a_newer_document(self):
+        page = self.make_page(reload_after=100, parsed_state="interactive")
+        original = page.wait_for_timeout
+
+        def wait(milliseconds):
+            original(milliseconds)
+            if page.waited == 500:
+                page.reload()  # Another document replaces the parsed one.
+
+        page.wait_for_timeout = wait
+        with patch.object(self.probe, "INTERACTIVE_GRACE_MS", 450), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited), (200, 1000))
+
+    def test_complete_dom_needs_no_grace_period(self):
+        page = self.make_page(reload_after=100)
+        with patch.object(self.probe, "INTERACTIVE_GRACE_MS", 10_000), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited), (200, 200))
 
     def test_unknown_ready_state_is_not_accepted(self):
         page = self.make_page(reload_after=100, parsed_state="uninitialized")
