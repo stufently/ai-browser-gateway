@@ -146,3 +146,45 @@ curl_cffi (`impersonate="chrome"`), затем ручной patchright (headful,
 с IP» — бан адреса: такой ответ надо вести сразу в egress. DataDome с этого IP
 браузером не проходится. В теле ticketmaster стоит IP клиента: перед тем как
 класть его в фикстуру, вычистить.
+
+## Замеры после 0.1.4 (2026-10-09)
+
+### Браузер через egress-прокси (D14)
+
+`patchright` и `scrapling` из образа 0.1.4 с `ABG_PROXY` = egress-прокси
+хоста, по одному запуску:
+
+| Сайт, защита | patchright | scrapling |
+|---|---|---|
+| etsy, tripadvisor, g2 — DataDome | 403 | 403 |
+| hyatt — Kasada | 429 | 429 |
+| homedepot — Akamai | 403 `ip_blocked` | 403 `ip_blocked` |
+| ticketmaster | 200 | 200 |
+
+Ticketmaster лестница уже берёт шагом `curl_cffi` через тот же прокси.
+Цели, где браузер через прокси добавил бы что-то, нет, поэтому ступень **не
+добавлена**. DataDome и Kasada с этого прокси браузерами не проходятся.
+
+### Повтор cookies браузера в curl_cffi (B5)
+
+Браузер решает вызов, затем `curl_cffi` (`impersonate="chrome"` и
+`chrome136`) повторяет запрос с его cookies и UA:
+
+| Сайт | Браузер | curl_cffi без cookies | с cookies и UA |
+|---|---|---|---|
+| rbc.ru — Qrator | patchright 200 | 401 | **200**, полная страница |
+| bizprofile.net — CF | scrapling 200, `cf_clearance` | 403 «Just a moment» | **200**, полная страница |
+| glassdoor.com — CF | scrapling 200 (редирект на `.de`) | 401 | 401 |
+
+Кэш решённой сессии по домену окупается на Qrator и на Cloudflare
+(bizprofile: ~25 с scrapling против одного HTTP-запроса). Это отдельная веха.
+
+### Извлечение текста (E17, E19)
+
+Выборка из 20 RSS-лент, по две статьи (32 строки), `curl_cffi`:
+видимый текст уже есть почти везде (2–13 тыс. символов);
+JSON-LD `articleBody` — в 4 строках (verge, wired×2, vox), WordPress REST —
+у techcrunch (2), и все они и без того читаются. nytimes отдаёт 403, и
+JSON-LD там нет. Прирост охвата **0**, поэтому экстракторы не внедряются.
+Пригодятся, только если понадобится формат «только текст статьи», а это
+изменение контракта, не обход.
