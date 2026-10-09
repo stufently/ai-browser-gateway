@@ -1358,7 +1358,8 @@ class JsChallengeReloadTests(unittest.TestCase):
         cls.probe = load_probe()
 
     def make_page(self, first_status=401, first_body=None, reload_after=None,
-                  reload_status=200, redirect_first=True, main_reload=True):
+                  reload_status=200, redirect_first=True, main_reload=True,
+                  ready_after=0, body_lag=0, reload_during_read=False):
         test = self
 
         class Request:
@@ -1374,6 +1375,8 @@ class JsChallengeReloadTests(unittest.TestCase):
 
         class Frame:
             def content(self):
+                if reload_during_read and not page.reloaded:
+                    page.reload()
                 return page.body
 
         class Page:
@@ -1384,7 +1387,8 @@ class JsChallengeReloadTests(unittest.TestCase):
                 self.body = test.LOADER if first_body is None else first_body
                 self.url = "https://a.test/news/1"
                 self.waited = 0
-                self.load_states = []
+                self.reloaded_at = None
+                self.reloaded = False
 
             def on(self, event, handler):
                 self.listeners.append((event, handler))
@@ -1413,12 +1417,22 @@ class JsChallengeReloadTests(unittest.TestCase):
                     if redirect_first:
                         self.emit(Response(301, self.main_frame))
                 elif self.waited == reload_after + 100 and main_reload:
-                    self.emit(Response(reload_status, self.main_frame))
-                    self.body = test.ARTICLE
-                    self.url = "https://a.test/education/1"
+                    self.reload()
 
-            def wait_for_load_state(self, state, timeout):
-                self.load_states.append(state)
+            def reload(self):
+                self.reloaded = True
+                self.reloaded_at = self.waited
+                self.emit(Response(reload_status, self.main_frame))
+                self.url = "https://a.test/education/1"
+                if not body_lag:
+                    self.body = test.ARTICLE
+
+            def evaluate(self, script):
+                assert script == "document.readyState"
+                if self.reloaded and self.waited - self.reloaded_at >= body_lag:
+                    self.body = test.ARTICLE
+                return ("complete" if self.reloaded
+                        and self.waited - self.reloaded_at >= ready_after else "loading")
 
             def title(self):
                 return ""
@@ -1439,7 +1453,6 @@ class JsChallengeReloadTests(unittest.TestCase):
         self.assertEqual(result["headers"], {"x-status": "200"})
         self.assertIn("real text", result["body"])
         self.assertEqual(result["final_url"], "https://a.test/education/1")
-        self.assertEqual(page.load_states, ["load"])
         self.assertEqual(page.listeners, [])
 
     def test_no_reload_keeps_the_challenge_within_the_wait_limit(self):
@@ -1453,6 +1466,32 @@ class JsChallengeReloadTests(unittest.TestCase):
         self.assertEqual(page.waited, 400)
         self.assertEqual(page.listeners, [])
 
+    def test_reload_during_dom_read_reports_the_new_status(self):
+        page = self.make_page(reload_during_read=True)
+        result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited), (200, 0))
+        self.assertEqual(result["headers"], {"x-status": "200"})
+        self.assertIn("real text", result["body"])
+
+    def test_wait_continues_until_new_document_is_complete(self):
+        page = self.make_page(reload_after=100, ready_after=300)
+        result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited), (200, 500))
+
+    def test_wait_continues_while_dom_still_shows_the_challenge(self):
+        page = self.make_page(reload_after=100, body_lag=200)
+        result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited), (200, 400))
+        self.assertIn("real text", result["body"])
+
+    def test_second_challenge_document_does_not_end_the_wait(self):
+        page = self.make_page(reload_after=100, reload_status=401, body_lag=10_000)
+        with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 600), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited), (401, 600))
+
     def test_only_foreign_documents_do_not_end_the_wait(self):
         page = self.make_page(reload_after=100, main_reload=False)
         with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 500), \
@@ -1465,7 +1504,7 @@ class JsChallengeReloadTests(unittest.TestCase):
     def test_ordinary_page_is_not_held(self):
         page = self.make_page(first_status=200, first_body=self.ARTICLE)
         result = self.navigate(page)
-        self.assertEqual((result["status"], page.waited, page.load_states), (200, 0, []))
+        self.assertEqual((result["status"], page.waited), (200, 0))
         page = self.make_page(first_status=401, first_body="<p>nope</p>")
         self.assertEqual((self.navigate(page)["status"], page.waited), (401, 0))
 

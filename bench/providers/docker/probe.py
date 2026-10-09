@@ -246,9 +246,6 @@ _INERT_MARKUP = re.compile(
 )
 
 
-_INERT_COMMENTS = re.compile(r"<!--.*?-->", re.S)
-
-
 def _decisive_title(body: str) -> str:
     """Title used for RULE decisions: comments, scripts and templates removed."""
     return _title(_INERT_MARKUP.sub(" ", body))
@@ -309,11 +306,37 @@ _CAPTCHA_ATTR = re.compile(
 )
 # Qrator answers 401 with an empty page whose only content is its loader
 # script; the script sets a cookie and reloads to the real page (rbc.ru,
-# 2026-10-09). The passed page carries no `/__qrator/` reference.
-_QRATOR_LOADER = re.compile(
-    r'<script\b[^>]*\bsrc\s*=\s*["\']?/__qrator/',
-    re.I,
-)
+# 2026-10-09). The passed page carries no `/__qrator/` reference. Only a real
+# <script src> counts: data-src, script strings and <template> never run.
+class _QratorLoader(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.found = False
+        self._template_depth = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "template":
+            self._template_depth += 1
+        elif tag == "script" and not self._template_depth:
+            src = dict(reversed(attrs)).get("src") or ""
+            if src.strip().startswith("/__qrator/"):
+                self.found = True
+
+    def handle_endtag(self, tag):
+        if tag == "template" and self._template_depth:
+            self._template_depth -= 1
+
+
+def _has_qrator_loader(text: str) -> bool:
+    parser = _QratorLoader()
+    try:
+        parser.feed(text)
+        parser.close()
+    except Exception:
+        pass
+    return parser.found
+
+
 _CAPTCHA_WIDGET_CLASSES = frozenset({"g-recaptcha", "h-captcha", "cf-turnstile"})
 _SPECIAL_URL_SCHEMES = frozenset({"http", "https", "ws", "wss", "ftp", "file"})
 
@@ -436,7 +459,7 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
         return "suspected", tuple(body_names + captcha_names)
     if "body_captcha_interactive" in captcha_names and captcha_confirmed:
         return "captcha", tuple(body_names + captcha_names)
-    if _QRATOR_LOADER.search(_INERT_COMMENTS.sub(" ", text)):
+    if _has_qrator_loader(text):
         return "javascript_required", tuple(body_names + captcha_names + ["body_qrator_loader"])
     if status_verdict is not None:
         return status_verdict, tuple(body_names + captcha_names + status_names)
@@ -706,10 +729,12 @@ class PlaywrightAdapter:
         try:
             response = self.page.goto(url, wait_until="load", timeout=_bound_timeout_ms(120_000))
             body = _playwright_body(self.page, getattr(self, "sentinel", ""))
-            status = response.status if response is not None else None
-            headers = None if response is None else _normalize_headers(response.headers)
+            # The DOM just read may already belong to a later document.
+            latest = documents[-1] if documents else response
+            status = latest.status if latest is not None else None
+            headers = None if latest is None else _normalize_headers(latest.headers)
             if detect_challenge(status, headers, body)[0] == "javascript_required":
-                reloaded = _await_reload(self.page, documents, len(documents))
+                reloaded = _await_reload(self.page, documents)
                 if reloaded is not None:
                     body = _playwright_body(self.page, getattr(self, "sentinel", ""))
                     status = reloaded.status
@@ -729,23 +754,33 @@ class PlaywrightAdapter:
 JS_CHALLENGE_WAIT_MS = 15_000
 
 
-def _await_reload(page: Any, documents: list[Any], seen: int) -> Any:
-    """Wait for the main frame's next final document after a JS challenge."""
+def _await_reload(page: Any, documents: list[Any]) -> Any:
+    """Wait until a later main-frame document has loaded past the challenge.
+
+    A load-state wait could resolve on the challenge document itself, so the
+    loop checks the latest document's readiness and DOM instead; the
+    challenge's own DOM keeps the loader and never ends the wait.
+    """
     try:
         timeout_ms = _bound_timeout_ms(JS_CHALLENGE_WAIT_MS)
     except TimeoutError:
         return None
     deadline = time.monotonic() + timeout_ms / 1000
-    while len(documents) <= seen:
+    while True:
+        if documents:
+            latest = documents[-1]
+            try:
+                ready = page.evaluate("document.readyState") == "complete"
+                body = "\n".join(frame.content() for frame in page.frames)
+            except Exception:
+                ready = False
+            if ready and detect_challenge(
+                    latest.status, _normalize_headers(latest.headers), body
+            )[0] != "javascript_required":
+                return latest
         if time.monotonic() >= deadline:
             return None
         page.wait_for_timeout(100)
-    left = max(1, int((deadline - time.monotonic()) * 1000))
-    try:
-        page.wait_for_load_state("load", timeout=left)
-    except Exception:
-        pass
-    return documents[-1]
 
 
 class PatchrightAdapter(PlaywrightAdapter):
