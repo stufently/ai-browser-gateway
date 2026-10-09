@@ -170,3 +170,14 @@ class ClientTests(unittest.TestCase):
         self.assertEqual(argv[-5:], [
             'python@sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6',
             'python3', '/client.py', URL, 'meta'])
+
+
+class ClientEnumTests(unittest.TestCase):
+    def test_standalone_enums_match_bench(self):
+        import importlib.util
+        from bench.models import ChallengeType, FailureReason
+        spec = importlib.util.spec_from_file_location('standalone_client_enums', CLIENT)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(module.FAILURES, {item.value for item in FailureReason})
+        self.assertEqual(module.CHALLENGES, {item.value for item in ChallengeType})

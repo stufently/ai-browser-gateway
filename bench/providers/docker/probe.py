@@ -352,6 +352,8 @@ def _has_qrator_loader(text: str) -> bool:
 _PX_BLOCK_TITLE = "access to this page has been denied"
 _PX_APP_ID = "window._pxappid"
 _PX_STATUSES = frozenset({403, 429})
+# Script types a browser executes; JSON and other data blocks never run.
+_JS_SCRIPT_TYPES = frozenset({"", "module", "text/javascript", "application/javascript"})
 
 
 class _LiveScripts(HTMLParser):
@@ -367,7 +369,13 @@ class _LiveScripts(HTMLParser):
         if tag == "template":
             self._template_depth += 1
         elif tag == "script":
-            self._in_script = not self._template_depth
+            kind = (dict(reversed(attrs)).get("type") or "").strip().lower()
+            runs = kind in _JS_SCRIPT_TYPES or kind.endswith("javascript")
+            self._in_script = runs and not self._template_depth
+
+    def handle_startendtag(self, tag, attrs):
+        # HTML ignores the self-closing slash on non-void elements.
+        self.handle_starttag(tag, attrs)
 
     def handle_endtag(self, tag):
         if tag == "template" and self._template_depth:
