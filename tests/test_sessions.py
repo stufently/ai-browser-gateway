@@ -510,13 +510,15 @@ class ProbeSessionTests(unittest.TestCase):
             def cookies(self, url):
                 assert url == 'https://a.test/'
                 return self._cookies
-        many = [{'name': f'n{i}', 'value': 'v', 'domain': 'a.test'} for i in range(70)]
+        many = [{'name': f'n{i}', 'value': 'v', 'domain': 'a.test', 'path': '/app' if i else '/'}
+                for i in range(70)]
         session = self.probe._browser_session(Context(many), None, 'https://a.test/',
                                               'https://a.test/')
         self.assertEqual(session['ua'], 'UA')
         self.assertEqual(len(session['cookies']), 64)
         self.assertEqual(session['cookies'][0], {'name': 'n0', 'value': 'v', 'domain': 'a.test',
                                                  'path': '/'})
+        self.assertEqual(session['cookies'][1]['path'], '/app')
         self.assertIsNone(self.probe._browser_session(Context([]), None, 'https://a.test/',
                                                       'https://a.test/'))
         self.assertIsNone(self.probe._browser_session(None, None, 'https://a.test/', 'https://a.test/'))
