@@ -352,8 +352,16 @@ def _has_qrator_loader(text: str) -> bool:
 _PX_BLOCK_TITLE = "access to this page has been denied"
 _PX_APP_ID = "window._pxappid"
 _PX_STATUSES = frozenset({403, 429})
-# Script types a browser executes; JSON and other data blocks never run.
-_JS_SCRIPT_TYPES = frozenset({"", "module", "text/javascript", "application/javascript"})
+# Script types a browser executes (WHATWG JavaScript MIME essences, plus an
+# absent type and "module"); JSON and other data blocks never run.
+_JS_SCRIPT_TYPES = frozenset({
+    "", "module", "application/ecmascript", "application/javascript",
+    "application/x-ecmascript", "application/x-javascript", "text/ecmascript",
+    "text/javascript", "text/javascript1.0", "text/javascript1.1",
+    "text/javascript1.2", "text/javascript1.3", "text/javascript1.4",
+    "text/javascript1.5", "text/jscript", "text/livescript",
+    "text/x-ecmascript", "text/x-javascript",
+})
 
 
 class _LiveScripts(HTMLParser):
@@ -369,8 +377,10 @@ class _LiveScripts(HTMLParser):
         if tag == "template":
             self._template_depth += 1
         elif tag == "script":
-            kind = (dict(reversed(attrs)).get("type") or "").strip().lower()
-            runs = kind in _JS_SCRIPT_TYPES or kind.endswith("javascript")
+            attributes = dict(reversed(attrs))
+            kind = (attributes.get("type") or "").partition(";")[0].strip().lower()
+            # With src the browser runs the fetched file, not the inline text.
+            runs = kind in _JS_SCRIPT_TYPES and attributes.get("src") is None
             self._in_script = runs and not self._template_depth
 
     def handle_startendtag(self, tag, attrs):
