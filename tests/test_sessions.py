@@ -73,6 +73,12 @@ class SessionStoreTests(unittest.TestCase):
         clock.now += 1
         self.assertIsNone(store.get('a.test'))
 
+    def test_drop_compares_user_agent_too(self):
+        store = SessionStore()
+        store.put('a.test', SESSION)
+        store.drop('a.test', dict(SESSION, ua='Other UA'))
+        self.assertEqual(store.get('a.test'), SESSION)
+
     def test_late_drop_keeps_a_newer_session(self):
         store = SessionStore()
         newer = {'ua': 'UA2', 'cookies': [{'name': 'cf_clearance', 'value': 'v2'}]}
@@ -116,6 +122,7 @@ class FileSessionStoreTests(unittest.TestCase):
         path = os.path.join(self.dir, 'a.test.json')
         self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(os.stat(self.dir).st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(self.dir, '.lock')).st_mode), 0o600)
         self.assertEqual(FileSessionStore(self.dir, clock=self.clock).get('a.test'), SESSION)
         self.clock.now += MAX_AGE_S
         self.assertIsNone(self.store.get('a.test'))
@@ -346,9 +353,16 @@ class ProbeSessionTests(unittest.TestCase):
         def get(url, **kwargs):
             captured.update(kwargs)
             return Response()
+
+        class Session:
+            get = staticmethod(get)
+
+            def close(self):
+                pass
         curl_cffi = types.ModuleType('curl_cffi')
         requests_mod = types.ModuleType('curl_cffi.requests')
         requests_mod.get = get
+        requests_mod.Session = Session
         curl_cffi.requests = requests_mod
         with patch.dict(sys.modules, {'curl_cffi': curl_cffi, 'curl_cffi.requests': requests_mod}), \
                 patch.dict(os.environ, environ, clear=False):
@@ -369,13 +383,26 @@ class ProbeSessionTests(unittest.TestCase):
                 self.headers = {'Location': location} if location else {}
 
         chain = iter(Response(*item) for item in responses)
+        clients = []
 
         def get(url, **kwargs):
             calls.append((url, kwargs))
             return next(chain)
+
+        class Session:
+            def __init__(self):
+                self.closed = False
+                clients.append(self)
+
+            def get(self, url, **kwargs):
+                return get(url, client=self, **kwargs)
+
+            def close(self):
+                self.closed = True
         curl_cffi = types.ModuleType('curl_cffi')
         requests_mod = types.ModuleType('curl_cffi.requests')
         requests_mod.get = get
+        requests_mod.Session = Session
         curl_cffi.requests = requests_mod
         with patch.dict(sys.modules, {'curl_cffi': curl_cffi, 'curl_cffi.requests': requests_mod}), \
                 patch.dict(os.environ, environ, clear=False):
@@ -383,6 +410,7 @@ class ProbeSessionTests(unittest.TestCase):
                 os.environ.pop('ABG_SESSION', None)
             os.environ.pop('ABG_PROXY', None)
             value = self.probe.CurlCffiAdapter().navigate('https://a.test/')
+        self.clients = clients
         return calls, value
 
     def test_replay_follows_only_https_redirects_on_the_same_host(self):
@@ -390,6 +418,15 @@ class ProbeSessionTests(unittest.TestCase):
         calls, value = self.curl_chain(env, [(302, 'https://a.test/', '/next'),
                                               (200, 'https://a.test/next')])
         self.assertEqual([url for url, _ in calls], ['https://a.test/', 'https://a.test/next'])
+        # Both hops share one client (its cookie jar) and it is closed after.
+        self.assertEqual(len(self.clients), 1)
+        self.assertTrue(all(kw['client'] is self.clients[0] for _, kw in calls))
+        self.assertTrue(self.clients[0].closed)
+        for status in (301, 303, 307, 308):
+            with self.subTest(status=status):
+                hops, _ = self.curl_chain(env, [(status, 'https://a.test/', '/n'),
+                                                (200, 'https://a.test/n')])
+                self.assertEqual(len(hops), 2)
         self.assertTrue(all(kw['allow_redirects'] is False and kw['cookies'] == {'cf_clearance': 'v1'}
                             for _, kw in calls))
         self.assertEqual((value['status'], value['final_url'], value['redirects']),
@@ -411,6 +448,8 @@ class ProbeSessionTests(unittest.TestCase):
         calls, value = self.curl_chain({}, [(200, 'https://b.test/')])
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0][1]['allow_redirects'])
+        self.assertNotIn('client', calls[0][1])
+        self.assertEqual(self.clients, [])
 
     def test_curl_replays_cookies_and_user_agent(self):
         captured = self.curl({'ABG_SESSION': json.dumps(SESSION)})

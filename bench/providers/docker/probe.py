@@ -789,8 +789,12 @@ class CurlCffiAdapter:
             # other hop ends the replay at its 3xx.
             kwargs.update(headers={"User-Agent": session["ua"]}, cookies=session["cookies"],
                           allow_redirects=False)
+        # One client for the whole replay, so cookies set on a redirect reach
+        # the next hop as they would in a browser.
+        client = requests.Session() if session is not None else None
         try:
-            response = requests.get(url, **kwargs)
+            get = client.get if client is not None else requests.get
+            response = get(url, **kwargs)
             hops = len(response.history)
             while (session is not None and hops < SESSION_MAX_REDIRECTS
                    and response.status_code in (301, 302, 303, 307, 308)):
@@ -800,13 +804,16 @@ class CurlCffiAdapter:
                 if parsed.scheme != "https" or parsed.hostname != urlparse(url).hostname:
                     break
                 kwargs["timeout"] = _bound_timeout_s(120)
-                response = requests.get(target, **kwargs)
+                response = get(target, **kwargs)
                 hops += 1
         except Exception as exc:
             if any(cls.__name__ == "Timeout" and cls.__module__ == "curl_cffi.requests.exceptions"
                    for cls in type(exc).__mro__):
                 raise TimeoutError("curl_cffi request timed out") from exc
             raise
+        finally:
+            if client is not None:
+                client.close()
         return _result(
             response.status_code, str(response.url), response.content, hops,
             headers=_normalize_headers(response.headers),
