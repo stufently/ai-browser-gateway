@@ -159,9 +159,10 @@ def _session_in() -> dict[str, Any] | None:
         ua, cookies = value["ua"], value["cookies"]
         if not isinstance(ua, str) or not ua or not isinstance(cookies, list):
             return None
-        jar = [(c["name"], c["value"], c.get("domain", "")) for c in cookies[:SESSION_MAX_COOKIES]
+        jar = [(c["name"], c["value"], c.get("domain", ""), c.get("path") or "/")
+               for c in cookies[:SESSION_MAX_COOKIES]
                if isinstance(c["name"], str) and isinstance(c["value"], str)
-               and isinstance(c.get("domain", ""), str)]
+               and isinstance(c.get("domain", ""), str) and isinstance(c.get("path") or "/", str)]
     except (ValueError, KeyError, TypeError, AttributeError):
         return None
     return {"ua": ua, "cookies": jar} if jar else None
@@ -195,7 +196,7 @@ def _browser_session(context: Any, page: Any, url: str,
     if not cookies or not isinstance(ua, str) or not ua:
         return None
     return {"ua": ua, "cookies": [{"name": c["name"], "value": c["value"],
-                                   "domain": c.get("domain") or ""}
+                                   "domain": c.get("domain") or "", "path": c.get("path") or "/"}
                                   for c in cookies[:SESSION_MAX_COOKIES]]}
 
 
@@ -804,10 +805,11 @@ class CurlCffiAdapter:
         if session is not None:
             client = requests.Session()
             host = urlparse(url).hostname or ""
-            # The original Domain lets a later Set-Cookie replace the value
-            # instead of adding a second cookie of the same name.
-            for name, value, domain in session["cookies"]:
-                client.cookies.set(name, value, domain=_cookie_domain(domain, host))
+            # The original Domain and Path let a later Set-Cookie replace the
+            # value instead of adding a second cookie of the same name.
+            for name, value, domain, path in session["cookies"]:
+                client.cookies.set(name, value, domain=_cookie_domain(domain, host),
+                                   path=path if path.startswith("/") else "/")
         try:
             get = client.get if client is not None else requests.get
             response = get(url, **kwargs)

@@ -49,7 +49,11 @@ class SessionShapeTests(unittest.TestCase):
                     {'ua': 'x', 'cookies': []}, {'ua': 'x', 'cookies': [cookie] * 65},
                     {'ua': 'x', 'cookies': [{'name': '', 'value': 'v'}]},
                     {'ua': 'x', 'cookies': [{'name': 'n', 'value': 1}]},
-                    {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'path': '/'}]},
+                    {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'secure': True}]},
+                    {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'path': 'app'}]},
+                    {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'path': '/' * 1025}]},
+                    {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'path': 7}]},
+                    {'ua': 'x', 'cookies': [{'name': f'n{i}', 'value': 'v' * 4000} for i in range(9)]},
                     {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'domain': 1}]},
                     {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v', 'domain': 'd' * 256}]},
                     {'ua': 'x', 'cookies': [{'name': 'n', 'value': 'v' * 4097}]},
@@ -58,6 +62,9 @@ class SessionShapeTests(unittest.TestCase):
                 self.assertFalse(valid_session(bad))
         self.assertTrue(valid_session({'ua': 'x', 'cookies': [cookie] * 64}))
         self.assertTrue(valid_session({'ua': 'x', 'cookies': [dict(cookie, domain='.a.test')]}))
+        self.assertTrue(valid_session({'ua': 'x', 'cookies': [dict(cookie, path='/app')]}))
+        self.assertTrue(valid_session({'ua': 'x', 'cookies': [{'name': f'n{i}', 'value': 'v' * 4000}
+                                                               for i in range(8)]}))
 
 
 class SessionStoreTests(unittest.TestCase):
@@ -321,6 +328,12 @@ class TransportSessionTests(unittest.TestCase):
         self.assertEqual(argv[index - 1], '--env')
         self.assertFalse(any('cf_clearance' in part for part in argv))
 
+    def test_oversized_session_is_not_passed(self):
+        big = {'ua': 'UA', 'cookies': [{'name': f'n{i}', 'value': 'v' * 4000} for i in range(9)]}
+        argv, env = self.fetch('curl_cffi', session=big)
+        self.assertNotIn('ABG_SESSION', env)
+        self.assertNotIn('ABG_SESSION', argv)
+
     def test_inherited_session_variables_never_leak(self):
         argv, env = self.fetch('curl_cffi')
         self.assertNotIn('ABG_SESSION', env)
@@ -374,8 +387,8 @@ class ProbeSessionTests(unittest.TestCase):
             def __init__(self):
                 self.set_calls = []
 
-            def set(self, name, value, domain=''):
-                self.set_calls.append((name, value, domain))
+            def set(self, name, value, domain='', path='/'):
+                self.set_calls.append((name, value, domain, path))
 
         class Session:
             def __init__(self):
@@ -409,7 +422,7 @@ class ProbeSessionTests(unittest.TestCase):
         self.assertEqual([url for url, _ in calls], ['https://a.test/', 'https://a.test/next'])
         # Both hops share one client (its cookie jar, seeded once) and it is closed after.
         self.assertEqual(len(self.clients), 1)
-        self.assertEqual(self.clients[0].cookies.set_calls, [('cf_clearance', 'v1', 'a.test')])
+        self.assertEqual(self.clients[0].cookies.set_calls, [('cf_clearance', 'v1', 'a.test', '/')])
         self.assertTrue(all(kw['client'] is self.clients[0] and kw['allow_redirects'] is False
                             and 'cookies' not in kw for _, kw in calls))
         self.assertTrue(self.clients[0].closed)
@@ -427,12 +440,14 @@ class ProbeSessionTests(unittest.TestCase):
                    {'name': 'c', 'value': '3', 'domain': '.other.test'},
                    {'name': 'd', 'value': '4', 'domain': 'xa.test'},
                    {'name': 'e', 'value': '5'},
-                   {'name': 'f', 'value': '6', 'domain': 'est'}]
+                   {'name': 'f', 'value': '6', 'domain': 'est', 'path': '/app'},
+                   {'name': 'g', 'value': '7', 'path': 'bad'}]
         env = {'ABG_SESSION': json.dumps({'ua': 'UA', 'cookies': cookies})}
         self.curl_chain(env, [(200, 'https://a.test/')])
         self.assertEqual(self.clients[0].cookies.set_calls, [
-            ('a', '1', '.a.test'), ('b', '2', 'a.test'), ('c', '3', 'a.test'),
-            ('d', '4', 'a.test'), ('e', '5', 'a.test'), ('f', '6', 'a.test')])
+            ('a', '1', '.a.test', '/'), ('b', '2', 'a.test', '/'), ('c', '3', 'a.test', '/'),
+            ('d', '4', 'a.test', '/'), ('e', '5', 'a.test', '/'), ('f', '6', 'a.test', '/app'),
+            ('g', '7', 'a.test', '/')])
 
     def test_leaving_the_host_falls_back_to_an_ordinary_request(self):
         env = {'ABG_SESSION': json.dumps(SESSION)}
@@ -500,7 +515,8 @@ class ProbeSessionTests(unittest.TestCase):
                                               'https://a.test/')
         self.assertEqual(session['ua'], 'UA')
         self.assertEqual(len(session['cookies']), 64)
-        self.assertEqual(session['cookies'][0], {'name': 'n0', 'value': 'v', 'domain': 'a.test'})
+        self.assertEqual(session['cookies'][0], {'name': 'n0', 'value': 'v', 'domain': 'a.test',
+                                                 'path': '/'})
         self.assertIsNone(self.probe._browser_session(Context([]), None, 'https://a.test/',
                                                       'https://a.test/'))
         self.assertIsNone(self.probe._browser_session(None, None, 'https://a.test/', 'https://a.test/'))

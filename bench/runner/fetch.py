@@ -11,6 +11,9 @@ from bench.models import ChallengeType, FailureReason, FetchResult
 from bench.providers.registry import build_argv, by_name, parse_output
 
 PROBE_FILE = Path(__file__).resolve().parents[1] / 'providers' / 'docker' / 'probe.py'
+# A larger session is not passed at all: one environment string over 128 KiB
+# fails the launch with E2BIG instead of falling back to an ordinary request.
+SESSION_ENV_LIMIT = 32768
 
 
 def _failed(provider: str, url: str, reason: FailureReason) -> tuple[FetchResult, None]:
@@ -80,8 +83,9 @@ def _fetch(provider, *, url, sentinel, budget_ms, launcher=None,
     if proxy:
         child_env['ABG_PROXY'] = proxy
     env_names = []
-    if session is not None and provider == 'curl_cffi':
-        child_env['ABG_SESSION'] = json.dumps(session)
+    replay = json.dumps(session) if session is not None and provider == 'curl_cffi' else ''
+    if replay and len(replay) <= SESSION_ENV_LIMIT:
+        child_env['ABG_SESSION'] = replay
         env_names.append('ABG_SESSION')
     if on_session is not None and selected.kind == 'browser':
         child_env['ABG_SESSION_EXPORT'] = '1'

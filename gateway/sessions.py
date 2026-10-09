@@ -20,6 +20,8 @@ MAX_AGE_S = 1800
 MAX_ENTRIES = 256
 MAX_COOKIES = 64
 MAX_TEXT = 4096
+# The session travels in one environment variable (Linux caps one at 128 KiB).
+MAX_SESSION_BYTES = 32768
 # A file name is the host itself, so only plain DNS labels qualify.
 _HOST = re.compile(r'[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63})*')
 
@@ -29,7 +31,7 @@ def _same(stored, session):
 
 
 def valid_session(value):
-    """The probe's session shape: {"ua": str, "cookies": [{"name", "value"[, "domain"]}...]}."""
+    """The probe's session shape: {"ua": str, "cookies": [{"name", "value"[, "domain", "path"]}...]}."""
     if not isinstance(value, dict) or set(value) != {'ua', 'cookies'}:
         return False
     ua, cookies = value.get('ua'), value.get('cookies')
@@ -38,16 +40,18 @@ def valid_session(value):
     if not isinstance(cookies, list) or not 0 < len(cookies) <= MAX_COOKIES:
         return False
     for cookie in cookies:
-        if not isinstance(cookie, dict) or set(cookie) not in ({'name', 'value'},
-                                                               {'name', 'value', 'domain'}):
+        if not isinstance(cookie, dict) or not {'name', 'value'} <= set(cookie) <= {
+                'name', 'value', 'domain', 'path'}:
             return False
         if not all(isinstance(cookie[key], str) and len(cookie[key]) <= MAX_TEXT
                    for key in ('name', 'value')) or not cookie['name']:
             return False
-        domain = cookie.get('domain', '')
+        domain, path = cookie.get('domain', ''), cookie.get('path', '/')
         if not isinstance(domain, str) or len(domain) > 255:
             return False
-    return True
+        if not isinstance(path, str) or not path.startswith('/') or len(path) > 1024:
+            return False
+    return len(json.dumps(value)) <= MAX_SESSION_BYTES
 
 
 class SessionStore:
