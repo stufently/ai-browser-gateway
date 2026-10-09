@@ -736,11 +736,18 @@ class PlaywrightAdapter:
             latest, body = _document_and_body(self.page, documents, response, sentinel)
             status = latest.status if latest is not None else None
             headers = None if latest is None else _normalize_headers(latest.headers)
-            if (detect_challenge(status, headers, body)[0] == "javascript_required"
-                    and _await_reload(self.page, documents)):
-                latest, body = _document_and_body(self.page, documents, response, sentinel)
-                status = latest.status
-                headers = _normalize_headers(latest.headers)
+            # A document after goto's own may still be loading: only a settled
+            # read past the challenge is trusted.
+            if latest is not response or detect_challenge(
+                    status, headers, body)[0] == "javascript_required":
+                settled = _await_reload(self.page, documents, sentinel)
+                if settled is not None:
+                    latest, body = settled
+                elif latest is not response:
+                    body = ""
+                if latest is not None:
+                    status = latest.status
+                    headers = _normalize_headers(latest.headers)
         finally:
             self.page.remove_listener("response", record)
         return _result(status, self.page.url, body.encode(), 0, self.page.title(), headers=headers)
@@ -762,44 +769,45 @@ def _document_and_body(page: Any, documents: list[Any], response: Any,
     """Read the DOM together with the main-frame response it belongs to.
 
     A JS challenge can reload the page at any moment, so the DOM read is
-    repeated until no newer document arrived during it (a page that keeps
-    reloading gets the last pair after a few reads).
+    repeated until no newer document arrived during it. A page that keeps
+    reloading gets the latest response with an empty body: its DOM is unknown.
     """
     for _ in range(DOM_READ_ATTEMPTS):
         before = documents[-1] if documents else response
         body = _playwright_body(page, sentinel)
         after = documents[-1] if documents else response
         if after is before:
-            break
-    return after, body
+            return after, body
+    return after, ""
 
 
-def _await_reload(page: Any, documents: list[Any]) -> bool:
+def _await_reload(page: Any, documents: list[Any], sentinel: str) -> tuple[Any, str] | None:
     """Wait until the latest main-frame document has loaded past the challenge.
 
     A load-state wait could resolve on the challenge document itself, so the
     loop checks the latest document's readiness and DOM instead; the
-    challenge's own DOM keeps the loader and never ends the wait.
+    challenge's own DOM keeps the loader and never ends the wait. The DOM is
+    accepted only when no newer document arrived while it was read.
     """
     try:
         timeout_ms = _bound_timeout_ms(JS_CHALLENGE_WAIT_MS)
     except TimeoutError:
-        return False
+        return None
     deadline = time.monotonic() + timeout_ms / 1000
     while True:
         if documents:
             latest = documents[-1]
             try:
                 ready = page.evaluate("document.readyState") == "complete"
-                body = "\n".join(frame.content() for frame in page.frames)
+                body = _playwright_body(page, sentinel) if ready else ""
             except Exception:
                 ready = False
             if ready and documents[-1] is latest and detect_challenge(
                     latest.status, _normalize_headers(latest.headers), body
             )[0] != "javascript_required":
-                return True
+                return latest, body
         if time.monotonic() >= deadline:
-            return False
+            return None
         page.wait_for_timeout(100)
 
 

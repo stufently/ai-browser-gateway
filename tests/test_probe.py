@@ -1360,7 +1360,7 @@ class JsChallengeReloadTests(unittest.TestCase):
     def make_page(self, first_status=401, first_body=None, reload_after=None,
                   reload_status=200, redirect_first=True, main_reload=True,
                   ready_after=0, body_lag=0, reload_during_read=False,
-                  endless_reload=False):
+                  endless_reload=False, partial=False):
         test = self
 
         class Request:
@@ -1431,6 +1431,8 @@ class JsChallengeReloadTests(unittest.TestCase):
                 self.url = "https://a.test/education/1"
                 if not body_lag:
                     self.body = test.ARTICLE
+                elif partial:
+                    self.body = "<html><body><nav>menu</nav>"
 
             def evaluate(self, script):
                 assert script == "document.readyState"
@@ -1478,11 +1480,48 @@ class JsChallengeReloadTests(unittest.TestCase):
         self.assertEqual(result["headers"], {"x-status": "200"})
         self.assertIn("real text", result["body"])
 
+    def test_endless_reload_never_pairs_status_with_an_unconfirmed_dom(self):
+        page = self.make_page(endless_reload=True)
+        with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 300), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertEqual((result["status"], result["body"], page.waited), (200, "", 300))
+
     def test_dom_read_is_retried_a_bounded_number_of_times(self):
         page = self.make_page(endless_reload=True)
-        result = self.navigate(page)
+        documents = []
+        response = object()
+        page.on("response", documents.append)
+        latest, body = self.probe._document_and_body(page, documents, response, "")
         self.assertEqual(page.reads, self.probe.DOM_READ_ATTEMPTS)
-        self.assertEqual((result["status"], page.waited), (200, 0))
+        self.assertEqual((latest.status, body), (200, ""))
+
+    def test_new_document_still_loading_is_awaited_even_without_loader(self):
+        page = self.make_page(reload_during_read=True, partial=True, body_lag=200,
+                              ready_after=200)
+        result = self.navigate(page)
+        self.assertEqual((result["status"], page.waited), (200, 200))
+        self.assertIn("real text", result["body"])
+
+    def test_unsettled_new_document_yields_no_body(self):
+        page = self.make_page(reload_during_read=True, partial=True, body_lag=10_000,
+                              ready_after=10_000)
+        with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 300), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertEqual((result["status"], result["body"], page.waited), (200, "", 300))
+
+    def test_challenge_without_any_response_keeps_none_status(self):
+        page = self.make_page()
+        page.goto = lambda url, **kwargs: None
+        with patch.object(self.probe, "JS_CHALLENGE_WAIT_MS", 200), \
+                patch.object(self.probe.time, "monotonic",
+                             side_effect=lambda: page.waited / 1000):
+            result = self.navigate(page)
+        self.assertIsNone(result["status"])
+        self.assertIn("__qrator", result["body"])
 
     def test_document_arriving_during_wait_check_is_rechecked(self):
         page = self.make_page(reload_after=100)
