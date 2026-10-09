@@ -104,7 +104,7 @@ the gateway also checks content and challenge signals.
 | Provider | What it does | When it runs |
 | --- | --- | --- |
 | `curl_cffi` | HTTP with browser headers and TLS impersonation. | First; its attempt is capped at 15000 ms within the total budget. |
-| `patchright` | Browser rendering for JavaScript pages. | After an eligible HTTP failure, such as missing content, a suspected challenge, HTTP 403, or an HTTP timeout, if browsers are allowed and budget remains. |
+| `patchright` | Browser rendering for JavaScript pages; on a JavaScript challenge (Qrator's 401 loader) it waits up to 15 s for the page to reload. | After an eligible HTTP failure, such as missing content, a suspected challenge, a JavaScript challenge, HTTP 403, or an HTTP timeout, if browsers are allowed and budget remains. |
 | `scrapling` | Stealthy browser session with `solve_cloudflare=True`. | After an eligible Patchright failure, if budget remains. |
 
 Some outcomes stop escalation: interactive challenges need human action;
@@ -113,9 +113,13 @@ automatically advance to the next browser. The ladder does not guarantee access
 to every Cloudflare-protected page.
 
 `--no-browser` removes both browser providers. The one-shot image makes direct
-requests, with no proxy profiles, RSS/Wayback entrances, or cache. Environment
-variables `http_proxy`, `https_proxy`, `all_proxy`, `ftp_proxy`, and `no_proxy`
-are ignored in every letter case.
+requests, with no RSS/Wayback entrances or cache. Environment variables
+`http_proxy`, `https_proxy`, `all_proxy`, `ftp_proxy`, and `no_proxy` are
+ignored in every letter case. A proxy is used only when `ABG_EGRESS_PROXY`
+holds its URL (`http`, `https`, `socks5`, `socks5h`): the ladder then ends
+with one `curl_cffi` attempt through it (profile `proxy`), for sites that
+block the host's address. Pass it as `docker run -e ABG_EGRESS_PROXY` so the
+credentials stay out of the command line.
 
 ## MCP server for AI agents
 

@@ -352,9 +352,14 @@ which supplies expected text, and do not repeat it during acceptance.
 
 Самодостаточный образ запускает лестницу `curl_cffi → patchright → scrapling`
 локальными процессами. Развёрнутый API и Docker-демон внутри контейнера не нужны.
-Внутри только direct: без прокси, входов RSS/Wayback, токенов и кэша.
+Внутри direct: без входов RSS/Wayback, токенов и кэша.
 Переменные окружения `http_proxy`, `https_proxy`, `all_proxy`, `ftp_proxy` и
-`no_proxy` в любом регистре игнорируются: образ всегда ходит direct.
+`no_proxy` в любом регистре игнорируются. Прокси используется только из
+`ABG_EGRESS_PROXY` (URL со схемой `http`, `https`, `socks5`, `socks5h`): тогда
+лестница заканчивается одной попыткой `curl_cffi` через него (профиль `proxy`)
+— для сайтов, которые режут адрес хоста. Передавать как
+`docker run -e ABG_EGRESS_PROXY`, чтобы креды не попали в командную строку;
+неверный URL — код `2`.
 
 Сборка из корня репозитория и запуск:
 
