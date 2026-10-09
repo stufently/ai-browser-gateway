@@ -123,3 +123,26 @@ CloakBrowser, r.jina.ai, Common Crawl, платные скраперы) сюда
 2. B5/B7: кэш сессии и памяти ступени по домену в сервисе.
 3. E17/E19: JSON-LD и WP REST.
 4. D13/D14/D15: side-load и браузер через egress с гео-согласованием.
+
+## Замер с нашего хоста: как лестница 0.1.3 встречает вендоров (2026-10-09)
+
+curl_cffi (`impersonate="chrome"`), затем ручной patchright (headful, Xvfb)
+с ожиданием 25 с, затем сам one-shot 0.1.3 с `--budget-ms 90000`.
+По одному запросу на сайт.
+
+| Сайт, защита | curl_cffi | Браузер, 25 с | Лестница 0.1.3 |
+|---|---|---|---|
+| wayfair, PerimeterX (`_pxhd`) | 429 | **сразу 200, настоящая страница** | `http_429` → `human`, браузер не пробовала |
+| priceline, PerimeterX | 403 | «Access to this page has been denied» | 403 → оба браузера → `human` |
+| hyatt, Kasada (`KPSDK`) | 429 | остаётся 429 | `http_429` → `human` |
+| etsy, tripadvisor, g2, DataDome (`rt:'i'`) | 403 | остаётся на `captcha-delivery` | 403 → оба браузера впустую (~5 с) → `human` |
+| homedepot, cnbc, Akamai «Access Denied» | 403 | — | 403 → оба браузера впустую → `human`; это бан IP |
+| ticketmaster, своя стена | 403 | «Your Browsing Activity Has Been Paused» | 403 → оба браузера → `human` |
+| avito, Qrator | **439** | 429 «Доступ ограничен: проблема с IP» | не замерено |
+| glassdoor, CF | 401 «Authenticating...» | «Just a moment...» через 25 с | не замерено |
+
+Вывод для вехи детекта: 429 от PerimeterX — не rate limit, такой ответ надо
+вести в браузер (wayfair откроется). Akamai «Access Denied» и Qrator «проблема
+с IP» — бан адреса: такой ответ надо вести сразу в egress. DataDome с этого IP
+браузером не проходится. В теле ticketmaster стоит IP клиента: перед тем как
+класть его в фикстуру, вычистить.
