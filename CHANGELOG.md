@@ -28,6 +28,17 @@
   окружения (не argv) добавляет в конец лестницы шаг `curl_cffi` через
   профиль `proxy`; в дочерние probe переменная не передаётся.
 
+### Выпуск
+
+- Образ `ghcr.io/stufently/ai-browser-gateway-oneshot` — теги `0.1.3`,
+  `sha-6031421`, `latest` (`sha256:bac36ac4…`); на него переведены
+  `abg-fetch` (ансибль, по умолчанию `ABG_EGRESS_PROXY` = `HTTPS_PROXY`
+  хоста) и check-sites. `0.1.2` выпущен раньше тем же днём и заменён: в
+  одном прогоне из шести на `rbc.ru` patchright не дожидался `complete`.
+  Боевой сервис переведён на релиз `6031421c3b0a` (откат — `2fa1b21e9e38`,
+  конфигурация — `compose.env.pre-qrator`); прошли `--check-deploy`,
+  `--check-bizprofile`, `rbc.ru` и `cnbc.com` через API.
+
 ## 2026-10-05
 
 ### Добавлено

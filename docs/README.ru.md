@@ -223,12 +223,15 @@ shutdown removes running providers while draining and finishes sooner.
 
 ## M12b deployed service
 
-Stand-host runs release `2fa1b21e9e38e85542edd246e17aa6c9915366ac`
-(image `abg-runtime:2fa1b21e9e38`, deployed 2026-09-24) under
+Stand-host runs release `6031421c3b0a0e04a263440437cdbd9a08e7e3c8`
+(image `abg-runtime:6031421c3b0a`, deployed 2026-10-09) under
 `/home/user/services/ai-browser-gateway`, with the API published at
-`127.0.0.1:8765`. It differs from the M16c release `db4fc359171c` only by
-the detector fix for Cloudflare tokens inside encoded third-party URLs; the
-measurements below were taken on M16c. Measured outcomes and image identity:
+`127.0.0.1:8765`. It adds the Qrator JS-challenge handling (CHANGELOG
+2026-10-09) to release `2fa1b21e9e38` (2026-09-24, the rollback; its
+configuration is kept as `compose.env.pre-qrator`), which in turn differs
+from the M16c release `db4fc359171c` only by the detector fix for Cloudflare
+tokens inside encoded third-party URLs; the measurements below were taken on
+M16c. Measured outcomes and image identity:
 [M16c deployment results](research/04-phase1-verdict.md#после-выкладки-m16c).
 Deployment and target checks passed. The executor's AC-954 run hit
 `worker_internal_error`, a catch-all the harness reports for any worker failure
@@ -242,7 +245,7 @@ Start or stop the service using its explicit configuration:
 
 ```bash
 service_root=/home/user/services/ai-browser-gateway
-release_sha=2fa1b21e9e38e85542edd246e17aa6c9915366ac
+release_sha=6031421c3b0a0e04a263440437cdbd9a08e7e3c8
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
@@ -306,7 +309,7 @@ python3 tests/deployed_m12b.py --check-bizprofile "${host[@]}"
 python3 tests/deployed_m12b.py --run-targets "${host[@]}"
 ```
 
-The 2026-09-24 deployment passed `--check-deploy` and `--check-bizprofile`.
+The 2026-10-09 deployment passed `--check-deploy` and `--check-bizprofile`.
 
 Proxy profiles are generated once into `secrets/proxies.toml` from a file with
 `PROXY_LOGIN` and `PROXY_PASSWORD`; the proxy domain is an argument, hosts are
