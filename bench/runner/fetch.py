@@ -1,6 +1,7 @@
 """One real provider request. Isolated from execute_plan's shared environ."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -44,14 +45,19 @@ def validate_url(url):
 
 
 def fetch_content(provider, *, url, budget_ms, launcher=None,
-                  egress=None, entrance_url=None, network=None):
+                  egress=None, entrance_url=None, network=None,
+                  session=None, on_session=None):
+    """session: cookies and UA for curl_cffi to replay; on_session receives
+    the session a browser reports after a passed page."""
     return _fetch(provider, url=url, sentinel=None, budget_ms=budget_ms,
                   launcher=launcher, egress=egress, entrance_url=entrance_url,
-                  network=network, content_only=True)
+                  network=network, content_only=True,
+                  session=session, on_session=on_session)
 
 
 def _fetch(provider, *, url, sentinel, budget_ms, launcher=None,
-           egress=None, entrance_url=None, network=None, content_only=False):
+           egress=None, entrance_url=None, network=None, content_only=False,
+           session=None, on_session=None):
     from bench.runner.execute import DockerLauncher, _validated
 
     if (type(budget_ms) is not int or budget_ms <= 0
@@ -69,15 +75,24 @@ def _fetch(provider, *, url, sentinel, budget_ms, launcher=None,
         return _failed(provider, url, FailureReason.not_measured)
 
     proxy = None if egress is None else egress[1]
-    child_env = {key: value for key, value in os.environ.items() if key != 'ABG_PROXY'}
+    child_env = {key: value for key, value in os.environ.items()
+                 if key not in ('ABG_PROXY', 'ABG_SESSION', 'ABG_SESSION_EXPORT')}
     if proxy:
         child_env['ABG_PROXY'] = proxy
+    env_names = []
+    if session is not None and provider == 'curl_cffi':
+        child_env['ABG_SESSION'] = json.dumps(session)
+        env_names.append('ABG_SESSION')
+    if on_session is not None and selected.kind == 'browser':
+        child_env['ABG_SESSION_EXPORT'] = '1'
+        env_names.append('ABG_SESSION_EXPORT')
     target = (entrance_url or url) if selected.kind == 'entrance' else url
     argv = build_argv(
         selected, url=target, sentinel=sentinel, network=network,
         proxy_env='ABG_PROXY' if proxy else None,
         probe_bind=PROBE_FILE, include_content=True, budget_ms=budget_ms,
         **({'content_only': True} if content_only else {}),
+        **({'env_names': tuple(env_names)} if env_names else {}),
     )
     argv.extend(['--mode', 'cold'])
     runner = DockerLauncher() if launcher is None else launcher
@@ -116,6 +131,8 @@ def _fetch(provider, *, url, sentinel, budget_ms, launcher=None,
             error_type=FailureReason.none,
             challenge=ChallengeType(payload['challenge']),
         )
+        if on_session is not None and payload.get('session') is not None:
+            on_session(payload['session'])
         return result, payload.get('entrance_age_hours')
     except (subprocess.TimeoutExpired, TimeoutError):
         return _failed(provider, url, FailureReason.timeout)

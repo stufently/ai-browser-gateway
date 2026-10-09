@@ -142,6 +142,47 @@ def _proxy_url() -> str:
     return os.environ.get("ABG_PROXY") or ""
 
 
+# A solved challenge travels as the browser's cookies and User-Agent: curl_cffi
+# replays them (ABG_SESSION, JSON), browsers report them (ABG_SESSION_EXPORT=1).
+# Measured 2026-10-09: rbc.ru (Qrator) and bizprofile.net (cf_clearance) then
+# answer curl_cffi with the real page. The values never reach argv or logs.
+SESSION_MAX_COOKIES = 64
+
+
+def _session_in() -> dict[str, Any] | None:
+    raw = os.environ.get("ABG_SESSION")
+    if not raw:
+        return None
+    try:
+        value = json.loads(raw)
+        ua, cookies = value["ua"], value["cookies"]
+        if not isinstance(ua, str) or not ua or not isinstance(cookies, list):
+            return None
+        jar = {c["name"]: c["value"] for c in cookies[:SESSION_MAX_COOKIES]
+               if isinstance(c["name"], str) and isinstance(c["value"], str)}
+    except (ValueError, KeyError, TypeError):
+        return None
+    return {"ua": ua, "cookies": jar} if jar else None
+
+
+def _exporting_session() -> bool:
+    return os.environ.get("ABG_SESSION_EXPORT") == "1"
+
+
+def _browser_session(context: Any, page: Any, url: str) -> dict[str, Any] | None:
+    try:
+        cookies = context.cookies(url)
+        if page is None:
+            page = context.pages[0] if context.pages else None
+        ua = page.evaluate("navigator.userAgent") if page is not None else None
+    except Exception:
+        return None
+    if not cookies or not isinstance(ua, str) or not ua:
+        return None
+    return {"ua": ua, "cookies": [{"name": c["name"], "value": c["value"]}
+                                  for c in cookies[:SESSION_MAX_COOKIES]]}
+
+
 def playwright_proxy(url: str) -> dict[str, str]:
     """ProxySettings для playwright/patchright/camoufox: креды отдельно от server."""
     parsed = urlparse(url)
@@ -735,6 +776,10 @@ class CurlCffiAdapter:
         proxy = _proxy_url()
         if proxy:
             kwargs["proxy"] = proxy
+        session = _session_in()
+        if session is not None:
+            kwargs["headers"] = {"User-Agent": session["ua"]}
+            kwargs["cookies"] = session["cookies"]
         try:
             response = requests.get(url, **kwargs)
         except Exception as exc:
@@ -837,6 +882,8 @@ class PlaywrightAdapter:
                          headers=headers)
         if unsettled:
             result["err"] = "javascript_required"
+        elif _exporting_session():
+            result["session"] = _browser_session(self.page.context, self.page, self.page.url)
         return result
 
     def close(self) -> None:
@@ -985,7 +1032,11 @@ class ScraplingAdapter:
             # the real page. Trust the body only for this successful response.
             headers.pop("cf-mitigated")
         final_url = str(getattr(response, "url", url) or url)
-        return _result(status, final_url, body, len(history), headers=headers)
+        result = _result(status, final_url, body, len(history), headers=headers)
+        if _exporting_session():
+            result["session"] = _browser_session(
+                getattr(self.session, "context", None), None, final_url)
+        return result
 
     def close(self) -> None:
         if hasattr(self, "session"):
@@ -1218,6 +1269,11 @@ def run_probe(
             html = body if isinstance(body, str) else ""
             payload["html"] = html
             payload["text"] = html_to_text(html)
+            # Only a page that passed is worth replaying.
+            session = response.get("session")
+            if (session and isinstance(status, int) and 200 <= status < 300
+                    and challenge == "none" and not payload["err"]):
+                payload["session"] = session
         return payload
     except Exception as exc:
         finished = clock()

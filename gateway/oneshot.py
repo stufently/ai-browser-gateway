@@ -3,6 +3,8 @@
 The ladder runs direct; ABG_EGRESS_PROXY (a proxy URL, read from the
 environment so credentials stay out of argv) adds one curl_cffi step through
 that proxy after the browsers, for sites that block the host's address.
+ABG_SESSION_DIR (a mounted directory) keeps solved-challenge sessions between
+runs, so a later run of the same host can skip the browser.
 """
 import argparse
 from dataclasses import asdict
@@ -20,6 +22,7 @@ from gateway.product import ProductRequest, plan_product, run_product
 
 
 EGRESS_ENV = 'ABG_EGRESS_PROXY'
+SESSION_DIR_ENV = 'ABG_SESSION_DIR'
 EGRESS_PROFILE = 'proxy'
 _PROXY_SCHEMES = frozenset({'http', 'https', 'socks5', 'socks5h'})
 
@@ -109,6 +112,15 @@ class _Parser(argparse.ArgumentParser):
         raise ValueError('invalid_request')
 
 
+def session_store():
+    """Sessions persist between runs only in a directory the caller mounts."""
+    directory = os.environ.get(SESSION_DIR_ENV)
+    if not directory:
+        return None
+    from gateway.sessions import FileSessionStore
+    return FileSessionStore(directory)
+
+
 def main(argv=None):
     try:
         try:
@@ -141,7 +153,7 @@ def main(argv=None):
             for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
                 previous[signum] = signal.signal(signum, interrupt)
             result = run_product(request, ProductFetcher(
-                request.url, profiles=profiles, launcher=launcher))
+                request.url, profiles=profiles, launcher=launcher, sessions=session_store()))
         except _Interrupted:
             print('{"error": "interrupted"}', file=sys.stderr)
             return 4

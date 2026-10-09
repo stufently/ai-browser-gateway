@@ -190,6 +190,8 @@ def make_service(environ=None, *, fetcher_factory=None):
         raise ConfigError from None
 
     launches = LaunchGate()
+    from gateway.sessions import SessionStore
+    sessions = SessionStore()
 
     def factory(url, **kwargs):
         launches.check()
@@ -199,7 +201,7 @@ def make_service(environ=None, *, fetcher_factory=None):
             from gateway.fetch import ProductFetcher
             fetcher = ProductFetcher(
                 url, launcher=LabeledLauncher(instance, os.urandom(16).hex(), gate=launches),
-                network=network, **kwargs)
+                network=network, sessions=sessions, **kwargs)
 
         def fetch(step, budget_ms):
             # limit_fetcher calls this AFTER acquiring server.slots. Keep that
@@ -213,6 +215,7 @@ def make_service(environ=None, *, fetcher_factory=None):
         fetcher_factory=factory, rotate_profiles=True)
     server.instance = instance
     server.launches = launches
+    server.sessions = sessions
     return server
 
 

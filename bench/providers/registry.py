@@ -39,7 +39,7 @@ def by_name(name: str) -> Provider:
 def build_argv(provider: Provider, *, url: str, sentinel: str | None = None, network=None,
                proxy_env: str | None = None, probe_bind=None,
                include_content: bool = False, budget_ms: int | None = None,
-               content_only: bool = False) -> list[str]:
+               content_only: bool = False, env_names: tuple[str, ...] = ()) -> list[str]:
     """argv_extra holds Docker options, never shell fragments or probe arguments."""
     argv = ['docker', 'run', '--rm', '--user', '1002:1002']
     if provider.kind == 'browser':
@@ -49,6 +49,9 @@ def build_argv(provider: Provider, *, url: str, sentinel: str | None = None, net
     argv.extend(provider.argv_extra)
     if proxy_env is not None:
         argv.extend(['--env', proxy_env])
+    for name in env_names:
+        # Name only: Docker reads the value from the launcher's environment.
+        argv.extend(['--env', name])
     if probe_bind is not None:
         source = str(Path(probe_bind).resolve())
         target = '/opt/abg' if Path(source).is_dir() else '/opt/abg/probe.py'

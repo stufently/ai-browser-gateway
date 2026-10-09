@@ -1,6 +1,9 @@
 """Docker-backed transport for gateway.engine.run."""
 from __future__ import annotations
 
+from urllib.parse import urlsplit
+
+from bench.models import ChallengeType, FailureReason
 from bench.runner.execute import fetch_page
 from gateway.models import PlanStep, ProviderReply
 
@@ -34,23 +37,44 @@ class BenchFetcher:
 
 
 class ProductFetcher:
-    """One content-only cold request, with per-instance route configuration."""
+    """One content-only cold request, with per-instance route configuration.
+
+    With a session store, the direct HTTP step replays the cookies and UA a
+    browser left for this host, and a direct browser that passes leaves its
+    own. A replay that does not pass is dropped. Cookies are bound to the
+    address that solved them, so egress steps never use or leave one.
+    """
 
     def __init__(self, url, *, entrances=None, profiles=None,
-                 launcher=None, network=None):
+                 launcher=None, network=None, sessions=None):
         self.url = url
         self.entrances = dict(entrances or {})
         self.profiles = dict(profiles or {})
         self.launcher = launcher
         self.network = network
+        self.sessions = sessions
+        self.host = urlsplit(url).hostname
 
     def __call__(self, step: PlanStep, budget_ms: int) -> ProviderReply:
         from bench.runner.execute import fetch_content
         egress = (None if step.egress_profile == 'direct' else
                   (step.egress_profile, self.profiles.get(step.egress_profile)))
+        options = {}
+        replay = None
+        if self.sessions is not None and egress is None and self.host:
+            if step.purpose == 'http':
+                replay = self.sessions.get(self.host)
+                if replay is not None:
+                    options['session'] = replay
+            elif step.purpose == 'browser':
+                options['on_session'] = lambda value: self.sessions.put(self.host, value)
         result, age = fetch_content(
             step.provider, url=self.url, budget_ms=budget_ms, launcher=self.launcher,
             egress=egress, entrance_url=self.entrances.get(step.provider),
-            network=self.network,
+            network=self.network, **options,
         )
+        if replay is not None and not (
+                result.error_type == FailureReason.none and type(result.status) is int
+                and 200 <= result.status < 300 and result.challenge == ChallengeType.none):
+            self.sessions.drop(self.host)
         return ProviderReply(result, age)

@@ -124,6 +124,29 @@ with one `curl_cffi` attempt through it (profile `proxy`), for sites that
 block the host's address. Pass it as `docker run -e ABG_EGRESS_PROXY` so the
 credentials stay out of the command line.
 
+### Reusing a solved challenge
+
+When a browser step passes a challenge, the cookies and User-Agent it ended
+with can let the cheap HTTP step read the same host next time. Measured on
+2026-10-09: `bizprofile.net` (Cloudflare `cf_clearance`) took 21.5 s through
+Scrapling, then 1.2–1.4 s through `curl_cffi` alone; `rbc.ru` (Qrator) took
+6.2 s, then about 1 s. The self-hosted service keeps these sessions in memory.
+The one-shot image keeps them only in a directory you mount and name in
+`ABG_SESSION_DIR`:
+
+```sh
+mkdir -m 700 -p ~/.cache/abg-sessions
+docker run --rm --user "$(id -u):$(id -g)" -v ~/.cache/abg-sessions:/sessions \
+  -e ABG_SESSION_DIR=/sessions ghcr.io/stufently/ai-browser-gateway-oneshot:latest \
+  https://cloudflare-protected.example/ --format markdown --budget-ms 90000
+```
+
+A session belongs to one host and lasts at most 30 minutes. Only direct steps
+use one, because cookies are bound to the address that solved them. A replay
+that does not pass discards the session, and the ladder continues as usual.
+Each file is `0600` and holds cookies of an anonymous visit; treat the
+directory as private.
+
 ## MCP server for AI agents
 
 `scripts/abg-mcp` (Python 3.12+, stdlib only) exposes one MCP tool, `fetch_page`,
