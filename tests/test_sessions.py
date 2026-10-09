@@ -224,9 +224,11 @@ class ProductFetcherSessionTests(unittest.TestCase):
         self.assertEqual(store.get('a.test'), SESSION)
 
     def test_failed_replay_drops_the_session(self):
+        from dataclasses import replace
+        offsite = replace(result(), final_url='https://b.test/')
         for reply in (result(status=403), result(challenge=C.suspected),
                       result(status=None, error=F.timeout), result(status=302),
-                      result(status=200, error=F.provider_error)):
+                      result(status=200, error=F.provider_error), offsite):
             with self.subTest(reply=reply):
                 store = SessionStore()
                 store.put('a.test', SESSION)
@@ -348,37 +350,6 @@ class ProbeSessionTests(unittest.TestCase):
     def setUpClass(cls):
         cls.probe = load_probe()
 
-    def curl(self, environ):
-        captured = {}
-
-        class Response:
-            status_code, url, content, history, headers = 200, 'https://a.test/', b'<p>x</p>', [], {}
-
-        def get(url, **kwargs):
-            captured.update(kwargs)
-            return Response()
-
-        plain_get = get
-
-        class Session:
-            def get(self, url, **kwargs):
-                return plain_get(url, **kwargs)
-
-            def close(self):
-                pass
-        curl_cffi = types.ModuleType('curl_cffi')
-        requests_mod = types.ModuleType('curl_cffi.requests')
-        requests_mod.get = get
-        requests_mod.Session = Session
-        curl_cffi.requests = requests_mod
-        with patch.dict(sys.modules, {'curl_cffi': curl_cffi, 'curl_cffi.requests': requests_mod}), \
-                patch.dict(os.environ, environ, clear=False):
-            for name in ('ABG_SESSION', 'ABG_PROXY'):
-                if name not in environ:
-                    os.environ.pop(name, None)
-            self.probe.CurlCffiAdapter().navigate('https://a.test/')
-        return captured
-
     def curl_chain(self, environ, responses):
         calls = []
 
@@ -396,9 +367,17 @@ class ProbeSessionTests(unittest.TestCase):
             calls.append((url, kwargs))
             return next(chain)
 
+        class Jar:
+            def __init__(self):
+                self.set_calls = []
+
+            def set(self, name, value, domain=''):
+                self.set_calls.append((name, value, domain))
+
         class Session:
             def __init__(self):
                 self.closed = False
+                self.cookies = Jar()
                 clients.append(self)
 
             def get(self, url, **kwargs):
@@ -425,24 +404,33 @@ class ProbeSessionTests(unittest.TestCase):
         calls, value = self.curl_chain(env, [(302, 'https://a.test/', '/next'),
                                               (200, 'https://a.test/next')])
         self.assertEqual([url for url, _ in calls], ['https://a.test/', 'https://a.test/next'])
-        # Both hops share one client (its cookie jar) and it is closed after.
+        # Both hops share one client (its cookie jar, seeded once) and it is closed after.
         self.assertEqual(len(self.clients), 1)
-        self.assertTrue(all(kw['client'] is self.clients[0] for _, kw in calls))
+        self.assertEqual(self.clients[0].cookies.set_calls, [('cf_clearance', 'v1', 'a.test')])
+        self.assertTrue(all(kw['client'] is self.clients[0] and kw['allow_redirects'] is False
+                            and 'cookies' not in kw for _, kw in calls))
         self.assertTrue(self.clients[0].closed)
+        self.assertEqual((value['status'], value['final_url'], value['redirects']),
+                         (200, 'https://a.test/next', 1))
         for status in (301, 303, 307, 308):
             with self.subTest(status=status):
                 hops, _ = self.curl_chain(env, [(status, 'https://a.test/', '/n'),
                                                 (200, 'https://a.test/n')])
                 self.assertEqual(len(hops), 2)
-        self.assertTrue(all(kw['allow_redirects'] is False and kw['cookies'] == {'cf_clearance': 'v1'}
-                            for _, kw in calls))
-        self.assertEqual((value['status'], value['final_url'], value['redirects']),
-                         (200, 'https://a.test/next', 1))
+
+    def test_leaving_the_host_falls_back_to_an_ordinary_request(self):
+        env = {'ABG_SESSION': json.dumps(SESSION)}
         for location in ('http://a.test/plain', 'https://b.test/x', '//b.test/x'):
             with self.subTest(location=location):
-                calls, value = self.curl_chain(env, [(301, 'https://a.test/', location)])
-                self.assertEqual(len(calls), 1)
-                self.assertEqual(value['status'], 301)
+                calls, value = self.curl_chain(env, [(301, 'https://a.test/', location),
+                                                      (200, 'https://b.test/x')])
+                self.assertEqual(len(calls), 2)
+                url, plain = calls[1]
+                self.assertEqual(url, 'https://a.test/')
+                self.assertNotIn('client', plain)
+                self.assertNotIn('headers', plain)
+                self.assertTrue(plain['allow_redirects'])
+                self.assertEqual((value['status'], value['final_url']), (200, 'https://b.test/x'))
 
     def test_replay_redirects_are_capped(self):
         env = {'ABG_SESSION': json.dumps(SESSION)}
@@ -458,11 +446,10 @@ class ProbeSessionTests(unittest.TestCase):
         self.assertNotIn('client', calls[0][1])
         self.assertEqual(self.clients, [])
 
-    def test_curl_replays_cookies_and_user_agent(self):
-        captured = self.curl({'ABG_SESSION': json.dumps(SESSION)})
-        self.assertEqual(captured['headers'], {'User-Agent': SESSION['ua']})
-        self.assertEqual(captured['cookies'], {'cf_clearance': 'v1'})
-        self.assertEqual(captured['impersonate'], 'chrome')
+    def test_curl_replays_user_agent_with_impersonation(self):
+        calls, _ = self.curl_chain({'ABG_SESSION': json.dumps(SESSION)}, [(200, 'https://a.test/')])
+        self.assertEqual(calls[0][1]['headers'], {'User-Agent': SESSION['ua']})
+        self.assertEqual(calls[0][1]['impersonate'], 'chrome')
 
     def test_curl_ignores_absent_or_broken_session(self):
         cookie = [{'name': 'n', 'value': 'v'}]
@@ -471,9 +458,11 @@ class ProbeSessionTests(unittest.TestCase):
                     json.dumps({'ua': 'x', 'cookies': [{'name': 1, 'value': 'v'}]}),
                     json.dumps({'ua': 'x', 'cookies': 'c'})):
             with self.subTest(raw=raw):
-                captured = self.curl({} if raw is None else {'ABG_SESSION': raw})
-                self.assertNotIn('headers', captured)
-                self.assertNotIn('cookies', captured)
+                calls, _ = self.curl_chain({} if raw is None else {'ABG_SESSION': raw},
+                                           [(200, 'https://a.test/')])
+                self.assertNotIn('headers', calls[0][1])
+                self.assertNotIn('client', calls[0][1])
+                self.assertEqual(self.clients, [])
 
     def test_browser_session_shape_and_cookie_cap(self):
         class Page:

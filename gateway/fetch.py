@@ -78,6 +78,7 @@ class ProductFetcher:
         )
         if replay is not None and not (
                 result.error_type == FailureReason.none and type(result.status) is int
-                and 200 <= result.status < 300 and result.challenge == ChallengeType.none):
+                and 200 <= result.status < 300 and result.challenge == ChallengeType.none
+                and urlsplit(result.final_url).hostname == self.host):
             self.sessions.drop(self.host, replay)
         return ProviderReply(result, age)

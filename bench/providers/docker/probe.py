@@ -787,11 +787,14 @@ class CurlCffiAdapter:
             # The replayed cookies keep no Secure flag or domain, so redirects
             # are followed by hand and only to https on the same host; any
             # other hop ends the replay at its 3xx.
-            kwargs.update(headers={"User-Agent": session["ua"]}, cookies=session["cookies"],
-                          allow_redirects=False)
+            kwargs.update(headers={"User-Agent": session["ua"]}, allow_redirects=False)
         # One client for the whole replay, so cookies set on a redirect reach
         # the next hop as they would in a browser.
-        client = requests.Session() if session is not None else None
+        client = None
+        if session is not None:
+            client = requests.Session()
+            for name, value in session["cookies"].items():
+                client.cookies.set(name, value, domain=urlparse(url).hostname or "")
         try:
             get = client.get if client is not None else requests.get
             response = get(url, **kwargs)
@@ -802,6 +805,12 @@ class CurlCffiAdapter:
                     _normalize_headers(response.headers).get("location", "")))
                 parsed = urlparse(target)
                 if parsed.scheme != "https" or parsed.hostname != urlparse(url).hostname:
+                    # Leaving the host ends the replay; fetch as if there were
+                    # no session, so the ladder sees the ordinary answer.
+                    kwargs.pop("headers")
+                    kwargs.update(allow_redirects=True, timeout=_bound_timeout_s(120))
+                    response = requests.get(url, **kwargs)
+                    hops = len(response.history)
                     break
                 kwargs["timeout"] = _bound_timeout_s(120)
                 response = get(target, **kwargs)
