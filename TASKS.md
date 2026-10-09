@@ -4,6 +4,14 @@
 `CHANGELOG.md`, сюда не дублируются. Записи старше ~30–60 дней уезжают в
 `docs/worklog-archive/YYYY-MM.md`.
 
+- [x] **Кэш сессий и извлечение текста (выбор владельца «всё по очереди»,
+  09.10.2026).** Готово 09.10.2026. Кэш сессий по хосту — выпуск `0.1.5`
+  (CHANGELOG), выложен в сервис, check-sites и `abg-fetch` на onyx
+  (deploy и deploy2; на остальной флот не катали — решение владельца).
+  JSON-LD и WordPress REST замерены и не внедряются: прирост охвата 0
+  ([docs/research/12-competitor-techniques.md](docs/research/12-competitor-techniques.md)).
+  Открыто: DataDome и Kasada; glassdoor требует логина.
+
 - [x] **Детект вендоров антибот-защит (выбор владельца 09.10.2026).**
   Готово 09.10.2026, выпуск `0.1.4` (CHANGELOG). PerimeterX 429 теперь
   ведёт в браузер (wayfair 6/6), Akamai «Access Denied» помечается
