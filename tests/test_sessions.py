@@ -426,12 +426,13 @@ class ProbeSessionTests(unittest.TestCase):
                    {'name': 'b', 'value': '2', 'domain': 'a.test'},
                    {'name': 'c', 'value': '3', 'domain': '.other.test'},
                    {'name': 'd', 'value': '4', 'domain': 'xa.test'},
-                   {'name': 'e', 'value': '5'}]
+                   {'name': 'e', 'value': '5'},
+                   {'name': 'f', 'value': '6', 'domain': 'est'}]
         env = {'ABG_SESSION': json.dumps({'ua': 'UA', 'cookies': cookies})}
         self.curl_chain(env, [(200, 'https://a.test/')])
         self.assertEqual(self.clients[0].cookies.set_calls, [
             ('a', '1', '.a.test'), ('b', '2', 'a.test'), ('c', '3', 'a.test'),
-            ('d', '4', 'a.test'), ('e', '5', 'a.test')])
+            ('d', '4', 'a.test'), ('e', '5', 'a.test'), ('f', '6', 'a.test')])
 
     def test_leaving_the_host_falls_back_to_an_ordinary_request(self):
         env = {'ABG_SESSION': json.dumps(SESSION)}
