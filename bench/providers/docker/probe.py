@@ -169,7 +169,12 @@ def _exporting_session() -> bool:
     return os.environ.get("ABG_SESSION_EXPORT") == "1"
 
 
-def _browser_session(context: Any, page: Any, url: str) -> dict[str, Any] | None:
+def _browser_session(context: Any, page: Any, url: str,
+                     final_url: str) -> dict[str, Any] | None:
+    # Cookies of a page reached by redirect to another host belong to that
+    # host; they must never be filed under the one requested.
+    if urlparse(final_url).hostname != urlparse(url).hostname:
+        return None
     try:
         cookies = context.cookies(url)
         if page is None:
@@ -883,7 +888,7 @@ class PlaywrightAdapter:
         if unsettled:
             result["err"] = "javascript_required"
         elif _exporting_session():
-            result["session"] = _browser_session(self.page.context, self.page, self.page.url)
+            result["session"] = _browser_session(self.page.context, self.page, url, self.page.url)
         return result
 
     def close(self) -> None:
@@ -1035,7 +1040,7 @@ class ScraplingAdapter:
         result = _result(status, final_url, body, len(history), headers=headers)
         if _exporting_session():
             result["session"] = _browser_session(
-                getattr(self.session, "context", None), None, final_url)
+                getattr(self.session, "context", None), None, url, final_url)
         return result
 
     def close(self) -> None:

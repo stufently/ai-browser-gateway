@@ -73,6 +73,15 @@ class SessionStoreTests(unittest.TestCase):
         clock.now += 1
         self.assertIsNone(store.get('a.test'))
 
+    def test_late_drop_keeps_a_newer_session(self):
+        store = SessionStore()
+        newer = {'ua': 'UA2', 'cookies': [{'name': 'cf_clearance', 'value': 'v2'}]}
+        store.put('a.test', newer)
+        store.drop('a.test', SESSION)
+        self.assertEqual(store.get('a.test'), newer)
+        store.drop('a.test', newer)
+        self.assertIsNone(store.get('a.test'))
+
     def test_invalid_session_or_host_is_ignored_and_drop_removes(self):
         store = SessionStore()
         store.put('a.test', {'ua': 'x', 'cookies': []})
@@ -137,6 +146,39 @@ class FileSessionStoreTests(unittest.TestCase):
         self.assertIsNone(self.store.get('a.test'))
         self.store.drop('missing.test')
 
+    def test_late_drop_keeps_a_newer_session(self):
+        newer = {'ua': 'UA2', 'cookies': [{'name': 'cf_clearance', 'value': 'v2'}]}
+        self.store.put('a.test', newer)
+        self.store.drop('a.test', SESSION)
+        self.assertEqual(self.store.get('a.test'), newer)
+        self.store.drop('a.test', newer)
+        self.assertIsNone(self.store.get('a.test'))
+
+    def test_shared_or_foreign_directory_is_refused(self):
+        os.makedirs(self.dir, mode=0o700)
+        self.store.put('a.test', SESSION)
+        os.chmod(self.dir, 0o770)
+        self.assertIsNone(self.store.get('a.test'))
+        self.store.put('b.test', SESSION)
+        self.assertFalse(os.path.exists(os.path.join(self.dir, 'b.test.json')))
+        os.chmod(self.dir, 0o700)
+        self.assertEqual(self.store.get('a.test'), SESSION)
+        with patch('os.getuid', return_value=os.getuid() + 1):
+            self.assertIsNone(self.store.get('a.test'))
+
+    def test_planted_link_is_neither_followed_nor_written_through(self):
+        os.makedirs(self.dir, mode=0o700)
+        outside = os.path.join(os.path.dirname(self.dir), 'outside.json')
+        with open(outside, 'w') as stream:
+            stream.write(json.dumps({'deadline': 9e9, 'session': SESSION}))
+        os.symlink(outside, os.path.join(self.dir, 'a.test.json'))
+        self.assertIsNone(self.store.get('a.test'))
+        self.store.put('a.test', {'ua': 'UA2', 'cookies': [{'name': 'n', 'value': 'v'}]})
+        with open(outside) as stream:
+            self.assertEqual(json.loads(stream.read())['session'], SESSION)
+        self.assertFalse(os.path.islink(os.path.join(self.dir, 'a.test.json')))
+        self.assertEqual([n for n in os.listdir(self.dir) if n.startswith('.')], [])
+
 
 class ProductFetcherSessionTests(unittest.TestCase):
     def run_step(self, step, reply, store, *, report=None):
@@ -192,6 +234,32 @@ class ProductFetcherSessionTests(unittest.TestCase):
                 self.assertNotIn('session', kwargs)
                 self.assertNotIn('on_session', kwargs)
         self.assertEqual(store.get('a.test'), SESSION)
+
+    def test_plain_http_never_uses_sessions(self):
+        store = SessionStore()
+        store.put('a.test', SESSION)
+        for step in (PlanStep('curl_cffi', 'direct', 'http'), PlanStep('patchright', 'direct', 'browser')):
+            with self.subTest(step=step):
+                calls = []
+                def fake(provider, **kwargs):
+                    calls.append(kwargs)
+                    return result(status=403), None
+                with patch('bench.runner.execute.fetch_content', fake):
+                    ProductFetcher('http://a.test/page', sessions=store)(step, 1000)
+                self.assertNotIn('session', calls[0])
+                self.assertNotIn('on_session', calls[0])
+        self.assertEqual(store.get('a.test'), SESSION)
+
+    def test_late_failure_keeps_a_session_saved_meanwhile(self):
+        store = SessionStore()
+        store.put('a.test', SESSION)
+        newer = {'ua': 'UA2', 'cookies': [{'name': 'cf_clearance', 'value': 'v2'}]}
+        def fake(provider, **kwargs):
+            store.put('a.test', newer)
+            return result(status=403), None
+        with patch('bench.runner.execute.fetch_content', fake):
+            ProductFetcher('https://a.test/', sessions=store)(PlanStep('curl_cffi', 'direct', 'http'), 1000)
+        self.assertEqual(store.get('a.test'), newer)
 
     def test_without_store_no_session_options(self):
         for step in (PlanStep('curl_cffi', 'direct', 'http'), PlanStep('scrapling', 'direct', 'browser')):
@@ -312,12 +380,17 @@ class ProbeSessionTests(unittest.TestCase):
                 assert url == 'https://a.test/'
                 return self._cookies
         many = [{'name': f'n{i}', 'value': 'v', 'domain': 'a.test'} for i in range(70)]
-        session = self.probe._browser_session(Context(many), None, 'https://a.test/')
+        session = self.probe._browser_session(Context(many), None, 'https://a.test/',
+                                              'https://a.test/')
         self.assertEqual(session['ua'], 'UA')
         self.assertEqual(len(session['cookies']), 64)
         self.assertEqual(session['cookies'][0], {'name': 'n0', 'value': 'v'})
-        self.assertIsNone(self.probe._browser_session(Context([]), None, 'https://a.test/'))
-        self.assertIsNone(self.probe._browser_session(None, None, 'https://a.test/'))
+        self.assertIsNone(self.probe._browser_session(Context([]), None, 'https://a.test/',
+                                                      'https://a.test/'))
+        self.assertIsNone(self.probe._browser_session(None, None, 'https://a.test/', 'https://a.test/'))
+        # A redirect to another host never files that host's cookies here.
+        self.assertIsNone(self.probe._browser_session(Context(many), None, 'https://a.test/',
+                                                      'https://b.test/x'))
 
     def run_probe(self, status, body, session):
         class Adapter:

@@ -141,11 +141,15 @@ docker run --rm --user "$(id -u):$(id -g)" -v ~/.cache/abg-sessions:/sessions \
   https://cloudflare-protected.example/ --format markdown --budget-ms 90000
 ```
 
-A session belongs to one host and lasts at most 30 minutes. Only direct steps
-use one, because cookies are bound to the address that solved them. A replay
-that does not pass discards the session, and the ladder continues as usual.
-Each file is `0600` and holds cookies of an anonymous visit; treat the
-directory as private.
+A session belongs to one host and lasts at most 30 minutes. Only direct
+`https://` steps use one, because cookies are bound to the address that solved
+them and the stored cookies keep no Secure flag. A page reached by redirect to
+another host leaves no session. A replay that does not pass discards the
+session, and the ladder continues as usual. Each file is `0600` and holds
+cookies of an anonymous visit; a directory that another user owns or can write
+to is ignored. Between gateway and provider the session travels in an
+environment variable, the same way as the proxy URL: anyone who can run
+`docker inspect` on the host can read it while the provider container lives.
 
 ## MCP server for AI agents
 

@@ -41,8 +41,10 @@ class ProductFetcher:
 
     With a session store, the direct HTTP step replays the cookies and UA a
     browser left for this host, and a direct browser that passes leaves its
-    own. A replay that does not pass is dropped. Cookies are bound to the
-    address that solved them, so egress steps never use or leave one.
+    own. A replay that does not pass is dropped, unless a newer session took
+    its place. Cookies are bound to the address that solved them, so egress
+    steps never use or leave one; plain http never does either, since the
+    stored cookies carry no Secure flag.
     """
 
     def __init__(self, url, *, entrances=None, profiles=None,
@@ -61,7 +63,8 @@ class ProductFetcher:
                   (step.egress_profile, self.profiles.get(step.egress_profile)))
         options = {}
         replay = None
-        if self.sessions is not None and egress is None and self.host:
+        if (self.sessions is not None and egress is None and self.host
+                and urlsplit(self.url).scheme == 'https'):
             if step.purpose == 'http':
                 replay = self.sessions.get(self.host)
                 if replay is not None:
@@ -76,5 +79,5 @@ class ProductFetcher:
         if replay is not None and not (
                 result.error_type == FailureReason.none and type(result.status) is int
                 and 200 <= result.status < 300 and result.challenge == ChallengeType.none):
-            self.sessions.drop(self.host)
+            self.sessions.drop(self.host, replay)
         return ProviderReply(result, age)
