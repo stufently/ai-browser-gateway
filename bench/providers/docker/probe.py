@@ -352,13 +352,42 @@ def _has_qrator_loader(text: str) -> bool:
 _PX_BLOCK_TITLE = "access to this page has been denied"
 _PX_APP_ID = "window._pxappid"
 _PX_STATUSES = frozenset({403, 429})
-_LIVE_SCRIPTS = re.compile(r"<script\b[^>]*>(.*?)</script\s*>", re.I | re.S)
-_DEAD_MARKUP = re.compile(r"<!--.*?-->|<template\b.*?</template\s*>", re.I | re.S)
+
+
+class _LiveScripts(HTMLParser):
+    """Inline script text that runs: comments and <template> (nested too) never do."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.texts: list[str] = []
+        self._template_depth = 0
+        self._in_script = False
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "template":
+            self._template_depth += 1
+        elif tag == "script":
+            self._in_script = not self._template_depth
+
+    def handle_endtag(self, tag):
+        if tag == "template" and self._template_depth:
+            self._template_depth -= 1
+        elif tag == "script":
+            self._in_script = False
+
+    def handle_data(self, data):
+        if self._in_script:
+            self.texts.append(data)
 
 
 def _has_px_app_id(text: str) -> bool:
-    live = _DEAD_MARKUP.sub(" ", text)
-    return any(_PX_APP_ID in script.lower() for script in _LIVE_SCRIPTS.findall(live))
+    parser = _LiveScripts()
+    try:
+        parser.feed(text)
+        parser.close()
+    except Exception:
+        pass
+    return any(_PX_APP_ID in script.lower() for script in parser.texts)
 # Akamai's edge "Access Denied" is a verdict on the address: both browsers got
 # the same 403 on homedepot.com and cnbc.com, a proxy got 200 on cnbc.com
 # (2026-10-09). The reference link is entity-encoded in the body.

@@ -51,6 +51,16 @@ class NextStepTests(unittest.TestCase):
             Step.change_egress,
         )
 
+    def test_ip_blocked_changes_egress_once(self):
+        self.assertIs(
+            next_step(FailureReason.ip_blocked, ChallengeType.ip_blocked, egress_changed=False),
+            Step.change_egress,
+        )
+        self.assertIs(
+            next_step(FailureReason.ip_blocked, ChallengeType.ip_blocked, egress_changed=True),
+            Step.human,
+        )
+
     def test_network_and_5xx_retry_later(self):
         for reason in (
             FailureReason.timeout,

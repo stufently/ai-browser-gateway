@@ -104,11 +104,16 @@ class DetectChallengeTests(unittest.TestCase):
                      "<title>Access to this page has been denied.</title>" + app_id,
                      title + "<p>window._pxAppId = 'PX1';</p>",
                      title + "<!-- <script>window._pxAppId = 'PX1';</script> -->",
-                     title + "<template><script>window._pxAppId = 1;</script></template>"):
+                     title + "<template><script>window._pxAppId = 1;</script></template>",
+                     title + "<template><template></template>"
+                             "<script>window._pxAppId = 1;</script></template>"):
             with self.subTest(body=body):
                 self.assertEqual(self.detect(429, {}, body)[0], "rate_limited")
-        self.assertEqual(self.detect(429, {}, title + app_id),
-                         ("suspected", ("body_perimeterx_block",)))
+        for body in (title + app_id, title + "<template></template>" + app_id,
+                     title + "<SCRIPT type=module>window._pxAppId='X'</SCRIPT>"):
+            with self.subTest(body=body):
+                self.assertEqual(self.detect(429, {}, body),
+                                 ("suspected", ("body_perimeterx_block",)))
 
     def test_akamai_denial_fixture_is_ip_blocked_only_on_403(self):
         body = fixture("akamai_access_denied_403.html")
