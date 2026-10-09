@@ -138,14 +138,18 @@ class FileSessionStoreTests(unittest.TestCase):
         self.assertEqual(os.listdir(self.dir) if os.path.isdir(self.dir) else [], [])
 
     def test_corrupt_or_foreign_file_reads_as_none(self):
-        os.makedirs(self.dir)
+        os.makedirs(self.dir, mode=0o700)
         path = os.path.join(self.dir, 'a.test.json')
         for content in ('not json', '{}', json.dumps({'deadline': 'x', 'session': SESSION}),
-                        json.dumps({'deadline': 9e9, 'session': {'ua': 'x', 'cookies': []}})):
+                        json.dumps({'deadline': 9e9, 'session': {'ua': 'x', 'cookies': []}}),
+                        json.dumps({'deadline': None, 'session': SESSION}), '[]'):
             with self.subTest(content=content):
                 with open(path, 'w') as stream:
                     stream.write(content)
                 self.assertIsNone(self.store.get('a.test'))
+        with open(path, 'w') as stream:
+            stream.write(json.dumps({'deadline': 9e9, 'session': SESSION}))
+        self.assertEqual(self.store.get('a.test'), SESSION)
 
     def test_drop_removes_file(self):
         self.store.put('a.test', SESSION)
