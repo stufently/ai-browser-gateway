@@ -1,0 +1,54 @@
+# Site config for .github/site/build.py. Everything else comes from README.md.
+name = "AI Browser Gateway"
+title = "AI Browser Gateway — fetch web pages for AI agents"
+headline = "Fetch web pages for AI agents: HTTP first, a headless browser when needed"
+description = "One-shot Docker image, MCP server and self-hosted API: a provider ladder of curl_cffi, Patchright and Scrapling for JavaScript pages and Cloudflare challenges."
+lang = "en"
+keywords = ["web fetching", "ai agents", "headless browser", "mcp server", "cloudflare", "web scraping", "playwright", "browser automation"]
+license = "MIT"
+license_url = "https://opensource.org/license/mit"
+category = "DeveloperApplication"
+os = "Linux"
+programming_language = "Python"
+eyebrow = "Open source · MIT · Docker image on GHCR"
+download_url = "https://github.com/stufently/ai-browser-gateway/pkgs/container/ai-browser-gateway-oneshot"
+
+# README "## <name>" sections shown on the home page, in this order (exact titles).
+landing_sections = ["Quick start", "How the provider ladder works"]
+
+# docs/ holds internal specs, plans and research notes; only README.md is rendered.
+pages = []
+docs_dir = ""
+
+features = [
+  "HTTP first: curl_cffi with browser headers and TLS impersonation, capped at 15000 ms within the total budget.",
+  "Browser only when needed: Patchright renders JavaScript pages after an eligible HTTP failure, then Scrapling with solve_cloudflare=True, while budget remains.",
+  "HTTP 200 is not proof of success: the gateway also checks content and challenge signals before accepting a page.",
+  "One-shot container: docker run with --format text, html, markdown, links or meta; no gateway API, token or Docker daemon inside the container.",
+  "MCP server for AI agents: scripts/abg-mcp exposes one stdio tool, fetch_page, on top of the self-hosted POST /v1/fetch API.",
+  "Reuses a solved challenge: cookies and User-Agent from a browser step let the HTTP step read the same host for up to 30 minutes.",
+]
+
+[[faq]]
+q = "Do I need a server and a token just to read a page?"
+a = "No. The one-shot image runs the provider ladder locally: docker run --rm ghcr.io/stufently/ai-browser-gateway-oneshot:latest https://example.com/ --format markdown. A token is only for the self-hosted POST /v1/fetch API and the MCP adapter that calls it."
+
+[[faq]]
+q = "Why does a plain HTTP client get 403 when a browser does not?"
+a = "A plain client sends non-browser headers, shows its own TLS fingerprint and does not run JavaScript, so a check can answer it with HTTP 403 or an interstitial. A browser is not an automatic win either: on the public set Patchright added no coverage over HTTP with browser headers, and Scrapling added one challenged Cloudflare target."
+
+[[faq]]
+q = "Does this project solve CAPTCHA and interactive challenges?"
+a = "No. No CAPTCHA-solving service is integrated. An interactive challenge stops the ladder, because it needs a person. The ladder does not guarantee access to every Cloudflare-protected page."
+
+[[faq]]
+q = "Can it log in and read pages behind a login wall?"
+a = "No. The gateway does not log in and does not read a page that requires an authenticated session."
+
+[[faq]]
+q = "How do I connect this to an MCP client?"
+a = "Add scripts/abg-mcp (Python 3.12+, stdlib only) as a stdio server. It exposes one tool, fetch_page, and the gateway API has to be running already. It negotiates MCP protocol versions 2025-11-25 and 2025-06-18."
+
+[[faq]]
+q = "How long should I wait for a page behind Cloudflare?"
+a = "The default budget is 30 seconds (--budget-ms 30000), which is often too short once the ladder reaches a browser. The Quick start uses 90 seconds (--budget-ms 90000) for a Cloudflare-protected page; the allowed range is 1 to 180000 milliseconds."
