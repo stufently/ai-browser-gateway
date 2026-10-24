@@ -13,3 +13,4 @@ review/
 # Local benchmark targets and their raw runs never leave the host.
 bench/targets/local.toml
 bench/local-runs/
+_site/
