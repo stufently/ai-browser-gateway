@@ -1,6 +1,6 @@
 FROM python:3.14-slim-bookworm
 
-RUN pip install --no-cache-dir "curl_cffi==0.16.3"
+RUN pip install --no-cache-dir "curl_cffi==0.17.0"
 WORKDIR /opt/abg
 COPY probe.py /opt/abg/probe.py
 ENV ABG_PROVIDER=curl_cffi
