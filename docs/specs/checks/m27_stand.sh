@@ -232,8 +232,9 @@ auth)
             "$work/p-$provider-401.json" >/dev/null \
             || fail "auth: $provider на 401 Basic: $(jq -c '{status,err}' "$work/p-$provider-401.json")"
     done
-    clean=$(docker logs "$id-target" 2>&1 | grep -c '^TARGET [^ ]* /auth401 authz=0$' || :)
-    [ "$(hits "$id-target" /auth401)" = "$clean" ] || fail "auth: Authorization ушёл сайту"
+    # Ни один запрос сайту за весь сценарий (любой путь) не несёт Authorization.
+    leaked=$(docker logs "$id-target" 2>&1 | grep -c '^TARGET .* authz=1$' || :)
+    [ "$leaked" -eq 0 ] || fail "auth: Authorization ушёл сайту ($leaked запросов)"
     # Неверный пароль у http-прокси: curl_cffi видит 407 и лестница сдаётся
     # на нём (поведение до M27); у SOCKS5 curl_cffi падает, и браузеры
     # получают отказ релея как provider_error.

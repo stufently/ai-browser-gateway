@@ -34,7 +34,8 @@ from tests.probe_m9_transport import _probe_payload  # noqa: E402
 URL = "https://example.invalid/"
 SECRET = "s3cr@t"
 ENC = "s3cr%40t"
-BASIC = "Proxy-Authorization: Basic " + base64.b64encode(f"user1:{SECRET}".encode()).decode()
+TOKEN = base64.b64encode(f"user1:{SECRET}".encode()).decode()
+BASIC = "Proxy-Authorization: Basic " + TOKEN
 RELAY_SERVER = re.compile(r"^http://127\.0\.0\.1:(\d+)$")
 FAILURES = []
 
@@ -303,7 +304,7 @@ def relay_side():
                 check(f"{label}: plain HTTP наверх", (
                     head.split("\r\n")[0], BASIC in head.split("\r\n"),
                     "proxy-authorization: basic zm9vomjhcg==" in lines,
-                    any(line.startswith("proxy-connection:") for line in lines),
+                    any(line.startswith(("proxy-connection:", "authorization:")) for line in lines),
                     "connection: close" in lines),
                     ("GET http://b.example/x?y=1 HTTP/1.1", True, False, False, True))
                 got = talk(port, b"POST http://b.example/form HTTP/1.1\r\nHost: b.example\r\n"
@@ -350,10 +351,12 @@ def relay_side():
                       [("connect", b"\x05\x01\x00\x03", b"b.example", 8000)])
                 heads = [e[1] for e in up.log if e[0] == "head"]
                 lines = [line.lower() for line in heads[-1]] if heads else []
-                check(f"{label}: запрос в origin-form без Proxy-*", (
+                check(f"{label}: запрос в origin-form без Proxy-* и Authorization", (
                     heads[-1][0] if heads else None,
-                    any(line.startswith("proxy-") for line in lines), "connection: close" in lines),
-                    ("GET /p?q=1 HTTP/1.1", False, True))
+                    any(line.startswith(("proxy-", "authorization:")) for line in lines),
+                    "connection: close" in lines,
+                    any(TOKEN.lower() in line or SECRET in line for line in lines)),
+                    ("GET /p?q=1 HTTP/1.1", False, True, False))
             adapter.close()
         up.close()
 
@@ -384,12 +387,27 @@ def cdp_world(adapter_name):
             return types.SimpleNamespace(status=200, url=url, body=b"ok")
 
         session.return_value.fetch.side_effect = fetch
-    return modules, page
+    sessions = {}
+
+    def new_cdp_session(target):
+        sessions.setdefault(id(target), []).append(Mock(name=f"cdp-{len(sessions)}"))
+        return sessions[id(target)][-1]
+
+    context = Mock()
+    context.new_cdp_session.side_effect = new_cdp_session
+    page.context = context
+    return modules, page, sessions
 
 
-def cancel_auth_side():
-    """С релеем остаётся узкий обработчик CDP: на любой вызов авторизации — CancelAuth."""
+def replay_auth(label, cdp):
+    """Шлёт события во ВСЕ подписки сессии и требует ровно ответы CancelAuth."""
     from unittest.mock import call
+    for name, event in (("Fetch.requestPaused", {"requestId": "r1"}),
+                        ("Fetch.authRequired", {"requestId": "407", "authChallenge": {"source": "Proxy"}}),
+                        ("Fetch.authRequired", {"requestId": "401", "authChallenge": {"source": "Server"}})):
+        for entry in cdp.on.call_args_list:
+            if entry.args[0] == name:
+                entry.args[1](event)
     expected = [
         call("Fetch.enable", {"handleAuthRequests": True, "patterns": [{"urlPattern": "*"}]}),
         call("Fetch.continueRequest", {"requestId": "r1"}),
@@ -398,11 +416,20 @@ def cancel_auth_side():
         call("Fetch.continueWithAuth", {"requestId": "401",
                                         "authChallengeResponse": {"response": "CancelAuth"}}),
     ]
+    check(f"{label}: только CancelAuth", cdp.send.call_args_list, expected)
+    sent = repr(cdp.mock_calls)
+    for needle in ("ProvideCredentials", SECRET, ENC, "user1"):
+        if needle in sent:
+            FAILURES.append(f"{label}: {needle!r} ушло в CDP")
+
+
+def cancel_auth_side():
+    """С релеем остаётся узкий обработчик CDP: на любой вызов авторизации — CancelAuth."""
     for proxy in (f"http://user1:{ENC}@127.0.0.1:9", f"socks5h://user1:{ENC}@127.0.0.1:9",
                   "http://user1@127.0.0.1:9"):
         for adapter_name in ("patchright", "scrapling"):
             label = f"CancelAuth {adapter_name} {proxy.split(':')[0]}"
-            modules, page = cdp_world(adapter_name)
+            modules, page, sessions = cdp_world(adapter_name)
             with patch.dict(sys.modules, modules), patch.dict(os.environ, {"ABG_PROXY": proxy}):
                 adapter = PROBE.make_adapter(adapter_name)
                 adapter.start()
@@ -410,34 +437,28 @@ def cancel_auth_side():
                     if adapter_name == "scrapling":
                         for _ in range(2):
                             adapter.navigate("http://target.invalid/")
-                    context = page.context
                     check(f"{label}: одна CDP-сессия на страницу",
-                          context.new_cdp_session.call_args_list, [call(page)])
-                    cdp = context.new_cdp_session.return_value
-                    callbacks = dict(entry.args for entry in cdp.on.call_args_list)
-                    if {"Fetch.requestPaused", "Fetch.authRequired"} <= set(callbacks):
-                        callbacks["Fetch.requestPaused"]({"requestId": "r1"})
-                        callbacks["Fetch.authRequired"]({"requestId": "407",
-                                                         "authChallenge": {"source": "Proxy"}})
-                        callbacks["Fetch.authRequired"]({"requestId": "401",
-                                                         "authChallenge": {"source": "Server"}})
-                    check(f"{label}: только CancelAuth", cdp.send.call_args_list, expected)
-                    sent = repr(cdp.send.call_args_list) + repr(context.mock_calls)
-                    for needle in ("ProvideCredentials", SECRET, ENC, "user1"):
-                        if needle in sent:
-                            FAILURES.append(f"{label}: {needle!r} ушло в CDP")
+                          len(sessions.get(id(page), [])), 1)
+                    if sessions.get(id(page)):
+                        replay_auth(label, sessions[id(page)][0])
+                    check(f"{label}: креды не ушли в контекст",
+                          any(n in repr(page.context.mock_calls) for n in (SECRET, ENC, "Provide")),
+                          False)
                     if adapter_name == "patchright":
-                        pages = [c.args[1] for c in context.on.call_args_list if c.args[:1] == ("page",)]
-                        new_page = Mock(context=context)
-                        for hook in pages:
+                        hooks = [c.args[1] for c in page.context.on.call_args_list
+                                 if c.args[:1] == ("page",)]
+                        new_page = Mock(context=page.context)
+                        for hook in hooks:
                             hook(new_page)
-                        check(f"{label}: новые страницы (popup) тоже с CancelAuth",
-                              context.new_cdp_session.call_args_list[-1:], [call(new_page)])
+                        check(f"{label}: новая страница (popup) — своя CDP-сессия",
+                              len(sessions.get(id(new_page), [])), 1)
+                        if sessions.get(id(new_page)):
+                            replay_auth(f"{label} popup", sessions[id(new_page)][0])
                 finally:
                     adapter.close()
     for proxy in ("", "http://127.0.0.1:9", "socks5h://127.0.0.1:9"):
         for adapter_name in ("patchright", "scrapling"):
-            modules, page = cdp_world(adapter_name)
+            modules, page, sessions = cdp_world(adapter_name)
             with patch.dict(sys.modules, modules), patch.dict(os.environ, {"ABG_PROXY": proxy}):
                 adapter = PROBE.make_adapter(adapter_name)
                 adapter.start()
@@ -445,7 +466,7 @@ def cancel_auth_side():
                     adapter.navigate("http://target.invalid/")
                 adapter.close()
             check(f"без кредов {adapter_name} {proxy or 'без прокси'}: обработчик не включён",
-                  (page.context.new_cdp_session.called, page.route.called), (False, False))
+                  (bool(sessions), page.route.called), (False, False))
 
 
 def failing_probe(proxy, connect):

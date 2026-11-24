@@ -93,8 +93,9 @@ scrapling 0.4.15, Chrome 156), Docker под 1002:1002, gost 3.3.3 в
 изолированных сетях:
 
 - Все семь сценариев `m27_stand.sh` — `ok` три прогона подряд (2–17 с на
-  сценарий). Чекер `m27_proxy_relay.py` — `ok` трижды; шесть мутантов
-  узкого обработчика (`ProvideCredentials`, обработчик снят у patchright
+  сценарий). Чекер `m27_proxy_relay.py` — `ok` трижды; девять мутантов
+  узкого обработчика и утечек (`ProvideCredentials`, в том числе вторым
+  подписчиком и только в popup, `Authorization` сайту через SOCKS5, обработчик снят у patchright
   или scrapling, включён без релея, нет на новых страницах,
   `handleAuthRequests: False`) чекер убивает все. Сценарий `auth` на
   эталоне без обработчика падает (страница с 401 виснет), на BASE с
@@ -256,7 +257,9 @@ https-прокси с публичным сертификатом — через
    `browser.close()` бросил; релей не закрыт при упавшем launch; релей
    включён у пакета `playwright`; флаг WebRTC или `block_webrtc` пропал;
    обработчик CDP отвечает `ProvideCredentials` (или шлёт логин/пароль)
-   хоть на какой-то `source`; обработчик не включён при релее (у
+   хоть на какой-то `source`, в том числе вторым подписчиком
+   `Fetch.authRequired` или только на новых страницах; релей добавляет
+   сайту `Authorization` (через SOCKS5 или HTTP-прокси); обработчик не включён при релее (у
    patchright или у scrapling) или включён без релея; новая страница
    patchright без обработчика; `handleAuthRequests` выключен;
    one-shot всё ещё отказывает SOCKS5 с паролем; `--proxy` с userinfo
@@ -299,7 +302,7 @@ https-прокси с публичным сертификатом — через
 - **AC-001.** Полный сьют и замороженные пробы зелёные на публичном образе Python:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-002.** Файлы стендов M26/M27 и чекеры M24/M25 не изменены, чекеры M24, M25 и M27 печатают ok:
-  `bash -c 'printf "%s\n" "e1505262287c2b33acd7e596d96664016684f53282ad92b2fd87c0141a2ff9a4  docs/specs/checks/m27_proxy_relay.py" "3270966807135f578d52a7802e320fad5e2ffd0fa712794de38cd5a26cd701b7  docs/specs/checks/m27_stand.sh" "c657ac0d254fa65fcbeb837b039964f00ec5be45bd59c9a3741c667a462877a0  docs/specs/checks/m27_target.py" "934e6b16c590b021fa0fb51c5d07edaadc108e503d81dd9f86a1507ade9a287f  docs/specs/checks/m26_proxy_ladder.py" "4aa0bedf53ea6949408a87504a95f25c5e85a4a97c71214b49a3479112992e49  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m27_proxy_relay; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 timeout 300 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
+  `bash -c 'printf "%s\n" "86449844e45d1b2ea7e3bdadd6caeca0c2a349a2719f04a052d82238e55f6fcc  docs/specs/checks/m27_proxy_relay.py" "37e4962e57e89386213a319f7edfe5a74e491c6b3703ee5b42e85b22aeafa09c  docs/specs/checks/m27_stand.sh" "c657ac0d254fa65fcbeb837b039964f00ec5be45bd59c9a3741c667a462877a0  docs/specs/checks/m27_target.py" "934e6b16c590b021fa0fb51c5d07edaadc108e503d81dd9f86a1507ade9a287f  docs/specs/checks/m26_proxy_ladder.py" "4aa0bedf53ea6949408a87504a95f25c5e85a4a97c71214b49a3479112992e49  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m27_proxy_relay; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 timeout 300 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
 - **AC-003.** Чекер M26 расходится ровно в двух снятых отказах SOCKS5 с паролем, остальное (лестница, сессии, проба) по-прежнему ok:
   `bash -c 'out=$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/m26_proxy_ladder.py); test "$(printf "%s\n" "$out" | wc -l)" = 4 && test "$(printf "%s\n" "$out" | sed "s/:.*//" | LC_ALL=C sort | uniq -c | tr -s " " | tr "\n" "|")" = " 2 socks5 с паролем и браузерами| 2 socks5h с паролем и браузерами|"'`
 - **AC-004.** Стенд M26 без изменений: curl_cffi через прокси с паролем, SOCKS без кредов у всех ступеней, совместимость с ABG_EGRESS_PROXY:
@@ -319,13 +322,14 @@ https-прокси с публичным сертификатом — через
 - **AC-011.** Стенд: креды в argv по-прежнему отказ без единого запроса через прокси:
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh refuse)" = ok'`
 - **AC-012.** Изменения только в разрешённых путях, есть новый тест релея, дерево чистое:
-  `bash -c 'b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)gateway/oneshot.py" ":(exclude)tests/test_probe.py" ":(exclude)tests/test_proxy_ladder.py" ":(exclude)tests/test_oneshot.py" ":(exclude)tests/test_proxy_relay.py" && test -n "$(git diff --name-only "$b" HEAD -- bench/providers/docker/probe.py)" && test -n "$(git diff --name-only "$b" HEAD -- tests/test_proxy_relay.py)" && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
+  `bash -c 'git merge-base --is-ancestor BASE_SHA_PLACEHOLDER HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)gateway/oneshot.py" ":(exclude)tests/test_probe.py" ":(exclude)tests/test_proxy_ladder.py" ":(exclude)tests/test_oneshot.py" ":(exclude)tests/test_proxy_relay.py" && test -n "$(git diff --name-only "$b" HEAD -- bench/providers/docker/probe.py)" && test -n "$(git diff --name-only "$b" HEAD -- tests/test_proxy_relay.py)" && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
 
 Что проверяет каждый сценарий стенда — в самом `m27_stand.sh`: сети
 `--internal`, цель только за прокси, `attempts` сверяются целиком
 (провайдер, `egress_profile`, статус, `error_type`), пароль (верный и
 неверный, в сыром, `%40`- и base64-виде `user:password`) ищется в stdout,
-stderr и `docker top` во время каждого прогона; сценарий `tls` дополнительно
+stderr и `docker top` во время каждого прогона; в сценарии `auth` ни один
+запрос сайту (любой путь) не несёт `Authorization`; сценарий `tls` дополнительно
 открывает настоящим `_ProxyRelay` сырой CONNECT-туннель поверх TLS до
 прокси и гонит через него HTTP-запрос; Chrome обязан стоять на
 `--proxy-server=http://127.0.0.1:<порт>` и ни разу на адресе прокси.
@@ -335,11 +339,12 @@ stderr и `docker top` во время каждого прогона; сцена
 ## Порядок работы
 
 До первой правки — первая половина AC-012 на свежем клоне:
-`b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD` (rc 0
-обязателен: иначе BASE не тот, это blocker; вторая половина AC-012 до
-работы падает по построению — новых файлов ещё нет) и чекер M25 (команда из AC-002 для
-`m25_turnstile_click`). Затем пункты 1–5, тесты релея и чекер M27, затем
-п. 7 и AC-003, затем стенд в порядке `relay → frame → sw → socks → auth →
+`git merge-base --is-ancestor <BASE_SHA> HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD`
+(rc 0 обязателен: иначе база старше спеки или не та, это blocker; вторая
+половина AC-012 до работы падает по построению — новых файлов ещё нет) и
+чекер M25 (команда из AC-002 для `m25_turnstile_click`). Затем пункты 1–5
+и тесты релея, затем п. 7, и только потом чекер M27 (его часть про
+one-shot требует уже снятого `proxy_unsupported`) и AC-003, затем стенд в порядке `relay → frame → sw → socks → auth →
 tls → refuse`, затем AC-004 и полный сьют. На падении сценария смотреть
 `attempts`, `err` пробы и лог прокси, а не подбирать ожидания: ожидания
 стенда посчитаны на эталоне и на BASE.
