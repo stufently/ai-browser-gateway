@@ -101,11 +101,15 @@ def ladder():
 
     s = Spawns()
     res = invoke([URL], {"ABG_PROXY": EXPLICIT, "ABG_EGRESS_PROXY": EGRESS}, s)
-    check("explicit+egress: маршруты", routes(res[1]),
-          [("curl_cffi", "explicit"), ("patchright", "explicit"), ("scrapling", "explicit"),
-           ("curl_cffi", "proxy")])
+    check("explicit+egress: запасной ступени нет", routes(res[1]),
+          [("curl_cffi", "explicit"), ("patchright", "explicit"), ("scrapling", "explicit")])
     check("explicit+egress: ABG_PROXY ступеней", [env.get("ABG_PROXY") for _, env in s.calls],
-          [EXPLICIT] * 3 + [EGRESS])
+          [EXPLICIT] * 3)
+
+    s = Spawns()
+    res = invoke([URL, "--proxy", "http://flag.invalid:8080"], {"ABG_EGRESS_PROXY": EGRESS}, s)
+    check("--proxy+egress: запасной ступени нет", [env.get("ABG_PROXY") for _, env in s.calls],
+          ["http://flag.invalid:8080"] * 3)
 
     s = Spawns()
     res = invoke([URL], {"ABG_PROXY": EGRESS, "ABG_EGRESS_PROXY": EGRESS}, s)

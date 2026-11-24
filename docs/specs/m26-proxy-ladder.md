@@ -88,7 +88,7 @@ patchright, scrapling.
   постановщика (черновая копия, не в репозитории): чекер `ok`, все шесть
   сценариев стенда `ok` не меньше трёх раз (5–20 с на сценарий); полный сьют и
   замороженные пробы на эталоне зелёные (789 и 125 тестов). На BASE чекер
-  падает по делу (40 расхождений), стенд: `http`, `deny`, `compat` — FAIL,
+  падает по делу (41 расхождение), стенд: `http`, `deny`, `compat` — FAIL,
   причём первая половина `compat` (только `ABG_EGRESS_PROXY`) на BASE
   проходит — это и есть эталон обратной совместимости.
 
@@ -130,14 +130,15 @@ TLS — проверены только приём схемы и начало р
    (замороженные пробы M10–M13 это проверяют). `gateway/api_http.py` и
    сервис не трогать: их белый список ключей поле не пропускает.
 5. **Профили в one-shot.** С явным прокси: профиль `explicit` → URL прокси,
-   `route_profile='explicit'`. Если задан и `ABG_EGRESS_PROXY`: значение
-   ДРУГОЕ — запасная ступень `curl_cffi`/`proxy` остаётся последней, как
-   сейчас; значение то же (сравнение строк после `strip`) — запасная
-   ступень не добавляется (тот же адрес второй раз не пробуем). Явный
+   `route_profile='explicit'`. **Решение владельца 24.11.2026:** явный
+   прокси (`--proxy` или `ABG_PROXY`) ОТКЛЮЧАЕТ запасную ступень
+   `ABG_EGRESS_PROXY` — `egress_profiles=()`, вся лестница идёт только через
+   явный прокси, лишней попытки через другой адрес (у `fetch.sh` это прокси
+   хоста) нет, при любом значении `ABG_EGRESS_PROXY`. Невалидный
+   `ABG_EGRESS_PROXY` по-прежнему `invalid_request`. Явный
    прокси со схемой `socks5://` (без учёта регистра) после проверок п. 1–3
    переписывается в `socks5h://` — так он уходит ВСЕМ ступеням маршрута и
-   так считается scope сессий (п. 6); сравнение с `ABG_EGRESS_PROXY`
-   идёт по исходной строке. `ABG_EGRESS_PROXY` не переписывается. Без явного
+   так считается scope сессий (п. 6). `ABG_EGRESS_PROXY` не переписывается. Без явного
    прокси поведение и вывод прежние, включая `egress_profile` в
    `attempts` (`direct`/`proxy`).
 6. **Сессии.** `ProductFetcher(..., route='direct')`: сессии читаются и
@@ -173,8 +174,9 @@ TLS — проверены только приём схемы и начало р
    `tests/test_oneshot.py`), каждый отказ — с проверкой ПРИЧИНЫ (точный
    stderr) и парным входом без нарушения, который проходит:
    все три ступени с `ABG_PROXY` и `egress_profile == 'explicit'`;
-   `--proxy` сильнее `ABG_PROXY`; запасная ступень при другом и при том же
-   `ABG_EGRESS_PROXY`; только `ABG_EGRESS_PROXY` — прежняя лестница; оба
+   `--proxy` сильнее `ABG_PROXY`; явный прокси (и через `ABG_PROXY`, и через
+   `--proxy`) при заданном `ABG_EGRESS_PROXY` — ровно три ступени
+   `explicit`, запасной нет; только `ABG_EGRESS_PROXY` — прежняя лестница; оба
    отказа и `invalid_request` — без единой пробы; пароль не появляется в
    stdout, stderr и argv проб; scope сессий (тот же прокси переигрывает,
    direct не берёт сессию прокси, другой логин/порт — другой каталог,
@@ -190,12 +192,12 @@ TLS — проверены только приём схемы и начало р
 пароль», пропускающий логин без пароля); снят отказ socks5-с-паролем или
 он не учитывает `--no-browser`; `socks5h` выпал из проверки отказа;
 браузерная ступень на `direct` при явном прокси; запасная ступень
-удалена при другом `ABG_EGRESS_PROXY` или оставлена при том же; пароль
+оставлена при явном прокси (для `ABG_PROXY` или для `--proxy`) или
+удалена без него; пароль
 вошёл в `identity`; логин или порт выпал из `identity`; сессия у
 запасной ступени; снята проверка корня сессий; снят маппинг
 `socks5h`→`socks5` или явного `socks5`→`socks5h`; маппинг задел
-`ABG_EGRESS_PROXY`; сравнение с `ABG_EGRESS_PROXY` после замены схемы;
-`PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK` уходит в пробу;
+`ABG_EGRESS_PROXY`; `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK` уходит в пробу;
 `redact` без раскодированного пароля.
 
 ## Не трогать
@@ -226,7 +228,7 @@ TLS — проверены только приём схемы и начало р
 - **AC-001.** Полный сьют и замороженные пробы зелёные на публичном образе Python:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-002.** Файлы стенда и чекеры M24/M25 не изменены, все три чекера печатают ok:
-  `bash -c 'printf "%s\n" "7499cb8df4ecf1b4813b1bb21e0eaa2c84919ac55c1e02784441a65b1e300bef  docs/specs/checks/m26_proxy_ladder.py" "1c4d36dbc702cec28161853f9f14cc56e8b4b02f1ceaa1b217ce72f297a82778  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m26_proxy_ladder; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
+  `bash -c 'printf "%s\n" "934e6b16c590b021fa0fb51c5d07edaadc108e503d81dd9f86a1507ade9a287f  docs/specs/checks/m26_proxy_ladder.py" "4aa0bedf53ea6949408a87504a95f25c5e85a4a97c71214b49a3479112992e49  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m26_proxy_ladder; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
 - **AC-003.** Стенд: без прокси цель недостижима, с HTTP-прокси с паролем curl_cffi берёт её через прокси:
   `bash -c 'test "$(bash docs/specs/checks/m26_stand.sh http)" = ok'`
 - **AC-004.** Стенд: браузерная ступень patchright идёт через прокси (страница с текстом только из JS):
@@ -235,7 +237,7 @@ TLS — проверены только приём схемы и начало р
   `bash -c 'test "$(bash docs/specs/checks/m26_stand.sh deny)" = ok'`
 - **AC-006.** Стенд: socks5h и socks5 без кредов, все три ступени через прокси:
   `bash -c 'test "$(bash docs/specs/checks/m26_stand.sh socks)" = ok'`
-- **AC-007.** Стенд: обратная совместимость ABG_EGRESS_PROXY и его стык с явным прокси:
+- **AC-007.** Стенд: без явного прокси ABG_EGRESS_PROXY работает как прежде (запасная ступень берёт цель); с явным прокси запасной ступени нет и цель не получает ни одного запроса через прокси ABG_EGRESS_PROXY:
   `bash -c 'test "$(bash docs/specs/checks/m26_stand.sh compat)" = ok'`
 - **AC-008.** Стенд: отказы с причиной без единого запроса через прокси, `--no-browser` с SOCKS5-паролем, `--proxy` сильнее `ABG_PROXY`:
   `bash -c 'test "$(bash docs/specs/checks/m26_stand.sh refuse)" = ok'`
@@ -300,7 +302,7 @@ Docker (нет образа, не создаётся сеть) — `blocked` с 
 
 Опирается на M25 (в `main`): её код в `probe.py` не трогается, её чекер
 обязан остаться `ok` (AC-002). Обещает следующим: one-shot принимает
-`ABG_PROXY`/`--proxy`, все ступени идут через него, отказы
+`ABG_PROXY`/`--proxy`, все ступени идут только через него (без запасной `ABG_EGRESS_PROXY`), отказы
 `proxy_credentials_in_argv`/`proxy_unsupported` стабильны (на них
 опирается обёртка скила).
 
@@ -319,6 +321,7 @@ Docker (нет образа, не создаётся сеть) — `blocked` с 
   `proxy_unsupported` пробрасывается как есть. Пин образа — новый
   тег+дайджест.
 - `SKILL.md`: раздел «Прокси»: `ABG_PROXY` (вся лестница) против
-  `ABG_EGRESS_PROXY` (запасная попытка, прежнее умолчание), таблица схем
+  `ABG_EGRESS_PROXY` (запасная попытка, прежнее умолчание; при явном
+  прокси отключена), таблица схем
   из этой спеки, SOCKS5 с паролем только с `--no-browser`, сессии через
   прокси хранятся отдельно от прямых.
