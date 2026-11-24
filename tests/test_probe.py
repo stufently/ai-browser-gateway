@@ -319,8 +319,11 @@ class AdapterContractTests(unittest.TestCase):
                 "curl_cffi": curl_cffi,
                 "curl_cffi.requests": requests_mod,
             }):
-                self.probe.CurlCffiAdapter().navigate("https://target.invalid/")
-            self.assertEqual(captured.get("proxy"), proxy)
+                for supplied in (proxy, "socks5://proxy.invalid:1080", "socks5h://proxy.invalid:1080"):
+                    with self.subTest(proxy=supplied), patch.dict(os.environ, {"ABG_PROXY": supplied}):
+                        captured.clear()
+                        self.probe.CurlCffiAdapter().navigate("https://target.invalid/")
+                        self.assertEqual(captured.get("proxy"), supplied)
 
             primp_kwargs = {}
 
@@ -1452,6 +1455,23 @@ class ProxyWiringTests(unittest.TestCase):
         cleaned = self.probe.redact(leaked)
         self.assertNotIn("pass", cleaned)
         self.assertIn("socks5://***@h:1080", cleaned)
+
+    def test_redact_proxy_password_in_raw_and_decoded_form(self):
+        url = "http://user1:s3cr%40t@proxy.invalid:8080"
+        with patch.dict(os.environ, {"ABG_PROXY": url}):
+            self.assertEqual(self.probe.redact(f"raw=s3cr%40t decoded='s3cr@t' url={url}"),
+                             "raw=*** decoded='***' url=http://***@proxy.invalid:8080")
+        for bad_or_empty in ("http://[::1", "http://user1:@proxy.invalid"):
+            with self.subTest(proxy=bad_or_empty), patch.dict(
+                    os.environ, {"ABG_PROXY": bad_or_empty}):
+                self.assertEqual(self.probe.redact(f"{url} refused"),
+                                 "http://***@proxy.invalid:8080 refused")
+
+    def test_playwright_proxy_maps_socks5h_to_socks5(self):
+        for scheme in ("socks5h", "SOCKS5H", "socks5"):
+            with self.subTest(scheme=scheme):
+                self.assertEqual(self.probe.playwright_proxy(f"{scheme}://proxy.invalid:1080"),
+                                 {"server": "socks5://proxy.invalid:1080"})
 
     def test_playwright_proxy_keeps_ipv6_brackets(self):
         """Без скобок host стал бы fd00, то есть прокси молча оказался бы другим."""

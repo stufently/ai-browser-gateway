@@ -209,8 +209,9 @@ def playwright_proxy(url: str) -> dict[str, str]:
     if ":" in host:
         host = f"[{host}]"
     netloc = f"{host}:{parsed.port}" if parsed.port is not None else host
+    scheme = "socks5" if parsed.scheme == "socks5h" else parsed.scheme
     settings = {
-        "server": urlunparse((parsed.scheme, netloc, parsed.path, parsed.params,
+        "server": urlunparse((scheme, netloc, parsed.path, parsed.params,
                               parsed.query, parsed.fragment)),
     }
     if parsed.username is not None:
@@ -231,8 +232,15 @@ _USERINFO_URL = re.compile(r"([a-z][a-z0-9+.\-]*://)([^/@\s'\"]+)@", re.I)
 
 
 def redact(text: str) -> str:
-    """Убирает userinfo из любых URL в тексте: http://u:p@h → http://***@h."""
-    return _USERINFO_URL.sub(r"\1***@", text)
+    """Убирает userinfo из URL и пароль текущего прокси из текста."""
+    text = _USERINFO_URL.sub(r"\1***@", text)
+    try:
+        password = urlparse(os.environ.get("ABG_PROXY", "")).password
+    except ValueError:
+        return text
+    if password:
+        text = text.replace(password, "***").replace(unquote(password), "***")
+    return text
 
 
 def _live_rss_kb() -> int:

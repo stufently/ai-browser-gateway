@@ -20,6 +20,7 @@ class ProductRequest:
     egress_profiles: tuple[str, ...] = ()
     budget_ms: int = 30_000
     expected_text: str | None = None
+    route_profile: str = 'direct'
 
 
 def _finite_nonnegative(value):
@@ -49,6 +50,9 @@ def _validate(request):
         for name in request.egress_profiles
     ):
         raise ValueError('invalid egress_profiles')
+    if (not isinstance(request.route_profile, str) or not request.route_profile
+            or request.route_profile in request.egress_profiles):
+        raise ValueError('invalid route_profile')
     _validate_expected(request.expected_text)
 
 
@@ -95,12 +99,13 @@ def accept_page(result: FetchResult, expected_text=None) -> tuple[bool, F]:
 
 def plan_product(request) -> tuple[PlanStep, ...]:
     _validate(request)
+    route = request.route_profile
     steps = []
     if request.max_age_hours > 0:
-        steps.extend(PlanStep(name, 'direct', 'entrance') for name in ('rss', 'wayback'))
-    steps.append(PlanStep('curl_cffi', 'direct', 'http'))
+        steps.extend(PlanStep(name, route, 'entrance') for name in ('rss', 'wayback'))
+    steps.append(PlanStep('curl_cffi', route, 'http'))
     if request.allow_browser:
-        steps.extend(PlanStep(name, 'direct', 'browser') for name in ('patchright', 'scrapling'))
+        steps.extend(PlanStep(name, route, 'browser') for name in ('patchright', 'scrapling'))
     steps.extend(PlanStep('curl_cffi', name, 'egress') for name in dict.fromkeys(request.egress_profiles))
     return tuple(steps)
 
