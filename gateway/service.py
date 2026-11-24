@@ -11,6 +11,7 @@ import tomllib
 from urllib.parse import urlsplit
 
 from gateway.httpapi import make_server
+from gateway.provider_images import ImageCheck
 
 _INSTANCE = re.compile(r'[a-z][a-z0-9-]{0,62}')
 _PORT = re.compile(r'0|[1-9][0-9]{0,4}')
@@ -170,7 +171,7 @@ def _int_env(env, key, default, pattern, hi=None):
     return value
 
 
-def make_service(environ=None, *, fetcher_factory=None):
+def make_service(environ=None, *, fetcher_factory=None, health_check=None):
     env = os.environ if environ is None else environ
     try:
         if env.get('ABG_TOKEN'):
@@ -212,7 +213,8 @@ def make_service(environ=None, *, fetcher_factory=None):
 
     server = make_server(
         (bind, port), token=token, browser_limit=limit, profiles=profiles,
-        fetcher_factory=factory, rotate_profiles=True)
+        fetcher_factory=factory, rotate_profiles=True,
+        health_check=ImageCheck().status if health_check is None else health_check)
     server.instance = instance
     server.launches = launches
     server.sessions = sessions

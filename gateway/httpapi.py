@@ -10,10 +10,11 @@ from gateway.fetch import ProductFetcher
 
 
 def make_server(address, *, token, browser_limit=1, profiles=None,
-                entrances=None, fetcher_factory=None, rotate_profiles=False):
+                entrances=None, fetcher_factory=None, rotate_profiles=False, health_check=None):
     if (not isinstance(token, str) or not token
             or any(not 33 <= ord(char) <= 126 for char in token)
             or type(browser_limit) is not int or browser_limit <= 0
+            or (health_check is not None and not callable(health_check))
             or not isinstance(address, (tuple, list)) or len(address) != 2
             or not isinstance(address[0], str) or not address[0]
             or type(address[1]) is not int or not 0 <= address[1] <= 65535):
@@ -28,6 +29,7 @@ def make_server(address, *, token, browser_limit=1, profiles=None,
         raise ValueError('invalid configuration') from None
     server = ThreadingHTTPServer(tuple(address), Handler)
     server.token = token.encode('ascii')
+    server.health_check = health_check
     server.profiles, server.entrances = profiles, entrances
     server.factory = ProductFetcher if fetcher_factory is None else fetcher_factory
     server.slots = BoundedSemaphore(browser_limit)

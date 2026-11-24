@@ -32,6 +32,8 @@ EVIDENCE = Path.home() / '.cache/abg-deploy-checks/m12b'
 DEFAULT_EVIDENCE = EVIDENCE
 PY = 'sha256:cad9a2c871761c413caa6fdd6441c783451e740a48aaeba60ae62a8b53525ef6'
 IMAGE = 'abg-runtime:' + SHA[:12]
+PROVIDER_IMAGES = ('abg-curl_cffi:m2', 'abg-patchright:m2', 'abg-rss:m4',
+                   'abg-scrapling:m8', 'abg-wayback:m4')
 NAMES = tuple('ms' + str(i) for i in range(1, 16))
 ECHO = 'http://api.ipify.org'
 API = 'http://127.0.0.1:8765'
@@ -50,6 +52,10 @@ STEPS = ('stop', 'browser', 'change_egress', 'retry_later', 'give_up', 'human', 
 
 class CheckError(Exception):
     """Static, non-secret internal failure code."""
+
+    def __init__(self, code, **details):
+        super().__init__(code)
+        self.details = details
 
 
 def require(condition, code):
@@ -336,16 +342,18 @@ def check_bizprofile():
                 url=url, allow_browser=True, budget_ms=120000, format='text', max_age_hours=0))
             value = row['api_evidence']
             last = value['attempts'][-1] if value['attempts'] else {}
-            passed = all((passed, value['ok'] is True, value['provider'] == 'scrapling',
-                          last.get('provider') == 'scrapling', last.get('success') is True,
+            provider = value['provider']
+            passed = all((passed, value['ok'] is True, isinstance(provider, str) and provider,
+                          last.get('provider') == provider, last.get('success') is True,
                           last.get('challenge') == 'none', last.get('error_type') == 'none',
                           row['marker_found'] is True))
         except Exception as exc:
             # A failed first measurement must not suppress the second page.
             error = str(exc) if isinstance(exc, CheckError) else type(exc).__name__
             row = {'api_evidence': None, 'marker_found': False, 'internal_error': redact(error)}
+            provider = None
             passed = False
-        evidence['pages'].append({'id': name, **row})
+        evidence['pages'].append({'id': name, **row, 'provider': redact(provider)})
     while True:
         archive = 'bizprofile-' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
         try:
@@ -354,7 +362,10 @@ def check_bizprofile():
         except FileExistsError:
             time.sleep(1)
     save('bizprofile', evidence)
-    require(passed, 'bizprofile_not_passed')
+    providers = {row['id']: row['provider'] for row in evidence['pages']}
+    if not passed:
+        raise CheckError('bizprofile_not_passed', providers=providers)
+    return {'providers': providers}
 
 
 def check_profiles():
@@ -468,6 +479,14 @@ def verify_release(release, manifest):
 
 def check_deploy():
     verify_release(RELEASE, SERVICE / 'manifests' / (SHA + '.sha256'))
+    filters = []
+    for image in PROVIDER_IMAGES:
+        filters.extend(('--filter', 'reference=' + image))
+    listing = docker('image', 'ls', '--format', '{{.Repository}}:{{.Tag}}', *filters, timeout=30)
+    present = {line.strip() for line in listing.splitlines()}
+    missing = [image for image in PROVIDER_IMAGES if image not in present]
+    if missing:
+        raise CheckError('provider_images_missing', missing_images=missing)
     config = {}
     for line in (SERVICE / 'compose.env').read_text().splitlines():
         if line and not line.startswith('#'):
@@ -583,14 +602,17 @@ def main():
     with (EVIDENCE / 'runner.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         try:
-            globals()[mode]()
+            details = globals()[mode]() or {}
         except Exception as exc:
             error = str(exc) if isinstance(exc, CheckError) else type(exc).__name__
-            save(mode + '-result', {'ok': False, 'internal_error': redact(error)})
-            print(json.dumps({'ok': False, 'internal_error': redact(error)}), file=sys.stderr)
+            details = exc.details if isinstance(exc, CheckError) else {}
+            failure = redact({'ok': False, 'internal_error': error, **details})
+            save(mode + '-result', failure)
+            print(json.dumps(failure), file=sys.stderr)
             return 1
-        save(mode + '-result', {'ok': True})
-        print(json.dumps({'ok': True, 'mode': mode}))
+        details = redact(details)
+        save(mode + '-result', {'ok': True, **details})
+        print(json.dumps({'ok': True, 'mode': mode, **details}))
     return 0
 
 
