@@ -991,6 +991,13 @@ class M24NewFixtureTests(unittest.TestCase):
         self.assertEqual(verdict, "none")
         self.assertNotIn("body_cf_challenges_host", markers)
 
+    def test_loader_does_not_hide_later_challenge_host(self):
+        body = ('<html><title>Shop</title>'
+                '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script>'
+                '<iframe src="https://challenges.cloudflare.com/cdn-cgi/x/h/b"></iframe>')
+        _, markers = self.detect(200, {}, body)
+        self.assertIn("body_cf_challenges_host", markers)
+
     def test_jsd_and_loader_together_do_not_decide(self):
         body = ('<html><title>Shop</title><p>Real</p>'
                 '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'

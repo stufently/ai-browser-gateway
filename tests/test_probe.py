@@ -1180,7 +1180,8 @@ class M24ScraplingHeaderTests(unittest.TestCase):
     def setUpClass(cls):
         cls.probe = load_probe()
 
-    def _run_scrapling(self, *, status, first_headers, html, cookies, events, calls_setup=True):
+    def _run_scrapling(self, *, status, first_headers, html, cookies, events, calls_setup=True,
+                       final_url="https://site.invalid/"):
         seen = {}
 
         class Session:
@@ -1225,7 +1226,7 @@ class M24ScraplingHeaderTests(unittest.TestCase):
                             if name == "response":
                                 callback(response)
                 return types.SimpleNamespace(
-                    status=status, url="https://site.invalid/",
+                    status=status, url=final_url,
                     body=html.encode(), headers=dict(first_headers),
                     history=(), cookies=cookies)
 
@@ -1285,6 +1286,25 @@ class M24ScraplingHeaderTests(unittest.TestCase):
             cookies=(), events=final)
         self.assertEqual(result["headers"], {"server": "cloudflare"})
         self.assertEqual(seen["handlers"], [])
+
+    def test_scrapling_fallback_drops_header_for_subdomain_host(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=({"name": "cf_clearance", "value": "v", "domain": ".site.invalid"},),
+            events=[], final_url="https://www.site.invalid/")
+        self.assertEqual(result["headers"], {"server": "cloudflare"})
+
+    def test_scrapling_fallback_skips_non_dict_cookie(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=("cf_clearance=v",
+                     {"name": "cf_clearance", "value": "v", "domain": ".site.invalid"}),
+            events=[])
+        self.assertEqual(result["headers"], {"server": "cloudflare"})
 
     def test_scrapling_primary_path_omits_set_cookie(self):
         stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
