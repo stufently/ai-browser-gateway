@@ -223,9 +223,13 @@ shutdown removes running providers while draining and finishes sooner.
 
 ## M12b deployed service
 
-Since 2026-11-24 stand-host runs release `0b8951244e6ce7fd780697a68b7f1b48543ee596`
-(image `abg-runtime:0b8951244e6c`, CHANGELOG 0.1.7; configuration before it
-is kept as `compose.env.pre-cfclick`). Before that it ran release
+Since 2026-11-24 stand-host runs release `0c3df98ec9339001ce6ef41e036646b37e919cf2`
+(image `abg-runtime:0c3df98ec933`, M27 proxy relay and M28 provider image
+health; configuration before it is kept as `compose.env.pre-0.1.8`, and the
+provider images it replaced are tagged `*-pre-0.1.8`). The rollback is release
+`0b8951244e6ce7fd780697a68b7f1b48543ee596`
+(image `abg-runtime:0b8951244e6c`, CHANGELOG 0.1.7, deployed earlier the same
+day; configuration before it is kept as `compose.env.pre-cfclick`). Before that it ran release
 `407c1ba5b2657d01259c57a2bd7d2439e79907a4`
 (image `abg-runtime:407c1ba5b265`, deployed 2026-10-09) under
 `/home/user/services/ai-browser-gateway`, with the API published at
@@ -253,7 +257,7 @@ Start or stop the service using its explicit configuration:
 
 ```bash
 service_root=/home/user/services/ai-browser-gateway
-release_sha=0b8951244e6ce7fd780697a68b7f1b48543ee596
+release_sha=0c3df98ec9339001ce6ef41e036646b37e919cf2
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
@@ -355,6 +359,17 @@ The 2026-11-24 deployment (release `0b8951244e6c`) passed `--check-deploy`.
 `--check-bizprofile` reported `bizprofile_not_passed`: both pages opened with
 their markers, but on the first step (`curl_cffi` 0.17.0), while the check
 then required Scrapling. Since M28 it accepts any provider.
+
+The later 2026-11-24 deployment (release `0c3df98ec933`, provider images
+rebuilt from it because `probe.py` is baked into them) passed `--check-deploy`,
+`--check-bizprofile` (both pages on `curl_cffi`), `--check-api-egress` and
+`--run-targets`. `--check-profiles` failed twice with `no_auth_407_missing`:
+the unauthenticated probe goes to `ms1`, and that proxy timed out along with
+`ms8` and `ms11`; 12 profiles answered, so this is a proxy outage, not the
+release. Live calls: steamdb, scrapingcourse and gitlab sign-in opened through
+patchright in 8.5–9.6 s after a `curl_cffi` 403, lowendtalk on `curl_cffi` in
+0.9 s. Untagging `abg-wayback:m4` turned `/health` into `503` with
+`missing: ["abg-wayback:m4"]` within 8 s; restoring the tag returned `200`.
 
 Proxy profiles are generated once into `secrets/proxies.toml` from a file with
 `PROXY_LOGIN` and `PROXY_PASSWORD`; the proxy domain is an argument, hosts are
