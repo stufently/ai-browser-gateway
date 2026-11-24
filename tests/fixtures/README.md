@@ -14,8 +14,12 @@
 | `perimeterx_block_429.html` | блок-страница PerimeterX; браузеру тот же сайт сразу отдаёт `200` | `wayfair.com`, `429` curl_cffi, снято 09.10.2026 |
 | `akamai_access_denied_403.html` | краевой отказ Akamai «Access Denied»: бан адреса, оба браузера получают тот же `403` | `homedepot.com`, `403`, снято 09.10.2026 |
 | `lowendtalk_200_grecaptcha.html` | настоящая страница `200` с невидимым reCAPTCHA и служебным скриптом Cloudflare; sitekey и параметры `__CF$cv$params` затёрты координатором | `lowendtalk.com/categories/offers`, снято 18.09.2026 |
+| `cf_managed_interstitial_403.html` | заглушка Managed Challenge (`cType: 'managed'`, «Just a moment...»), тело ответа `403 cf-mitigated: challenge` | `bizprofile.net`, снято 24.11.2026 |
+| `cf_passed_gitlab_signin_200.html` | страница входа ПОСЛЕ пройденного вызова (scrapling, есть `cf_clearance`); содержит слово `recaptcha`; значения `csrf-token`/`authenticity_token` затёрты | `gitlab.com/users/sign_in`, `200`, снято 24.11.2026 |
+| `cf_passed_scrapingcourse_200.html` | страница ПОСЛЕ пройденного вызова; встроенный `turnstile/v0/api.js` | `scrapingcourse.com/cloudflare-challenge`, `200`, снято 24.11.2026 |
+| `cf_jsd_turnstile_widget_200.html` | обычная страница `200`: пассивный JSD-скрипт и встроенный виджет Turnstile с тестовым ключом | `nowsecure.nl`, `200`, снято 24.11.2026 |
 
-Ray ID в заглушке заменён на `RAYREDACTED0000`; ничего секретного в файлах нет.
+Ray ID в заглушках и в JSD-пути заменён на `RAYREDACTED0000`; ничего секретного в файлах нет.
 
 ## Почему длины текста НЕ хватает
 
