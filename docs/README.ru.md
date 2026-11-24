@@ -319,8 +319,10 @@ done
 
 These images are used only by short-lived containers, so
 `docker image prune -a` treats them as unused and deletes them. Without them
-every request fails with `environment_error` within a second while `/health`
-stays green.
+every request fails with `environment_error` within a second. Since M28
+`/health` answers `503` with the missing tags (the container turns unhealthy)
+and `--check-deploy` fails with `provider_images_missing`; the image list is
+cached for 15 seconds.
 
 Run these checks sequentially from the clone, with no other API clients.
 The service root and the expected `ABG_INSTANCE` are arguments; the defaults
@@ -338,8 +340,8 @@ python3 tests/deployed_m12b.py --run-targets "${host[@]}"
 
 The 2026-10-09 deployment passed `--check-deploy` and `--check-bizprofile`.
 
-The healthcheck and `--check-deploy` do not start provider containers, so a
-host without provider images passes them. Finish every deployment with live
+The healthcheck and `--check-deploy` only check that provider images exist;
+they do not start provider containers. Finish every deployment with live
 API calls through the ladder, for example a plain page and one behind a
 Cloudflare challenge; each must exit `0` and print the page title
 (a failed fetch exits `1`):
@@ -352,7 +354,7 @@ scripts/abg-fetch https://www.scrapingcourse.com/cloudflare-challenge meta
 The 2026-11-24 deployment (release `0b8951244e6c`) passed `--check-deploy`.
 `--check-bizprofile` reported `bizprofile_not_passed`: both pages opened with
 their markers, but on the first step (`curl_cffi` 0.17.0), while the check
-still requires Scrapling.
+then required Scrapling. Since M28 it accepts any provider.
 
 Proxy profiles are generated once into `secrets/proxies.toml` from a file with
 `PROXY_LOGIN` and `PROXY_PASSWORD`; the proxy domain is an argument, hosts are
@@ -373,8 +375,9 @@ when measuring rotation. Profile checks take at least eight minutes.
 
 Network checks run inside Docker and write sanitized JSON. Bizprofile checks
 request the homepage and Elevate Electric LLC card without `expected_text`,
-then check their content markers locally. Both pages must succeed through
-Scrapling with `challenge=none`. Each run preserves `bizprofile-<UTC>.json`
+then check their content markers locally. Both pages must succeed with
+`challenge=none`, the response provider must match the last attempt, and the
+result lists the provider of each page. Each run preserves `bizprofile-<UTC>.json`
 exclusively and updates `bizprofile.json`; failed pages are recorded without
 retrying. Page content and URLs are omitted from this evidence. Requests to
 the same hostname are spaced by at least 30 seconds across runner launches.
