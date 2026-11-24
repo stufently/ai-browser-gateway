@@ -223,7 +223,10 @@ shutdown removes running providers while draining and finishes sooner.
 
 ## M12b deployed service
 
-Stand-host runs release `407c1ba5b2657d01259c57a2bd7d2439e79907a4`
+Since 2026-11-24 stand-host runs release `0b8951244e6ce7fd780697a68b7f1b48543ee596`
+(image `abg-runtime:0b8951244e6c`, CHANGELOG 0.1.7; configuration before it
+is kept as `compose.env.pre-cfclick`). Before that it ran release
+`407c1ba5b2657d01259c57a2bd7d2439e79907a4`
 (image `abg-runtime:407c1ba5b265`, deployed 2026-10-09) under
 `/home/user/services/ai-browser-gateway`, with the API published at
 `127.0.0.1:8765`. It adds the per-host session cache (CHANGELOG
@@ -250,7 +253,7 @@ Start or stop the service using its explicit configuration:
 
 ```bash
 service_root=/home/user/services/ai-browser-gateway
-release_sha=407c1ba5b2657d01259c57a2bd7d2439e79907a4
+release_sha=0b8951244e6ce7fd780697a68b7f1b48543ee596
 env -u ABG_RELEASE -u ABG_RUNTIME_IMAGE docker compose --env-file "$service_root/compose.env" \
   -f "$service_root/releases/$release_sha/deploy/compose.yaml" \
   -p ai-browser-gateway up -d
@@ -300,6 +303,25 @@ docker build -t "abg-runtime:${release_sha:0:12}" \
   -f "$service_root/releases/$release_sha/deploy/Dockerfile" "$service_root/releases/$release_sha"
 ```
 
+The API launches every ladder step as a separate provider container, so the
+host also needs the provider images named in `bench/providers/registry.py`.
+The production ladder uses `abg-rss:m4`, `abg-wayback:m4`, `abg-curl_cffi:m2`,
+`abg-patchright:m2` and `abg-scrapling:m8`. Build them from the release being
+deployed (its Dockerfiles pin the provider packages; see
+[container preparation](m2-runner-usage.md#container-preparation-operator-not-executed-by-acceptance)):
+
+```bash
+docker_dir="$service_root/releases/$release_sha/bench/providers/docker"
+for image in rss:m4 wayback:m4 curl_cffi:m2 patchright:m2 scrapling:m8; do
+  docker build -f "$docker_dir/Dockerfile.${image%%:*}" -t "abg-$image" "$docker_dir"
+done
+```
+
+These images are used only by short-lived containers, so
+`docker image prune -a` treats them as unused and deletes them. Without them
+every request fails with `environment_error` within a second while `/health`
+stays green.
+
 Run these checks sequentially from the clone, with no other API clients.
 The service root and the expected `ABG_INSTANCE` are arguments; the defaults
 are `$HOME/services/ai-browser-gateway` and `stand-host`:
@@ -315,6 +337,22 @@ python3 tests/deployed_m12b.py --run-targets "${host[@]}"
 ```
 
 The 2026-10-09 deployment passed `--check-deploy` and `--check-bizprofile`.
+
+The healthcheck and `--check-deploy` do not start provider containers, so a
+host without provider images passes them. Finish every deployment with live
+API calls through the ladder, for example a plain page and one behind a
+Cloudflare challenge; each must exit `0` and print the page title
+(a failed fetch exits `1`):
+
+```bash
+scripts/abg-fetch https://example.com/ meta
+scripts/abg-fetch https://www.scrapingcourse.com/cloudflare-challenge meta
+```
+
+The 2026-11-24 deployment (release `0b8951244e6c`) passed `--check-deploy`.
+`--check-bizprofile` reported `bizprofile_not_passed`: both pages opened with
+their markers, but on the first step (`curl_cffi` 0.17.0), while the check
+still requires Scrapling.
 
 Proxy profiles are generated once into `secrets/proxies.toml` from a file with
 `PROXY_LOGIN` and `PROXY_PASSWORD`; the proxy domain is an argument, hosts are

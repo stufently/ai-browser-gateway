@@ -22,14 +22,22 @@
   6/6 за 9–13 с (patchright), nowsecure и lowendtalk — 6/6 за ~1,8 с;
   через прокси с паролем — steamdb, gitlab, lowendtalk открыты, в журнале
   прокси есть все три хоста, SOCKS5 с паролем — `proxy_unsupported`.
-  Перевод боевого сервиса 24.11 на релиз `0b8951244e6c` (образ
-  `abg-runtime:0b8951244e6c`, конфиг до него — `compose.env.pre-cfclick`)
-  откатан на `407c1ba5b265`: `--check-deploy` прошёл, `--check-bizprofile`
-  упал (`api_provider_infrastructure_error`), все вызовы API —
-  `environment_error` на curl_cffi за ~0,5 с. Причина не в релизе: на хосте
-  нет ни одного образа провайдеров (`abg-curl_cffi:m2`, `abg-scrapling:m8`
-  и др.), откаченный релиз падает так же — сервис не отдаёт страницы и до
-  выкладки.
+  Боевой сервис 24.11 переведён на релиз `0b8951244e6c` (образ
+  `abg-runtime:0b8951244e6c`, конфиг до него — `compose.env.pre-cfclick`).
+  Первая попытка была откатана: на хосте не осталось ни одного образа
+  провайдеров, и все вызовы API падали с `environment_error` на curl_cffi
+  за ~0,5 с — и на новом, и на старом релизе. Образы удалила
+  `docker image prune -a --filter until=720h` при чистке диска 10.11: их
+  контейнеры живут секунды, и prune считает образы неиспользуемыми.
+  Пересобраны из каталога релиза `abg-rss:m4`, `abg-wayback:m4`,
+  `abg-curl_cffi:m2` (curl_cffi 0.17.0), `abg-patchright:m2`,
+  `abg-scrapling:m8`. После этого `--check-deploy` прошёл;
+  `--check-bizprofile` формально не прошёл: обе страницы открыты с маркерами,
+  но первой ступенью curl_cffi, а проверка требует Scrapling. Живые вызовы
+  API: steamdb, scrapingcourse, gitlab sign-in — `ok` через patchright за
+  8–10 с (curl_cffi — 403), lowendtalk — `ok` через curl_cffi за ~1 с.
+  В процедуру выкладки (`docs/README.ru.md`) добавлены сборка образов
+  провайдеров и живой вызов API: healthcheck их отсутствия не видит.
 
 ### Исправлено
 
