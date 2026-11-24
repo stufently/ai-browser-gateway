@@ -4,7 +4,7 @@
 
 Репозиторий ai-browser-gateway, 24.11.2026.
 
-BASE_SHA: (ставится отдельным коммитом сразу после коммита этой спеки)
+BASE_SHA: 6d4ba73dffae59db6c1f41f55b4076ad23da1230 (коммит спеки и стенда; следующий коммит только вписывает эту строку и BASE_SHA в AC-012)
 
 Клон делается от вершины `main` не раньше BASE_SHA; в базе уже есть код
 M26 (выпуск 0.1.7), усиление `TurnstileClickTests` (`1d5cd18`), эта спека и
@@ -322,7 +322,7 @@ https-прокси с публичным сертификатом — через
 - **AC-011.** Стенд: креды в argv по-прежнему отказ без единого запроса через прокси:
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh refuse)" = ok'`
 - **AC-012.** Изменения только в разрешённых путях, есть новый тест релея, дерево чистое:
-  `bash -c 'git merge-base --is-ancestor BASE_SHA_PLACEHOLDER HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)gateway/oneshot.py" ":(exclude)tests/test_probe.py" ":(exclude)tests/test_proxy_ladder.py" ":(exclude)tests/test_oneshot.py" ":(exclude)tests/test_proxy_relay.py" && test -n "$(git diff --name-only "$b" HEAD -- bench/providers/docker/probe.py)" && test -n "$(git diff --name-only "$b" HEAD -- tests/test_proxy_relay.py)" && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
+  `bash -c 'git merge-base --is-ancestor 6d4ba73dffae59db6c1f41f55b4076ad23da1230 HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)gateway/oneshot.py" ":(exclude)tests/test_probe.py" ":(exclude)tests/test_proxy_ladder.py" ":(exclude)tests/test_oneshot.py" ":(exclude)tests/test_proxy_relay.py" && test -n "$(git diff --name-only "$b" HEAD -- bench/providers/docker/probe.py)" && test -n "$(git diff --name-only "$b" HEAD -- tests/test_proxy_relay.py)" && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
 
 Что проверяет каждый сценарий стенда — в самом `m27_stand.sh`: сети
 `--internal`, цель только за прокси, `attempts` сверяются целиком
@@ -339,7 +339,7 @@ stderr и `docker top` во время каждого прогона; в сце�
 ## Порядок работы
 
 До первой правки — первая половина AC-012 на свежем клоне:
-`git merge-base --is-ancestor <BASE_SHA> HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD`
+`git merge-base --is-ancestor 6d4ba73dffae59db6c1f41f55b4076ad23da1230 HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD`
 (rc 0 обязателен: иначе база старше спеки или не та, это blocker; вторая
 половина AC-012 до работы падает по построению — новых файлов ещё нет) и
 чекер M25 (команда из AC-002 для `m25_turnstile_click`). Затем пункты 1–5
