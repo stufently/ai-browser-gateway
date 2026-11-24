@@ -930,6 +930,9 @@ class ProxyRelayError(Exception):
 
 _RELAY_BIND_HOST = "127.0.0.1"
 _RELAY_HEAD_LIMIT = 64 * 1024
+# Предел блока заголовков ответа: столько же держит сам Chromium, поэтому
+# легальный большой ответ проходит, а бесконечный поток без пустой строки — нет.
+_RELAY_RESPONSE_LIMIT = 256 * 1024
 _RELAY_CHUNK = 65536
 _RELAY_TIMEOUT_S = 30.0
 _RELAY_JOIN_TIMEOUT_S = 5.0
@@ -958,9 +961,13 @@ def _relay_close(sock: socket.socket | None) -> None:
 
 
 def _relay_halt(sock: socket.socket | None, mode: int = socket.SHUT_RDWR) -> None:
-    """Разбудить чужой recv/send: close() из другого потока оставляет поток ждать."""
+    """Разбудить чужой recv/send: close() из другого потока оставляет поток ждать.
+
+    ValueError нужен рядом с OSError: ssl.SSLSocket.shutdown() зовёт
+    checkClosed() и бросает его на уже закрытом сокете.
+    """
     if sock is not None:
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError, ValueError):
             sock.shutdown(mode)
 
 
@@ -982,28 +989,41 @@ def _relay_recv_exact(sock: socket.socket, size: int) -> bytes | None:
 def _relay_read_head(sock: socket.socket) -> tuple[str, bytes]:
     """Заголовок до \\r\\n\\r\\n и байты после него; пустой заголовок — вход не читается."""
     buffer = b""
-    while b"\r\n\r\n" not in buffer:
-        if len(buffer) >= _RELAY_HEAD_LIMIT:
-            return "", b""
-        chunk = sock.recv(_RELAY_CHUNK)
-        if not chunk:
-            return "", b""
-        buffer += chunk
+    try:
+        while b"\r\n\r\n" not in buffer:
+            if len(buffer) >= _RELAY_HEAD_LIMIT:
+                return "", b""
+            chunk = sock.recv(_RELAY_CHUNK)
+            if not chunk:
+                return "", b""
+            buffer += chunk
+    except OSError:
+        return "", b""  # обрыв или таймаут: вызывающий отвечает 502, а не молча рвёт
     head, _, rest = buffer.partition(b"\r\n\r\n")
     if len(head) > _RELAY_HEAD_LIMIT:
         return "", b""
     return head.decode("latin-1"), rest
 
 
-def _relay_read_line(sock: socket.socket, limit: int = 4096) -> tuple[str, bytes]:
-    """Первая строка ответа и всё прочитанное с ней; пустые байты — ответа нет."""
-    buffer = b""
-    while b"\r\n" not in buffer and len(buffer) < limit:
-        chunk = sock.recv(_RELAY_CHUNK)
-        if not chunk:
-            break
-        buffer += chunk
-    return buffer.partition(b"\r\n")[0].decode("latin-1"), buffer
+def _relay_read_block(sock: socket.socket, buffer: bytes = b"",
+                      limit: int = _RELAY_RESPONSE_LIMIT) -> tuple[bytes, bytes] | None:
+    """Блок заголовков до \\r\\n\\r\\n байт в байт и остаток после него.
+
+    None — ответа нет вовсе: прокси молчит, сбросил соединение, не уложился в
+    таймаут или прислал блок больше лимита.
+    """
+    try:
+        while b"\r\n\r\n" not in buffer:
+            if len(buffer) >= limit:
+                return None
+            chunk = sock.recv(_RELAY_CHUNK)
+            if not chunk:
+                return None
+            buffer += chunk
+    except OSError:
+        return None
+    end = buffer.find(b"\r\n\r\n") + 4
+    return buffer[:end], buffer[end:]
 
 
 def _relay_status(head: str) -> int | None:
@@ -1101,11 +1121,13 @@ class _ProxyRelay:
     def _spawn(self, target, name: str, *args) -> threading.Thread:
         thread = threading.Thread(target=target, args=args, name=name, daemon=True)
         with self._lock:
+            # Старт до добавления в список: close() не должен получить поток,
+            # которому join() ещё запрещён, и бросить слушатель незакрытым.
+            thread.start()
             # Страница открывает десятки соединений: завершившиеся потоки
             # убираются, чтобы close() не перебирал всю историю сессии.
             self._threads = [entry for entry in self._threads if entry.is_alive()]
             self._threads.append(thread)
-        thread.start()
         return thread
 
     def _accept_loop(self, listener: socket.socket) -> None:
@@ -1138,17 +1160,32 @@ class _ProxyRelay:
         except OSError:
             self._fatal_reason(UPSTREAM_UNREACHABLE)
             return None
+        # Сокет регистрируется до рукопожатия: зависший TLS иначе некому
+        # разбудить, и close() ждёт весь свой дедлайн, оставляя поток жить.
+        self._track(sock)
         if self.scheme == "https":
             try:
                 # Проверки сертификата прокси не ослабляются: доверие из CA
                 # образа, включая SSL_CERT_FILE/SSL_CERT_DIR окружения пробы.
-                sock = ssl.create_default_context().wrap_socket(sock,
-                                                                 server_hostname=self.host)
+                # do_handshake_on_connect=False обязателен: wrap_socket сразу
+                # отбирает fd у сырого сокета (fileno() даёт -1), поэтому
+                # разбудить рукопожатие может только зарегистрированная обёртка.
+                wrapped = ssl.create_default_context().wrap_socket(
+                    sock, server_hostname=self.host, do_handshake_on_connect=False)
             except (OSError, ValueError):
-                _relay_close(sock)
+                self._release(sock)
                 self._fatal_reason(UPSTREAM_TLS_FAILED)
                 return None
-        self._track(sock)
+            with self._lock:
+                self._sockets.discard(sock)
+                self._sockets.add(wrapped)
+            try:
+                wrapped.do_handshake()
+            except (OSError, ValueError):
+                self._release(wrapped)
+                self._fatal_reason(UPSTREAM_TLS_FAILED)
+                return None
+            sock = wrapped
         return sock
 
     def _proxy_handshake(self, upstream: socket.socket, host: str, port: int) -> bytes | None:
@@ -1210,7 +1247,8 @@ class _ProxyRelay:
             self._fatal_reason(UPSTREAM_UNREACHABLE)
             return None
 
-    def _pump(self, source: socket.socket, target: socket.socket, first: bytes = b"") -> None:
+    def _pump(self, source: socket.socket, target: socket.socket, first: bytes = b"",
+              halt: bool = True) -> None:
         try:
             if first:
                 target.sendall(first)
@@ -1222,7 +1260,19 @@ class _ProxyRelay:
         except OSError:
             pass
         finally:
-            _relay_halt(target, socket.SHUT_WR)
+            if halt:
+                _relay_halt(target, socket.SHUT_WR)
+
+    def _pump_request_body(self, client: socket.socket, upstream: socket.socket,
+                           first: bytes) -> None:
+        """Тело запроса наверх без полузакрытия: ответ приходит по тому же сокету.
+
+        `shutdown(SHUT_WR)` на ssl.SSLSocket отправляет close_notify и закрывает
+        TLS-состояние, поэтому прокси может не отдать ответ, который ещё в пути.
+        Конец тела прокси знает из Content-Length или chunked, а соединение
+        закрывает `_serve` после ответа.
+        """
+        self._pump(client, upstream, first, halt=False)
 
     def _tunnel(self, upstream_first: bytes, client_first: bytes,
                 client: socket.socket, upstream: socket.socket) -> None:
@@ -1297,20 +1347,32 @@ class _ProxyRelay:
                 self._fatal_reason(UPSTREAM_UNREACHABLE)
                 _relay_send(client, _RELAY_BAD_GATEWAY)
                 return
-            body = self._spawn(self._pump, "proxy-relay-body", client, upstream, rest)
-            line, buffered = _relay_read_line(upstream)
-            status = _relay_status(line)
-            if not buffered or status == 407:
-                # Ответ прокси клиенту не отдаётся: 407 значит отказ авторизации,
-                # а пустой ответ — прокси не сказал ничего.
-                self._fatal_reason(UPSTREAM_REJECTED_HTTP if status == 407
-                                   else UPSTREAM_UNREACHABLE)
-                _relay_send(client, _RELAY_BAD_GATEWAY)
-            else:
+            body = self._spawn(self._pump_request_body, "proxy-relay-body",
+                               client, upstream, rest)
+            pending = b""
+            while True:
+                block = _relay_read_block(upstream, pending)
+                if block is None:
+                    # Прокси не ответил вовсе: молчание, обрыв или таймаут.
+                    self._fatal_reason(UPSTREAM_UNREACHABLE)
+                    _relay_send(client, _RELAY_BAD_GATEWAY)
+                    break
+                response_head, pending = block
+                status = _relay_status(response_head.decode("latin-1"))
+                if status == 407:
+                    # Ответ прокси клиенту не достаётся: ни 407, ни его текст.
+                    self._fatal_reason(UPSTREAM_REJECTED_HTTP)
+                    _relay_send(client, _RELAY_BAD_GATEWAY)
+                    break
+                if status is not None and 100 <= status < 200:
+                    # Промежуточный 1xx уходит как есть, финальный статус впереди.
+                    _relay_send(client, response_head)
+                    continue
                 # Заголовки ответа не переписываются: запрос наверх уже несёт
                 # Connection: close, поэтому ответ уходит байт в байт.
-                _relay_send(client, buffered)
+                _relay_send(client, response_head + pending)
                 self._pump(upstream, client)
+                break
             # Ответ отдан: соединение закрывается, спящий насос тела будится.
             _relay_halt(client)
             body.join(_RELAY_JOIN_TIMEOUT_S)

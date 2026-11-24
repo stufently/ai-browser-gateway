@@ -13,6 +13,7 @@ import json
 import os
 import re
 import socket
+import struct
 import sys
 import threading
 import time
@@ -35,6 +36,11 @@ CONNECT = b"CONNECT a.example:443 HTTP/1.1\r\nHost: a.example:443\r\n\r\n"
 ESTABLISHED = b"HTTP/1.1 200 Connection established\r\n\r\n"
 BAD_GATEWAY = b"HTTP/1.1 502"
 BAD_REQUEST = b"HTTP/1.1 400"
+GATEWAY_RESPONSE = (b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
+                    b"Connection: close\r\n\r\n")
+INTERIM_100 = b"HTTP/1.1 100 Continue\r\n\r\n"
+INTERIM_103 = b"HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n"
+PLAIN_REQUEST = b"GET http://b.example/x HTTP/1.1\r\nHost: b.example\r\n\r\n"
 PLAIN_OK = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"
 REJECTED_HTTP = "upstream proxy rejected credentials (HTTP 407)"
 REJECTED_SOCKS = "upstream proxy rejected credentials (SOCKS5)"
@@ -114,7 +120,7 @@ def read_eof(conn):
         data += chunk
 
 
-def http_upstream(connect_status=200, plain_status=200):
+def http_upstream(connect_status=200, plain_status=200, interim=None):
     """Поддельный http-прокси: пишет заголовки каждого запроса в log."""
     responses = {
         200: b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi",
@@ -141,7 +147,25 @@ def http_upstream(connect_status=200, plain_status=200):
                    if line.lower().startswith("content-length:")]
         if lengths:
             log.append(("body", rest + recv_exact(conn, max(0, lengths[0] - len(rest)))))
+        if interim:
+            conn.sendall(interim)
         conn.sendall(responses[plain_status])
+
+    return Upstream(handler)
+
+
+def silent_upstream():
+    """Поддельный прокси, который принимает TCP и закрывает соединение без ответа."""
+    return Upstream(lambda conn, log: log.append("accepted"))
+
+
+def reset_upstream():
+    """Поддельный прокси, который читает запрос и сбрасывает соединение (RST)."""
+
+    def handler(conn, log):
+        read_head_rest(conn)  # запрос прочитан: sendall у релея уже прошёл
+        log.append("reset")
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
 
     return Upstream(handler)
 
@@ -358,6 +382,68 @@ class RelayHttpUpstreamTests(RelayCase):
         self.assertEqual(got[:12], BAD_GATEWAY)
         self.assertEqual(relay.fatal, TLS_FAILED)
 
+    def test_interim_1xx_does_not_hide_upstream_407(self):
+        up, proxy = self.upstream(http_upstream, plain_status=407, interim=INTERIM_100)
+        relay, port = self.start_relay(proxy)
+        got = self.talk_eof(port, PLAIN_REQUEST)
+        self.assertEqual(got, INTERIM_100 + GATEWAY_RESPONSE)
+        self.assertNotIn(b"407", got)
+        self.assertNotIn(b"Proxy-Authenticate", got)
+        self.assertEqual(relay.fatal, REJECTED_HTTP)
+
+    def test_interim_1xx_before_final_status_reaches_client(self):
+        up, proxy = self.upstream(http_upstream, interim=INTERIM_103)
+        relay, port = self.start_relay(proxy)
+        got = self.talk_eof(port, PLAIN_REQUEST)
+        self.assertEqual(got, INTERIM_103 + PLAIN_OK)
+        self.assertIsNone(relay.fatal)
+
+    def test_silent_upstream_is_502_with_reason(self):
+        """Прокси принял TCP и закрыл соединение: клиенту 502, а не голый обрыв."""
+        up, proxy = self.upstream(silent_upstream)
+        relay, port = self.start_relay(proxy)
+        self.assertEqual(self.talk_eof(port, CONNECT), GATEWAY_RESPONSE)
+        self.assertEqual(relay.fatal, UNREACHABLE)
+        self.assertEqual(self.talk_eof(port, PLAIN_REQUEST), GATEWAY_RESPONSE)
+        self.assertEqual(relay.fatal, UNREACHABLE)
+
+    def test_reset_before_response_is_502_with_reason(self):
+        """Сброс соединения при чтении ответа: 502 и причина, а не тихий обрыв."""
+        for payload in (PLAIN_REQUEST, CONNECT):
+            with self.subTest(request=payload.split(b" ", 1)[0]):
+                up, proxy = self.upstream(reset_upstream)
+                relay, port = self.start_relay(proxy)
+                self.assertEqual(self.talk_eof(port, payload), GATEWAY_RESPONSE)
+                self.assertEqual(relay.fatal, UNREACHABLE)
+                self.assertEqual(up.log[-1], "reset")
+
+    def test_client_half_close_does_not_half_close_upstream(self):
+        """Полузакрытие направления наверх обрезало бы ответ, который ещё в пути."""
+        seen = []
+
+        def handler(conn, log):
+            log.append(read_head_rest(conn)[0])
+            conn.settimeout(0.5)
+            try:
+                # EOF здесь означает, что релей сделал shutdown(SHUT_WR) наверх.
+                seen.append("eof" if not conn.recv(1) else "data")
+            except TimeoutError:
+                seen.append("open")
+            conn.settimeout(5)
+            conn.sendall(PLAIN_OK)
+
+        up = Upstream(handler)
+        self.addCleanup(up.close)
+        relay, port = self.start_relay(self.proxy_url(port=up.port))
+        with socket.create_connection(("127.0.0.1", port), 5) as conn:
+            conn.settimeout(5)
+            conn.sendall(b"GET http://b.example/x HTTP/1.1\r\nHost: b.example\r\n"
+                         b"Content-Length: 0\r\n\r\n")
+            conn.shutdown(socket.SHUT_WR)
+            self.assertEqual(read_eof(conn), PLAIN_OK)
+        self.assertEqual(seen, ["open"])
+        self.assertIsNone(relay.fatal)
+
     def test_non_http_absolute_uri_is_400_and_nothing_goes_upstream(self):
         up, proxy = self.upstream(http_upstream)
         relay, port = self.start_relay(proxy)
@@ -525,6 +611,70 @@ class RelayCloseTests(RelayCase):
         with self.assertRaises(OSError):
             socket.create_connection(("127.0.0.1", port), 1).close()
 
+    def test_close_interrupts_a_pending_tls_handshake(self):
+        """Зависшее рукопожатие TLS будится: сокет прокси учтён до do_handshake()."""
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        baseline = threading.active_count()
+        relay = self.probe._ProxyRelay(
+            self.proxy_url(scheme="https", port=listener.getsockname()[1]))
+        port = int(RELAY_SERVER.match(relay.start()).group(1))
+        self.addCleanup(relay.close)
+        client = socket.create_connection(("127.0.0.1", port), 5)
+        self.addCleanup(client.close)
+        client.sendall(CONNECT)
+        upstream, _ = listener.accept()
+        self.addCleanup(upstream.close)
+        upstream.settimeout(10)
+        # ClientHello дошёл: поток соединения действительно висит в рукопожатии.
+        self.assertTrue(upstream.recv(8))
+        started = time.monotonic()
+        relay.close()
+        elapsed = time.monotonic() - started
+        # Без учёта сокета close() выжидает весь свой дедлайн (_RELAY_JOIN_TIMEOUT_S).
+        self.assertLess(elapsed, 2.0)
+        deadline = time.monotonic() + 5
+        while threading.active_count() > baseline and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertLessEqual(threading.active_count(), baseline)
+
+    def test_thread_is_started_before_it_is_listed(self):
+        """В списке close() не должно быть не стартовавших потоков: join() на таком
+        бросает RuntimeError, и слушатель остаётся незакрытым."""
+        up, proxy = self.upstream(http_upstream)
+        relay = self.probe._ProxyRelay(proxy)
+        port = int(RELAY_SERVER.match(relay.start()).group(1))
+        self.addCleanup(relay.close)
+        intercepted = threading.Event()
+        release = threading.Event()
+        seen = []
+        original_start = threading.Thread.start
+
+        def delayed_start(self_thread, *args, **kwargs):
+            # Снимок списка в тот момент, когда start() ещё не отработал.
+            seen.append((self_thread.name, self_thread.ident,
+                         [entry.name for entry in relay._threads]))
+            intercepted.set()
+            release.wait(10)
+            return original_start(self_thread, *args, **kwargs)
+
+        client = None
+        try:
+            with patch.object(threading.Thread, "start", delayed_start):
+                client = socket.create_connection(("127.0.0.1", port), 5)
+                self.assertTrue(intercepted.wait(10))
+                release.set()
+        finally:
+            release.set()
+            if client is not None:
+                client.close()
+        worker = [entry for entry in seen if entry[0] == "proxy-relay-connection"]
+        self.assertEqual(len(worker), 1, seen)
+        self.assertIsNone(worker[0][1])  # поток ещё не стартовал
+        self.assertNotIn("proxy-relay-connection", worker[0][2])
+
 
 class BrowserWiringTests(RelayCase):
     """Прокси запуска браузеров и закрытие релея вместе с адаптером."""
@@ -673,14 +823,17 @@ class RunProbeRelayReasonTests(RelayCase):
         def close(self):
             self.closed = True
 
-    def run(self, stub, **kwargs):
+    def probe_with(self, stub, sentinel=None, content_only=True, **kwargs):
+        # Хелпер не должен называться run: unittest.TestCase.run — точка входа
+        # раннера, и его перекрытие молча снимает весь класс с прогона.
         return self.probe.run_probe(
-            "patchright", URL, None, mode="cold", content_only=True, include_content=True,
-            adapter_factory=lambda _: stub, metrics=lambda: (0, 0), **kwargs)
+            "patchright", URL, sentinel, mode="cold", content_only=content_only,
+            include_content=True, adapter_factory=lambda _: stub, metrics=lambda: (0, 0),
+            **kwargs)
 
     def test_navigation_failure_keeps_its_own_reason_without_fatal(self):
         stub = self.Stub(error=RuntimeError("net::ERR_TUNNEL_CONNECTION_FAILED"))
-        payload = self.run(stub)
+        payload = self.probe_with(stub)
         self.assertEqual(payload["err"], "RuntimeError: net::ERR_TUNNEL_CONNECTION_FAILED")
         self.assertIs(payload["ok"], False)
         self.assertTrue(stub.closed)
@@ -688,19 +841,19 @@ class RunProbeRelayReasonTests(RelayCase):
     def test_navigation_failure_reports_the_proxy_reason(self):
         stub = self.Stub(error=RuntimeError("net::ERR_TUNNEL_CONNECTION_FAILED"),
                          fatal=REJECTED_HTTP)
-        payload = self.run(stub)
+        payload = self.probe_with(stub)
         self.assertEqual(payload["err"], f"ProxyRelayError: {REJECTED_HTTP}")
         self.assertIs(payload["ok"], False)
         self.assertTrue(stub.closed)
 
     def test_timeout_reports_the_proxy_reason(self):
-        payload = self.run(self.Stub(error=TimeoutError("budget exceeded"), fatal=UNREACHABLE))
+        payload = self.probe_with(self.Stub(error=TimeoutError("budget exceeded"), fatal=UNREACHABLE))
         self.assertEqual(payload["err"], f"ProxyRelayError: {UNREACHABLE}")
-        paired = self.run(self.Stub(error=TimeoutError("budget exceeded")))
+        paired = self.probe_with(self.Stub(error=TimeoutError("budget exceeded")))
         self.assertEqual(paired["err"], "timeout")
 
     def test_successful_navigation_with_fatal_reads_as_failure(self):
-        payload = self.run(self.Stub(result=self.RESULT, fatal=REJECTED_SOCKS))
+        payload = self.probe_with(self.Stub(result=self.RESULT, fatal=REJECTED_SOCKS))
         self.assertIs(payload["ok"], False)
         self.assertIsNone(payload["status"])
         self.assertEqual(payload["err"], f"ProxyRelayError: {REJECTED_SOCKS}")
@@ -708,15 +861,26 @@ class RunProbeRelayReasonTests(RelayCase):
         self.assertNotIn("page text", json.dumps(payload))
 
     def test_successful_navigation_without_fatal_stays_successful(self):
-        payload = self.run(self.Stub(result=self.RESULT))
-        self.assertIs(payload["ok"], True)
+        # В режиме content_only ok всегда false: sentinel не ищется. Успех виден
+        # по status/err/html, а пара с sentinel доказывает ok=True без fatal.
+        payload = self.probe_with(self.Stub(result=self.RESULT))
+        self.assertIs(payload["ok"], False)
         self.assertEqual(payload["status"], 200)
         self.assertEqual(payload["err"], "")
         self.assertIn("page text", payload["html"])
+        passed = self.probe_with(self.Stub(result=self.RESULT), sentinel="page text",
+                                 content_only=False)
+        self.assertIs(passed["ok"], True)
+        self.assertEqual(passed["err"], "")
+        spoiled = self.probe_with(self.Stub(result=self.RESULT, fatal=REJECTED_SOCKS),
+                                  sentinel="page text", content_only=False)
+        self.assertIs(spoiled["ok"], False)
+        self.assertIsNone(spoiled["status"])
+        self.assertEqual(spoiled["err"], f"ProxyRelayError: {REJECTED_SOCKS}")
 
     def test_fatal_hides_the_proxy_url_of_the_underlying_error(self):
         stub = self.Stub(error=RuntimeError(f"dial {self.proxy_url()} failed"), fatal=UNREACHABLE)
-        blob = json.dumps(self.run(stub))
+        blob = json.dumps(self.probe_with(stub))
         self.assertNotIn(SECRET, blob)
         self.assertNotIn(ENC, blob)
         self.assertIn(f"ProxyRelayError: {UNREACHABLE}", blob)
