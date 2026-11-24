@@ -22,6 +22,9 @@ WIDGET = "cf_jsd_turnstile_widget_200.html"
 INTERSTITIALS = ("cf_interstitial_200body_403.html", "cf_managed_interstitial_403.html")
 CLEARANCE = ({"name": "cf_clearance", "value": "v", "domain": ".site.invalid"},)
 OTHER_COOKIE = ({"name": "session", "value": "v", "domain": ".site.invalid"},)
+FOREIGN_CLEARANCE = ({"name": "cf_clearance", "value": "v", "domain": ".other.invalid"},)
+SUFFIX_CLEARANCE = ({"name": "cf_clearance", "value": "v", "domain": "ite.invalid"},)
+SUBDOMAIN_CLEARANCE = ({"name": "cf_clearance", "value": "v", "domain": "site.invalid"},)
 JSD = '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
 LOADER = '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>'
 ORCHESTRATE = '<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1?ray=x"></script>'
@@ -171,6 +174,13 @@ def scrapling_cases(probe):
     result, _ = scrapling(probe, status=200, first_headers=STALE, html=body(GITLAB),
                           cookies=OTHER_COOKIE, events=(), calls_setup=False)
     check("fallback keeps header without cf_clearance", result["headers"], STALE)
+    for label, cookies in (("other domain", FOREIGN_CLEARANCE), ("bare suffix", SUFFIX_CLEARANCE)):
+        result, _ = scrapling(probe, status=200, first_headers=STALE, html=body(GITLAB),
+                              cookies=cookies, events=(), calls_setup=False)
+        check(f"fallback keeps header with cf_clearance for {label}", result["headers"], STALE)
+    result, _ = scrapling(probe, status=200, first_headers=STALE, html=body(GITLAB),
+                          cookies=SUBDOMAIN_CLEARANCE, events=(), calls_setup=False)
+    check("fallback drops header with host-only cf_clearance", result["headers"], {"server": "cloudflare"})
     result, _ = scrapling(probe, status=200, first_headers=STALE, html=body(GITLAB),
                           cookies=None, events=(), calls_setup=False)
     check("fallback keeps header when cookies are missing", result["headers"], STALE)

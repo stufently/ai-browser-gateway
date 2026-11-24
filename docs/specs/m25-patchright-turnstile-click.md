@@ -84,8 +84,10 @@ git pull в клоне не делать; push в origin запрещён, ра�
 1. **Когда включается.** В `PlaywrightAdapter.navigate`, после первого
    чтения DOM и ДО существующей ветки ожидания JS, только если
    `self.package == "patchright"`: вердикт `detect_challenge(status,
-   headers, body)` — `suspected` или `interactive`, и среди правил есть
-   `body_just_a_moment` или `body_cf_chl_opt`. Иначе поведение прежнее
+   headers, body)` — `suspected` или `interactive`, среди правил есть
+   `header_cf_mitigated` (заголовок ставит край Cloudflare, телом страницы
+   его не подделать) И `body_just_a_moment` или `body_cf_chl_opt`. Тело
+   заглушки без заголовка — без клика и без ожидания. Иначе поведение прежнее
    (playwright, страницы без заглушки, 403 Akamai — без ожидания вообще).
 2. **Потолок ожидания.** `min(12 000 мс, половина остатка общего
    дедлайна)` через `_bound_timeout_ms`; при `TimeoutError` — не ждать.
@@ -108,7 +110,13 @@ git pull в клоне не делать; push в origin запрещён, ра�
    - во время заглушки никаких `page.evaluate`/`frame.evaluate`: только
      `title()`, локаторы, `bounding_box`, `input_value`, `mouse`,
      `context.cookies()`; любое исключение Playwright в шаге цикла — шаг
-     не удался, цикл продолжается.
+     не удался, цикл продолжается;
+   - у каждого вызова Playwright с параметром `timeout` (`bounding_box`,
+     `input_value` и любых других, что понадобятся) — явный `timeout` не
+     больше 1000 мс и не больше остатка потолка: штатные 30 с ожидания
+     локатора не должны съесть бюджет;
+   - клик только в точку внутри найденного контейнера токена, никаких
+     кликов по другим элементам и «на всякий случай».
 4. **После цикла.** Успех — перечитать DOM `_document_and_body` от
    последнего записанного документа и пройти существующую ветку ожидания
    (`latest is not response` → `_await_reload`), статус и заголовки — у
@@ -120,7 +128,9 @@ git pull в клоне не делать; push в origin запрещён, ра�
    3,5–5 с; без клика при заполненном токене; заглушка ушла без
    `cf_clearance` → прежний 403 (а с cookie тот же сценарий → 200);
    никогда не проходит → прежний 403 и потолок 12 с; потолок «половина
-   остатка» при малом бюджете; контейнер вне границ → нет клика;
+   остатка» при малом бюджете; контейнер, нарушающий ровно одну границу
+   (ширина 40, высота 20, высота 120 — граничные значения), → нет клика;
+   тело заглушки без `cf-mitigated` → нет клика и ожидания;
    `PlaywrightAdapter` → нет клика и ожидания; 403 Akamai → нет ожидания;
    ни одного `evaluate` пока заглушка на месте; сессия после прохода несёт
    `cf_clearance`. Таймеры в тестах сокращать патчем констант, где это не
@@ -129,7 +139,9 @@ git pull в клоне не делать; push в origin запрещён, ра�
 Мутанты, которые новые тесты обязаны убивать: сдвиг 25→26; пауза 4→1 с;
 снят пропуск при заполненном токене; снято условие `cf_clearance`;
 потолок 12→16 с; снята «половина остатка»; включение для playwright;
-снята граница размера контейнера; `evaluate` в цикле.
+снята любая одна граница размера контейнера или строгое неравенство
+заменено нестрогим; снято требование заголовка `cf-mitigated`;
+`evaluate` в цикле.
 
 ## Не трогать
 
@@ -152,7 +164,7 @@ git pull в клоне не делать; push в origin запрещён, ра�
 - **AC-001.** Полный сьют и замороженные пробы зелёные на публичном образе Python:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-002.** Чекеры обеих вех не изменены и печатают ok:
-  `bash -c 'printf "%s\n" "4cb49aa56948038c8534939be7f8b8ad0bf5a03ad86bbc0415ead43a1dd64950  docs/specs/checks/m24_cf_detector.py" "483344d7cf864da91c7de9a83341c82846544583eadb684c759e63a0fc5d8a42  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
+  `bash -c 'printf "%s\n" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "3e788084ea88b7046cf0d26c651f88d8e822c1bae18acdf6dfdffcb5d96ad11c  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
 - **AC-003.** Живой прогон, steamdb трижды проходит ступенью patchright в дефолтном бюджете:
   `bash -c 'd=$(mktemp -d) && for i in 1 2 3; do docker run --rm --user 1002:1002 -v "$PWD/bench":/opt/abg-src/bench:ro -v "$PWD/gateway":/opt/abg-src/gateway:ro -v "$PWD/bench/providers/docker/probe.py":/opt/abg/probe.py:ro ghcr.io/stufently/ai-browser-gateway-oneshot@sha256:bb1d5f0817d2db585def9389be12044ab19c9a7f578de735f5b5cba6aece195e https://steamdb.info/ > "$d/$i.json" && jq -e ".ok and .provider == \"patchright\" and .attempts[-1].status == 200 and .attempts[-1].challenge == \"none\" and .elapsed_ms < 20000" "$d/$i.json" || exit 1; done'`
 - **AC-004.** Живой прогон, scrapingcourse трижды проходит ступенью patchright в дефолтном бюджете:
@@ -163,7 +175,10 @@ git pull в клоне не делать; push в origin запрещён, ра�
   `bash -c 'b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)tests/test_probe.py" && test -n "$(git diff --name-only "$b" HEAD -- bench/providers/docker/probe.py)" && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
 
 Живые критерии (AC-003…AC-005) ходят в сеть с адреса хоста. Сбой сети или
-DNS — `blocked` с дословной ошибкой в `note`, а не правка кода.
+DNS — `blocked` с дословной ошибкой в `note`, а не правка кода. Если в
+AC-003/AC-004 первая ступень curl_cffi сама получила 200 (сайт перестал
+отдавать заглушку этому адресу), ступень patchright не проверена: статус
+`blocked` с выводом `attempts` в `note`, а не `fail` и не правка кода.
 
 ## Порядок работы: сначала замер
 

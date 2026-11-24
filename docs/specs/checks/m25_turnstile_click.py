@@ -264,9 +264,18 @@ def scenarios(probe):
     check("never passes: kept clicking", len(page.downs) >= 2, True)
     check("never passes: capped at 12 s", 10.5 <= elapsed <= 14.0, True)
 
-    page = Page(pass_on_click_after_s=0.0, boxes={1: BOXES[1]})
-    result, elapsed = run(probe, page, budget_ms=6_000)
-    check("no widget box in bounds: no click", page.downs, [])
+    # Each bound is broken alone, so dropping any single check is visible.
+    for label, box in (("too narrow", {"x": 100, "y": 200, "width": 40, "height": 65}),
+                       ("too low", {"x": 100, "y": 200, "width": 300, "height": 20}),
+                       ("too tall", {"x": 100, "y": 200, "width": 300, "height": 120})):
+        page = Page(pass_on_click_after_s=0.0, boxes={d: dict(box) for d in (1, 2, 3, 4)})
+        run(probe, page, budget_ms=3_000)
+        check(f"widget box {label}: no click", page.downs, [])
+
+    page = Page(pass_on_click_after_s=0.0, headers={"server": "cloudflare"})
+    result, elapsed = run(probe, page, budget_ms=30_000)
+    check("interstitial body without cf-mitigated: no click", page.downs, [])
+    check("interstitial body without cf-mitigated: no wait", elapsed < 2.0, True)
 
     page = Page(pass_on_click_after_s=0.0)
     result, elapsed = run(probe, page, budget_ms=30_000, adapter="playwright")

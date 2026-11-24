@@ -84,6 +84,13 @@ patchright 1.62.3, Chrome 156; Docker под пользователем 1002):
 Предположение: формулировки JSD-пути и загрузчика виджета стабильны у
 Cloudflare (видны на всех замеренных страницах 18.09 и 24.11.2026).
 
+Сознательный выбор (после ревью плана): iframe с хоста
+`challenges.cloudflare.com` выпадает из тела для всех браузерных
+адаптеров, включая бенч. Содержимое этого фрейма — служебный виджет
+Cloudflare, а не контент цели: sentinel или признак заглушки, найденный
+только в нём, ничего не говорит о самой странице. Заглушка остаётся видна
+по главному фрейму (пять решающих правил на обеих фикстурах).
+
 ## Что сделать
 
 ### 1. Детектор: пассивные скрипты не решают (`detect_challenge`)
@@ -113,8 +120,11 @@ Cloudflare (видны на всех замеренных страницах 18.
 - Иначе (обработчик не сработал, статус не совпал) — запасное правило:
   `cf-mitigated` снимается, только если статус 2xx,
   `detect_challenge(status, None, body)[0] == "none"` И в
-  `response.cookies` есть cookie с именем `cf_clearance`. Отсутствующий или
-  `None` `cookies` — значит cookie нет.
+  `response.cookies` есть cookie с именем `cf_clearance`, ПРИМЕНИМАЯ к хосту
+  итогового адреса (`response.url`): домен cookie без ведущей точки равен
+  хосту или хост кончается на `"." + домен` (cookie чужого домена или
+  «голый» суффикс вроде `ite.invalid` для `site.invalid` не считаются).
+  Отсутствующий или `None` `cookies` — значит cookie нет.
 - Вето по словам удалить целиком: `_SCRAPLING_CHALLENGE_STRINGS`,
   `_SCRAPLING_STALE_CF_HEADER_RULES`, `_scrapling_only_jsd_platform_paths`,
   `_scrapling_has_challenge_strings`.
@@ -166,14 +176,16 @@ Cloudflare (видны на всех замеренных страницах 18.
   с другим статусом не используется;
 - scrapling, запасное правило: снимается на gitlab, scrapingcourse,
   nowsecure при `cf_clearance`; остаётся без `cf_clearance` (тело чистое —
-  причина в cookie); остаётся на теле заглушки при `cf_clearance` (причина в
-  теле); остаётся вне 2xx;
+  причина в cookie); остаётся при `cf_clearance` чужого домена и «голого»
+  суффикса (причина в домене); остаётся на теле заглушки при `cf_clearance`
+  (причина в теле); остаётся вне 2xx;
 - patchright-тело: iframe `challenges.cloudflare.com` пропущен, обычный
   iframe прочитан, главный фрейм на этом хосте прочитан.
 
 Мутанты, которые новые тесты обязаны убивать (их потом прогонит отдельная
 веха): снять исключение JSD; снять исключение загрузчика; снять условие
-`cf_clearance`; снять сравнение статуса; снять проверку `frame ==
+`cf_clearance`; снять сверку домена cookie или заменить её на голый
+`endswith(домен)`; снять сравнение статуса; снять проверку `frame ==
 main_frame` в записи ответов; читать iframe `challenges.cloudflare.com`;
 не читать главный фрейм на хосте `challenges.cloudflare.com`.
 
@@ -204,7 +216,7 @@ main_frame` в записи ответов; читать iframe `challenges.clou
 - **AC-001.** Полный сьют и замороженные пробы зелёные на публичном образе Python:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-002.** Чекер вехи и фикстуры не изменены, чекер печатает ok:
-  `bash -c 'printf "%s\n" "4cb49aa56948038c8534939be7f8b8ad0bf5a03ad86bbc0415ead43a1dd64950  docs/specs/checks/m24_cf_detector.py" "6588ce1e6d1289fd7d6e45234e80e8965a04e235f1056561dca3b6badb662ff8  tests/fixtures/cf_interstitial_200body_403.html" "1bba04ac5f99e5f80119c1e404dd7d857f8e2d03ebfb9ebf13cbef1e0d07c2ac  tests/fixtures/cf_jsd_turnstile_widget_200.html" "e12d7a8e234fb35ca3c163c7bbcc0a9817b65ea9269251d1cfadcd42d6c4e033  tests/fixtures/cf_managed_interstitial_403.html" "98304a0909fbe5a70e23991a5140983e7eeb7127ba3153e5c2d1f8342f124b3f  tests/fixtures/cf_passed_gitlab_signin_200.html" "a30e63e8e2b2e94ef2b3d2ee880fae8461a1b9ab428e76ac3520550bfe910823  tests/fixtures/cf_passed_scrapingcourse_200.html" | sha256sum -c --quiet && test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/m24_cf_detector.py)" = ok'`
+  `bash -c 'printf "%s\n" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "6588ce1e6d1289fd7d6e45234e80e8965a04e235f1056561dca3b6badb662ff8  tests/fixtures/cf_interstitial_200body_403.html" "1bba04ac5f99e5f80119c1e404dd7d857f8e2d03ebfb9ebf13cbef1e0d07c2ac  tests/fixtures/cf_jsd_turnstile_widget_200.html" "e12d7a8e234fb35ca3c163c7bbcc0a9817b65ea9269251d1cfadcd42d6c4e033  tests/fixtures/cf_managed_interstitial_403.html" "98304a0909fbe5a70e23991a5140983e7eeb7127ba3153e5c2d1f8342f124b3f  tests/fixtures/cf_passed_gitlab_signin_200.html" "a30e63e8e2b2e94ef2b3d2ee880fae8461a1b9ab428e76ac3520550bfe910823  tests/fixtures/cf_passed_scrapingcourse_200.html" | sha256sum -c --quiet && test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/m24_cf_detector.py)" = ok'`
 - **AC-003.** Тесты вехи используют все четыре новые фикстуры:
   `bash -c 'for f in cf_passed_gitlab_signin_200 cf_passed_scrapingcourse_200 cf_jsd_turnstile_widget_200 cf_managed_interstitial_403; do grep -q "$f.html" tests/test_detect.py tests/test_probe.py || exit 1; done'`
 - **AC-004.** Вето по словам удалено из адаптера:
