@@ -89,11 +89,11 @@ git pull в клоне не делать; push в origin запрещён, ра�
    его не подделать) И `body_just_a_moment` или `body_cf_chl_opt`. Тело
    заглушки без заголовка — без клика и без ожидания. Иначе поведение прежнее
    (playwright, страницы без заглушки, 403 Akamai — без ожидания вообще).
-2. **Потолок ожидания.** Сначала `limit = _bound_timeout_ms(12_000)`
+2. **Потолок ожидания.** Сначала `limit = _bound_timeout_ms(10_000)`
    (сама функция режет только по ВСЕМУ остатку, пополам не делит), затем,
    если общий дедлайн задан, `limit = min(limit, int(_DEADLINE.remaining_s()
    * 1000 / 2))`; при `TimeoutError` — не ждать.
-   Константа 12 000 мс в модуле с комментарием-происхождением (замер:
+   Константа 10 000 мс в модуле с комментарием-происхождением (замер:
    проход за ≤7,3 с; половина остатка оставляет scrapling время, если клик
    не прошёл).
 3. **Цикл** (опрос каждые 250 мс через `page.wait_for_timeout`):
@@ -129,7 +129,7 @@ git pull в клоне не делать; push в origin запрещён, ра�
    проход со вторым кликом и точкой (x+25, середина); пауза между кликами
    3,5–5 с; без клика при заполненном токене; заглушка ушла без
    `cf_clearance` → прежний 403 (а с cookie тот же сценарий → 200);
-   никогда не проходит → прежний 403 и потолок 12 с; потолок «половина
+   никогда не проходит → прежний 403 и потолок 10 с; потолок «половина
    остатка» при малом бюджете; контейнер, нарушающий ровно одну границу
    (ширина 40, высота 20, высота 120 — граничные значения), → нет клика;
    тело заглушки без `cf-mitigated` → нет клика и ожидания;
@@ -140,7 +140,7 @@ git pull в клоне не делать; push в origin запрещён, ра�
 
 Мутанты, которые новые тесты обязаны убивать: сдвиг 25→26; пауза 4→1 с;
 снят пропуск при заполненном токене; снято условие `cf_clearance`;
-потолок 12→16 с; снята «половина остатка»; включение для playwright;
+потолок 10→14 с; снята «половина остатка»; включение для playwright;
 снята любая одна граница размера контейнера или строгое неравенство
 заменено нестрогим; снято требование заголовка `cf-mitigated`;
 `evaluate` в цикле.
@@ -166,7 +166,7 @@ git pull в клоне не делать; push в origin запрещён, ра�
 - **AC-001.** Полный сьют и замороженные пробы зелёные на публичном образе Python:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-002.** Чекеры обеих вех не изменены и печатают ok:
-  `bash -c 'printf "%s\n" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "90b8ea94df0f3036db09af65219ac441b9004618c96992f26a1575ad027c1f9f  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
+  `bash -c 'printf "%s\n" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
 - **AC-003.** Живой прогон, steamdb трижды проходит ступенью patchright в дефолтном бюджете:
   `bash -c 'd=$(mktemp -d) && for i in 1 2 3; do docker run --rm --user 1002:1002 -v "$PWD/bench":/opt/abg-src/bench:ro -v "$PWD/gateway":/opt/abg-src/gateway:ro -v "$PWD/bench/providers/docker/probe.py":/opt/abg/probe.py:ro ghcr.io/stufently/ai-browser-gateway-oneshot@sha256:bb1d5f0817d2db585def9389be12044ab19c9a7f578de735f5b5cba6aece195e https://steamdb.info/ > "$d/$i.json" && jq -e ".ok and .provider == \"patchright\" and .attempts[-1].status == 200 and .attempts[-1].challenge == \"none\" and .elapsed_ms < 20000" "$d/$i.json" || exit 1; done'`
 - **AC-004.** Живой прогон, scrapingcourse трижды проходит ступенью patchright в дефолтном бюджете:
@@ -220,7 +220,7 @@ AC-003/AC-004 первая ступень curl_cffi сама получила 20
 `report-blocked.md` (по каждому живому прогону: время, число кликов,
 заголовок страницы в конце, есть ли `cf_clearance`), если: клик по образцу
 Byparr не проходит заглушку на steamdb или scrapingcourse хотя бы в одном
-из трёх прогонов; проход не укладывается в потолок 12 с; для прохода нужно
+из трёх прогонов; проход не укладывается в потолок 10 с; для прохода нужно
 что-то из запрещённого в «Не трогать» (клик ОС, апгрейд, другой браузер,
 решатель); чекер требует поведения, противоречащего спеке; нужна правка
 вне разрешённых файлов. Спеку, чекеры, критерии и BASE не менять, rc не

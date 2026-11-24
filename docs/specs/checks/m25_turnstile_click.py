@@ -263,7 +263,7 @@ def scenarios(probe):
     check("never passes: original 403 kept", (result["status"], result["challenge"], result["err"]),
           (403, "suspected", ""))
     check("never passes: kept clicking", len(page.downs) >= 2, True)
-    check("never passes: capped at 12 s", 10.5 <= elapsed <= 14.0, True)
+    check("never passes: capped at 10 s", 8.5 <= elapsed <= 12.0, True)
 
     # Each bound is broken alone, so dropping any single check is visible.
     for label, box in (("too narrow", {"x": 100, "y": 200, "width": 40, "height": 65}),
