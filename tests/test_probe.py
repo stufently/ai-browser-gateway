@@ -2317,6 +2317,58 @@ class TurnstileClickTests(unittest.TestCase):
         self.assertGreaterEqual(elapsed, 1.5)
         self.assertLessEqual(elapsed, 3.0)
 
+    def test_click_with_only_just_a_moment_marker(self):
+        # M21: тело с только body_just_a_moment (без body_cf_chl_opt) должно запускать клик
+        page = self.Page(self, pass_on_click_after_s=0.0, headers={"cf-mitigated": "challenge"})
+        result = self.navigate(page, budget_ms=30_000)
+        self.assertEqual(result["status"], 200)
+        self.assertGreaterEqual(len(page.downs), 1)
+
+    def test_no_click_when_budget_expired_before_start(self):
+        # M22: при истёкшем бюджете клик не должен происходить
+        page = self.Page(self, pass_on_click_after_s=None)
+        import time as _time
+        started = _time.monotonic()
+        result = self.navigate(page, budget_ms=50)
+        elapsed = _time.monotonic() - started
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
+        self.assertLess(elapsed, 1.0)
+
+    def test_script_present_blocks_gone_confirmation(self):
+        # M24: при наличии скрипта заглушки _turnstile_gone должен возвращать False
+        page = self.Page(self, pass_on_click_after_s=None)
+        result = self.navigate(page, budget_ms=3_000)
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
+
+    def test_container_at_depth_4_is_found(self):
+        # M25: контейнер на глубине 4 должен быть найден
+        box = {"x": 100, "y": 200, "width": 300, "height": 65}
+        page = self.Page(self, pass_on_click_after_s=0.0, boxes={4: box})
+        result = self.navigate(page, budget_ms=30_000)
+        self.assertEqual(result["status"], 200)
+        self.assertGreaterEqual(len(page.downs), 1)
+
+    def test_gone_confirmation_requires_250ms_pause(self):
+        # M26: после ухода заглушки должно пройти минимум 250мс перед подтверждением
+        page = self.Page(self, pass_on_click_after_s=0.0)
+        import time as _time
+        started = _time.monotonic()
+        result = self.navigate(page, budget_ms=30_000)
+        elapsed = _time.monotonic() - started
+        self.assertEqual(result["status"], 200)
+        self.assertGreaterEqual(elapsed, 0.25)
+
+    def test_miss_cooldown_is_500ms(self):
+        # M27: пауза после промаха должна быть 500мс (с допуском)
+        page = self.Page(self, pass_on_click_after_s=None)
+        page.boxes = {}
+        import time as _time
+        started = _time.monotonic()
+        self.navigate(page, budget_ms=2_000)
+        elapsed = _time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 0.4)
+        self.assertLessEqual(elapsed, 1.5)
+
 
 if __name__ == "__main__":
     unittest.main()
