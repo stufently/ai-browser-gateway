@@ -2,8 +2,9 @@
 
 ABG_PROXY routes curl_cffi, patchright and scrapling through a single proxy.
 --proxy URL takes precedence and rejects userinfo (proxy_credentials_in_argv).
-Pass proxy credentials through ABG_PROXY. SOCKS5 credentials with browser
-steps enabled report proxy_unsupported. Invalid URLs report invalid_request.
+Pass proxy credentials through ABG_PROXY: browser steps receive them through a
+loopback relay inside the probe, so SOCKS5 with a password works with browser
+steps enabled. Invalid URLs report invalid_request.
 
 With no explicit proxy, the ladder starts direct and ABG_EGRESS_PROXY can
 add a final curl_cffi step. ABG_SESSION_DIR keeps sessions across runs,
@@ -54,7 +55,7 @@ class _ProxyRefusal(ValueError):
     """A proxy input rejected with a specific CLI error."""
 
 
-def _explicit_proxy(flags, *, allow_browser):
+def _explicit_proxy(flags):
     if flags:
         candidates = flags
     else:
@@ -67,11 +68,8 @@ def _explicit_proxy(flags, *, allow_browser):
                for char in proxy):
             raise ValueError('invalid proxy')
         parts = _proxy_parts(proxy)
-        if parts.username is not None:
-            if flags:
-                raise _ProxyRefusal('proxy_credentials_in_argv')
-            if parts.scheme in ('socks5', 'socks5h') and allow_browser:
-                raise _ProxyRefusal('proxy_unsupported')
+        if parts.username is not None and flags:
+            raise _ProxyRefusal('proxy_credentials_in_argv')
     # curl_cffi must resolve names at the proxy, as Chromium does with SOCKS5.
     return 'socks5h' + proxy[len(parts.scheme):] if parts.scheme == 'socks5' else proxy
 
@@ -181,7 +179,7 @@ def main(argv=None):
             parser.add_argument('--proxy', action='append')
             args = parser.parse_args(argv)
             profiles = egress_profiles()
-            proxy = _explicit_proxy(args.proxy, allow_browser=not args.no_browser)
+            proxy = _explicit_proxy(args.proxy)
             egress = tuple(profiles)
             route = 'direct'
             if proxy is not None:

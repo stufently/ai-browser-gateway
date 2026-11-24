@@ -113,15 +113,21 @@ class ProxyLadderTests(unittest.TestCase):
         result, calls = cli(('--proxy', FLAG))
         self.assert_route(result, calls, FLAG)
 
-    def test_socks_credentials_require_http_only(self):
+    def test_socks_credentials_reach_every_step(self):
+        """SOCKS5 с паролем больше не отказ: креды уезжают в пробы тем же ABG_PROXY."""
         for scheme in ('socks5', 'socks5h'):
             for userinfo in ('user1:s3cr%40t', 'user1'):
                 with self.subTest(scheme=scheme, userinfo=userinfo):
                     env = {'ABG_PROXY': f'{scheme}://{userinfo}@proxy.invalid:1080'}
-                    self.assert_refused((), env, 'proxy_unsupported')
+                    relayed = f'socks5h://{userinfo}@proxy.invalid:1080'
+                    result, calls = cli(environ=env)
+                    self.assert_route(result, calls, relayed)
                     result, calls = cli(('--no-browser',), environ=env)
-                    self.assert_route(result, calls, f'socks5h://{userinfo}@proxy.invalid:1080',
-                                      ['curl_cffi'])
+                    self.assert_route(result, calls, relayed, ['curl_cffi'])
+                    observed = ' '.join([result[1], result[2],
+                                         *(' '.join(c.args[0]) for c in calls)])
+                    for secret in ('s3cr%40t', 's3cr@t'):
+                        self.assertNotIn(secret, observed)
             proxy = f'{scheme}://proxy.invalid:1080'
             result, calls = cli(environ={'ABG_PROXY': proxy})
             self.assert_route(result, calls, 'socks5h://proxy.invalid:1080')
