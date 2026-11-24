@@ -127,6 +127,26 @@ def ladder():
               [("curl_cffi", "direct"), ("patchright", "direct"), ("scrapling", "direct")])
 
     s = Spawns()
+    res = invoke([URL], {"ABG_PROXY": "SOCKS5://s.invalid:1080",
+                         "PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK": "1"}, s)
+    check("явный socks5 уходит в пробы как socks5h", [env.get("ABG_PROXY") for _, env in s.calls],
+          ["socks5h://s.invalid:1080"] * 3)
+    check("PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK не уходит в пробу",
+          [("PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK" in env) for _, env in s.calls],
+          [False] * 3)
+
+    s = Spawns()
+    invoke([URL], {"ABG_EGRESS_PROXY": "socks5://e.invalid:1080"}, s)
+    check("ABG_EGRESS_PROXY socks5 не переписывается", [env.get("ABG_PROXY") for _, env in s.calls],
+          [None, None, None, "socks5://e.invalid:1080"])
+
+    s = Spawns()
+    res = invoke([URL], {"ABG_PROXY": "socks5://e.invalid:1080",
+                         "ABG_EGRESS_PROXY": "socks5://e.invalid:1080"}, s)
+    check("одинаковые socks5: сравнение до замены схемы", routes(res[1]),
+          [("curl_cffi", "explicit"), ("patchright", "explicit"), ("scrapling", "explicit")])
+
+    s = Spawns()
     flag = "http://flag.invalid:8080"
     res = invoke([URL, "--proxy", flag], {"ABG_PROXY": EXPLICIT}, s)
     check("--proxy сильнее ABG_PROXY", [env.get("ABG_PROXY") for _, env in s.calls], [flag] * 3)
@@ -210,11 +230,64 @@ def sessions():
               replayed({"ABG_PROXY": "http://user1:s3cr%40t@proxy.invalid:8081"}), False)
 
         s = Spawns()
-        invoke([URL], {**env, "ABG_PROXY": "http://other.invalid:1", "ABG_EGRESS_PROXY": EXPLICIT}, s)
-        last = s.calls[-1][1]
-        check("сессия: запасная egress-ступень без сессии",
-              (last.get("ABG_PROXY"), "ABG_SESSION" in last, "ABG_SESSION_EXPORT" in last),
-              (EXPLICIT, False, False))
+        invoke([URL], {**env, "ABG_PROXY": "socks5://s.invalid:1080", "ABG_SESSION_DIR": str(root)},
+               Spawns(statuses={"patchright": 200}, session_from="patchright"))
+        check("сессия: scope по URL после замены socks5 -> socks5h",
+              (root / scope("socks5h|s.invalid|1080|") / "example.invalid.json").is_file(), True)
+
+        shared = Path(tmp) / "shared"
+        shared.mkdir()
+        shared.chmod(0o777)
+        s = Spawns(statuses={"patchright": 200}, session_from="patchright")
+        invoke([URL], {"ABG_SESSION_DIR": str(shared), "ABG_PROXY": EXPLICIT}, s)
+        check("сессия: общий (0777) корень не используется", list(shared.rglob("*")), [])
+        shared.chmod(0o700)
+        s = Spawns(statuses={"patchright": 200}, session_from="patchright")
+        invoke([URL], {"ABG_SESSION_DIR": str(shared), "ABG_PROXY": EXPLICIT}, s)
+        check("сессия: тот же корень 0700 используется",
+              (shared / scope("http|proxy.invalid|8080|user1") / "example.invalid.json").is_file(), True)
+
+    fallback_never_touches_sessions()
+
+
+def fallback_never_touches_sessions():
+    from gateway.fetch import ProductFetcher
+    from gateway.models import PlanStep
+    import bench.runner.execute as execute
+
+    class Store:
+        def __init__(self):
+            self.used = []
+
+        def get(self, host):
+            self.used.append("get")
+            return dict(SESSION)
+
+        def put(self, host, value):
+            self.used.append("put")
+
+        def drop(self, host, value=None):
+            self.used.append("drop")
+
+    calls = []
+
+    def fetch_content(provider, **kwargs):
+        calls.append(kwargs)
+        return Mock(), None
+
+    for step, wanted in ((PlanStep("curl_cffi", "proxy", "egress"), ({}, [])),
+                         (PlanStep("curl_cffi", "explicit", "http"), ({"session"}, ["get"]))):
+        store, calls[:] = Store(), []
+        fetcher = ProductFetcher(URL, profiles={"explicit": EXPLICIT, "proxy": EGRESS},
+                                 sessions=store, route="explicit")
+        with patch.object(execute, "fetch_content", fetch_content):
+            try:
+                fetcher(step, 1000)
+            except Exception:
+                pass  # The Mock result may not satisfy the replay check; only the call matters.
+        keys = set(calls[0]) & {"session", "on_session"} if calls else "no call"
+        check(f"ProductFetcher {step.egress_profile}: сессия в вызове", keys, wanted[0] or set())
+        check(f"ProductFetcher {step.egress_profile}: обращения к хранилищу", store.used[:1], wanted[1])
 
 
 def load_probe():
@@ -244,14 +317,13 @@ def probe_side():
     fake = types.ModuleType("curl_cffi")
     fake.requests = requests
     with patch.dict(sys.modules, {"curl_cffi": fake, "curl_cffi.requests": requests}):
-        for given, sent in (("socks5://h.invalid:1080", "socks5h://h.invalid:1080"),
-                            ("SOCKS5://h.invalid:1080", "socks5h://h.invalid:1080"),
+        for given, sent in (("socks5://h.invalid:1080", "socks5://h.invalid:1080"),
                             ("socks5h://h.invalid:1080", "socks5h://h.invalid:1080"),
                             ("http://h.invalid:8080", "http://h.invalid:8080")):
             seen.clear()
             with patch.dict(os.environ, {"ABG_PROXY": given}):
                 probe.CurlCffiAdapter().navigate(URL)
-            check(f"curl_cffi proxy для {given}", seen, [sent])
+            check(f"curl_cffi proxy для {given} как есть", seen, [sent])
 
     with patch.dict(os.environ, {"ABG_PROXY": "http://u:p%40ss@h.invalid:8080"}):
         text = probe.redact("launch failed: password='p@ss' raw=p%40ss url=http://u:p%40ss@h.invalid:8080/")

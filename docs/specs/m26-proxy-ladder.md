@@ -69,18 +69,26 @@ patchright, scrapling.
   | `https://u:p@` (TLS до прокси) | схема принята, TLS до прокси начат (`curl: (60)` на самоподписанном) | схема принята (`ERR_PROXY_CERTIFICATE_INVALID`) | не мерил, тот же Chromium |
 
   Следствия, заложенные в веху: браузерам `socks5h` отдаётся как `socks5`
-  (Chromium и так резолвит имя у SOCKS5-прокси), curl_cffi `socks5`
-  получает как `socks5h` (иначе имя цели резолвится с хоста — утечка DNS и
-  расхождение с браузерами); SOCKS5 с паролем при включённых браузерах
-  невозможен — отказ до запуска проб.
+  (Chromium и так резолвит имя у SOCKS5-прокси; прежде `socks5h` у
+  браузеров не работал вовсе, так что совместимость не страдает); явный
+  прокси `socks5://` one-shot сам переписывает в `socks5h://` до раздачи
+  ступеням, чтобы curl_cffi тоже резолвил имя у прокси, как браузеры
+  (иначе имя цели резолвится с хоста). Запасную ступень
+  `ABG_EGRESS_PROXY` и саму пробу curl_cffi это не трогает — прежнее
+  поведение `socks5` там сохраняется. SOCKS5 с паролем при включённых
+  браузерах невозможен — отказ до запуска проб.
 - В тексте ошибок выше пароля нет; Chrome запускается с
   `--proxy-server=http://<прокси>:8080` без кредов (видно в `docker top`).
+- `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK` в образе 0.1.6 не
+  задан; Playwright запускает Chrome с `--proxy-bypass-list=<-loopback>`
+  (видно в `docker top`), то есть loopback тоже идёт через прокси, пока
+  эта переменная не пришла из окружения вызывающего.
 - Стенд `docs/specs/checks/m26_stand.sh` и чекер
   `docs/specs/checks/m26_proxy_ladder.py` прогнаны на эталонной реализации
   постановщика (черновая копия, не в репозитории): чекер `ok`, все шесть
-  сценариев стенда `ok` трижды подряд (5–20 с на сценарий); полный сьют и
+  сценариев стенда `ok` не меньше трёх раз (5–20 с на сценарий); полный сьют и
   замороженные пробы на эталоне зелёные (789 и 125 тестов). На BASE чекер
-  падает по делу (37 расхождений), стенд: `http`, `deny`, `compat` — FAIL,
+  падает по делу (40 расхождений), стенд: `http`, `deny`, `compat` — FAIL,
   причём первая половина `compat` (только `ABG_EGRESS_PROXY`) на BASE
   проходит — это и есть эталон обратной совместимости.
 
@@ -125,7 +133,11 @@ TLS — проверены только приём схемы и начало р
    `route_profile='explicit'`. Если задан и `ABG_EGRESS_PROXY`: значение
    ДРУГОЕ — запасная ступень `curl_cffi`/`proxy` остаётся последней, как
    сейчас; значение то же (сравнение строк после `strip`) — запасная
-   ступень не добавляется (тот же адрес второй раз не пробуем). Без явного
+   ступень не добавляется (тот же адрес второй раз не пробуем). Явный
+   прокси со схемой `socks5://` (без учёта регистра) после проверок п. 1–3
+   переписывается в `socks5h://` — так он уходит ВСЕМ ступеням маршрута и
+   так считается scope сессий (п. 6); сравнение с `ABG_EGRESS_PROXY`
+   идёт по исходной строке. `ABG_EGRESS_PROXY` не переписывается. Без явного
    прокси поведение и вывод прежние, включая `egress_profile` в
    `attempts` (`direct`/`proxy`).
 6. **Сессии.** `ProductFetcher(..., route='direct')`: сессии читаются и
@@ -139,18 +151,25 @@ TLS — проверены только приём схемы и начало р
    `hostname` — как их отдаёт `urlsplit`. Пароль в `identity` не входит:
    смена пароля не меняет адрес выхода, а хэш от пароля в имени каталога —
    утечка. Без прокси каталог прежний (корень `ABG_SESSION_DIR`), старые
-   файлы сессий остаются годными. `FileSessionStore` не менять: подкаталог
-   он создаёт сам (`mkdir(mode=0o700, parents=True)`).
+   файлы сессий остаются годными. Перед подкаталогом one-shot проверяет
+   сам корень `ABG_SESSION_DIR` тем же правилом, что
+   `FileSessionStore._private` (каталог, не ссылка, владелец — текущий uid,
+   нет битов group/other); корень не годен — сессий нет вовсе (`None`),
+   ступени идут без кэша. Иначе подкаталог в общем записываемом корне
+   обошёл бы проверку, которую прямой режим проходит. `FileSessionStore` не
+   менять: подкаталог он создаёт сам (`mkdir(mode=0o700, parents=True)`).
 7. **Проба.** В `playwright_proxy` схема `socks5h` → `socks5` в `server`
-   (без учёта регистра). В `CurlCffiAdapter.navigate` прокси со схемой
-   `socks5://` (без учёта регистра) отдаётся curl_cffi как `socks5h://`;
-   `CurlAdapter`, `PrimpAdapter`, входы и pydoll не трогать. `redact`
+   (без учёта регистра). Адаптеры curl/curl_cffi/primp, входы и pydoll
+   прокси получают как есть — не трогать. `redact`
    дополнительно заменяет на `***` пароль текущего `ABG_PROXY` — и в сыром
    (`p%40ss`), и в раскодированном (`p@ss`) виде, если пароль непустой;
    битый URL в `ABG_PROXY` не должен ронять `redact`.
-8. **Модульный docstring** `gateway/oneshot.py` описывает оба режима и
+8. **Окружение пробы.** `LocalLauncher.run` дополнительно не передаёт
+   пробе `PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK` (с ней
+   Chromium ходил бы на loopback мимо прокси).
+9. **Модульный docstring** `gateway/oneshot.py` описывает оба режима и
    отказы.
-9. **Тесты** (unittest, без сети и браузера, через подмену `Popen`, как в
+10. **Тесты** (unittest, без сети и браузера, через подмену `Popen`, как в
    `tests/test_oneshot.py`), каждый отказ — с проверкой ПРИЧИНЫ (точный
    stderr) и парным входом без нарушения, который проходит:
    все три ступени с `ABG_PROXY` и `egress_profile == 'explicit'`;
@@ -160,8 +179,11 @@ TLS — проверены только приём схемы и начало р
    stdout, stderr и argv проб; scope сессий (тот же прокси переигрывает,
    direct не берёт сессию прокси, другой логин/порт — другой каталог,
    другой пароль — тот же); `plan_product` с `route_profile` и его
-   валидация; проба: `socks5h`→`socks5` в `playwright_proxy`,
-   `socks5`→`socks5h` в curl_cffi, `redact` с паролем.
+   валидация; корень сессий 0777 → без кэша, 0700 → с кэшем; запасная
+   ступень `ProductFetcher` не читает и не пишет хранилище при
+   НЕПУСТОМ хранилище; явный `socks5`→`socks5h` в окружении всех ступеней,
+   `ABG_EGRESS_PROXY=socks5://` как есть; проба: `socks5h`→`socks5` в
+   `playwright_proxy`, curl_cffi получает прокси как есть, `redact` с паролем.
 
 Мутанты, которые новые тесты обязаны убивать: `--proxy` слабее
 `ABG_PROXY`; снят отказ по userinfo в `--proxy` (и вариант «только
@@ -170,7 +192,10 @@ TLS — проверены только приём схемы и начало р
 браузерная ступень на `direct` при явном прокси; запасная ступень
 удалена при другом `ABG_EGRESS_PROXY` или оставлена при том же; пароль
 вошёл в `identity`; логин или порт выпал из `identity`; сессия у
-запасной ступени; снят маппинг `socks5h`→`socks5` или `socks5`→`socks5h`;
+запасной ступени; снята проверка корня сессий; снят маппинг
+`socks5h`→`socks5` или явного `socks5`→`socks5h`; маппинг задел
+`ABG_EGRESS_PROXY`; сравнение с `ABG_EGRESS_PROXY` после замены схемы;
+`PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK` уходит в пробу;
 `redact` без раскодированного пароля.
 
 ## Не трогать
@@ -182,9 +207,8 @@ TLS — проверены только приём схемы и начало р
 - 🚨 Зону M25: `PatchrightAdapter` и всё, что M25 добавила для клика
   Turnstile (`_try_turnstile_click` и связанные константы/хелперы),
   `PlaywrightAdapter.navigate`, `_document_and_body`, `_await_reload`,
-  `detect_challenge`, `ScraplingAdapter.navigate`. В `probe.py` правятся
-  только `playwright_proxy`, `redact` и ветка прокси в
-  `CurlCffiAdapter.navigate`.
+  `detect_challenge`, `ScraplingAdapter.navigate`, все адаптеры. В
+  `probe.py` правятся только `playwright_proxy` и `redact`.
 - `bench/runner/`, `bench/providers/registry.py`, `gateway/sessions.py`,
   `gateway/api_http.py`, `gateway/service.py`, `gateway/httpapi.py`,
   `gateway/mcp_stdio.py`, `deploy/`, `scripts/`, `README.md`, `docs/`,
@@ -202,7 +226,7 @@ TLS — проверены только приём схемы и начало р
 - **AC-001.** Полный сьют и замороженные пробы зелёные на публичном образе Python:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-002.** Файлы стенда и чекеры M24/M25 не изменены, все три чекера печатают ok:
-  `bash -c 'printf "%s\n" "81b5f6c17e49ff762ac5520bb870a7fa2b44df8c08901750639fccac356f969f  docs/specs/checks/m26_proxy_ladder.py" "137304672fc4c18010af6ba3c47aaca984c6d541c6a60203dd293040a34ff000  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m26_proxy_ladder; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
+  `bash -c 'printf "%s\n" "7499cb8df4ecf1b4813b1bb21e0eaa2c84919ac55c1e02784441a65b1e300bef  docs/specs/checks/m26_proxy_ladder.py" "1c4d36dbc702cec28161853f9f14cc56e8b4b02f1ceaa1b217ce72f297a82778  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m26_proxy_ladder; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
 - **AC-003.** Стенд: без прокси цель недостижима, с HTTP-прокси с паролем curl_cffi берёт её через прокси:
   `bash -c 'test "$(bash docs/specs/checks/m26_stand.sh http)" = ok'`
 - **AC-004.** Стенд: браузерная ступень patchright идёт через прокси (страница с текстом только из JS):
@@ -227,7 +251,9 @@ Docker (нет образа, не создаётся сеть) — `blocked` с 
 
 ## Порядок работы
 
-Сначала пункты 4–6 и чекер (AC-002), затем стенд по сценариям в порядке
+До первой правки — чекер M25 на BASE (команда из AC-002 для
+`m25_turnstile_click`); не `ok` — blocker (см. контракт ниже). Затем пункты
+4–6 и чекер M26 (AC-002), затем стенд по сценариям в порядке
 `http → browser → deny → socks → compat → refuse`. На падении сценария
 смотреть `attempts` и лог прокси, а не подбирать ожидания: ожидания стенда
 посчитаны на эталоне и на BASE.
@@ -264,8 +290,10 @@ Docker (нет образа, не создаётся сеть) — `blocked` с 
 прокси), если: какой-то провайдер в образе не ходит через прокси схемой,
 которую таблица выше называет рабочей; для зелёного стенда нужна правка
 вне разрешённых файлов или в зоне M25; чекер или стенд требуют поведения,
-противоречащего спеке; M25 ещё не в `main` (в BASE нет
-`docs/specs/checks/m25_turnstile_click.py`). Спеку, стенд, чекеры,
+противоречащего спеке; M25 ещё не в `main` — признак не наличие файла
+чекера (он закоммичен раньше кода), а то, что
+`docs/specs/checks/m25_turnstile_click.py` на BASE, до первой правки,
+не печатает `ok`: тогда сразу blocker с выводом чекера, не править. Спеку, стенд, чекеры,
 критерии и BASE не менять, rc не выдумывать, наружу ничего не публиковать.
 
 ## Стыки с соседними вехами

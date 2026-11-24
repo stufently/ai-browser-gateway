@@ -148,9 +148,21 @@ compat)
     oneshot egress_only - "$Q_OPEN" "$G/gate"
     rc_is egress_only 0
     steps egress_only '[["curl_cffi","direct",403,"http_403"],["patchright","direct",403,"http_403"],["scrapling","direct",403,"http_403"],["curl_cffi","proxy",200,"none"]]'
+    # 403 от /gate одинаков напрямую и через p: источник каждого запроса
+    # этого прогона сверяется по журналу gate (адреса p и q в сети int).
+    p_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$id-int\").IPAddress}}" "$id-p")
+    q_ip=$(docker inspect -f "{{(index .NetworkSettings.Networks \"$id-int\").IPAddress}}" "$id-q")
+    [ -n "$p_ip" ] && [ -n "$q_ip" ] || fail "compat: нет адресов прокси в сети int"
+    seen=$(docker logs "$id-gate" 2>&1 | grep -c '^TARGET ' || :)
     oneshot both "$P_AUTH" "$Q_OPEN" "$G/gate"
     rc_is both 0
     steps both '[["curl_cffi","explicit",403,"http_403"],["patchright","explicit",403,"http_403"],["scrapling","explicit",403,"http_403"],["curl_cffi","proxy",200,"none"]]'
+    docker logs "$id-gate" 2>&1 | grep '^TARGET ' | tail -n +"$((seen + 1))" | grep ' /gate' | cut -d' ' -f2 > "$work/gate.src"
+    from_p=$(grep -cxF "$p_ip" "$work/gate.src" || :)
+    from_q=$(grep -cxF "$q_ip" "$work/gate.src" || :)
+    other=$(grep -cvxF -e "$p_ip" -e "$q_ip" "$work/gate.src" || :)
+    [ "$from_p" -ge 3 ] && [ "$from_q" -ge 1 ] && [ "$other" -eq 0 ] \
+        || fail "compat: источники /gate p=$from_p q=$from_q прочие=$other, ждали p>=3 q>=1 прочие=0"
     oneshot same "$Q_OPEN" "$Q_OPEN" "$T/deny"
     rc_is same 1
     steps same '[["curl_cffi","explicit",403,"http_403"],["patchright","explicit",403,"http_403"],["scrapling","explicit",403,"http_403"]]'
