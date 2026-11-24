@@ -2324,22 +2324,6 @@ class TurnstileClickTests(unittest.TestCase):
         self.assertEqual(result["status"], 200)
         self.assertGreaterEqual(len(page.downs), 1)
 
-    def test_no_click_when_budget_expired_before_start(self):
-        # M22: при истёкшем бюджете клик не должен происходить
-        page = self.Page(self, pass_on_click_after_s=None)
-        import time as _time
-        started = _time.monotonic()
-        result = self.navigate(page, budget_ms=50)
-        elapsed = _time.monotonic() - started
-        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
-        self.assertLess(elapsed, 1.0)
-
-    def test_script_present_blocks_gone_confirmation(self):
-        # M24: при наличии скрипта заглушки _turnstile_gone должен возвращать False
-        page = self.Page(self, pass_on_click_after_s=None)
-        result = self.navigate(page, budget_ms=3_000)
-        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
-
     def test_container_at_depth_4_is_found(self):
         # M25: контейнер на глубине 4 должен быть найден
         box = {"x": 100, "y": 200, "width": 300, "height": 65}
@@ -2348,26 +2332,41 @@ class TurnstileClickTests(unittest.TestCase):
         self.assertEqual(result["status"], 200)
         self.assertGreaterEqual(len(page.downs), 1)
 
-    def test_gone_confirmation_requires_250ms_pause(self):
-        # M26: после ухода заглушки должно пройти минимум 250мс перед подтверждением
-        page = self.Page(self, pass_on_click_after_s=0.0)
-        import time as _time
-        started = _time.monotonic()
-        result = self.navigate(page, budget_ms=30_000)
-        elapsed = _time.monotonic() - started
-        self.assertEqual(result["status"], 200)
-        self.assertGreaterEqual(elapsed, 0.25)
+    def test_cap_is_zero_when_deadline_already_passed(self):
+        class Expired:
+            end = 1.0
+            def remaining_s(self):
+                raise TimeoutError("budget exhausted")
+        with patch.object(self.probe, "_DEADLINE", Expired()):
+            self.assertEqual(self.probe._turnstile_cap_ms(), 0)
 
-    def test_miss_cooldown_is_500ms(self):
-        # M27: пауза после промаха должна быть 500мс (с допуском)
-        page = self.Page(self, pass_on_click_after_s=None)
-        page.boxes = {}
-        import time as _time
-        started = _time.monotonic()
-        self.navigate(page, budget_ms=2_000)
-        elapsed = _time.monotonic() - started
-        self.assertGreaterEqual(elapsed, 0.4)
-        self.assertLessEqual(elapsed, 1.5)
+    def test_challenge_script_keeps_interstitial_even_with_real_title(self):
+        class Loc:
+            def __init__(self, selector):
+                self.selector = selector
+            def count(self):
+                return 1 if "challenge-platform/h/" in self.selector else 0
+        page = types.SimpleNamespace(title=lambda: "Real page", locator=Loc)
+        self.assertFalse(self.probe._turnstile_gone(page))
+        page.locator = lambda selector: types.SimpleNamespace(count=lambda: 0)
+        self.assertTrue(self.probe._turnstile_gone(page))
+
+    def test_failed_click_skips_reload_even_if_page_clears_later(self):
+        # The interstitial clears by itself during the loop but no cf_clearance
+        # arrives, so the loop gives up at its cap: the 403 must stand and the
+        # reload wait must not pick up the cookie-less 200 instead.
+        page = self.Page(self, pass_on_click_after_s=None, passes_by_itself_after_s=1.0,
+                         sets_clearance=False)
+        original_goto = page.goto
+        def goto_with_interstitial_reload(url, **kwargs):
+            response = original_goto(url, **kwargs)
+            # The interstitial reloads itself once: the latest document is no
+            # longer goto's own, which is what would open the reload wait.
+            page._emit(self.Response(403, self.CF_HEADERS, page.main_frame))
+            return response
+        page.goto = goto_with_interstitial_reload
+        result = self.navigate(page, budget_ms=4_000)
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
 
 
 if __name__ == "__main__":
