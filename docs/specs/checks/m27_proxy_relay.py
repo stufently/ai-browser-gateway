@@ -131,14 +131,19 @@ class Upstream:
         self.sock.close()
 
 
-def read_head(conn):
+def read_head_rest(conn):
     data = b""
     while b"\r\n\r\n" not in data:
         chunk = conn.recv(4096)
         if not chunk:
             break
         data += chunk
-    return data.partition(b"\r\n\r\n")[0].decode("latin-1")
+    head, _, rest = data.partition(b"\r\n\r\n")
+    return head.decode("latin-1"), rest
+
+
+def read_head(conn):
+    return read_head_rest(conn)[0]
 
 
 def recv_exact(conn, size):
@@ -153,8 +158,12 @@ def recv_exact(conn, size):
 
 def http_upstream(connect_status=200):
     def handler(conn, log):
-        head = read_head(conn)
+        head, rest = read_head_rest(conn)
         log.append(head)
+        length = [int(line.split(":", 1)[1]) for line in head.split("\r\n")
+                  if line.lower().startswith("content-length:")]
+        if length:
+            log.append(("body", rest + recv_exact(conn, length[0] - len(rest))))
         if head.startswith("CONNECT "):
             if connect_status != 200:
                 conn.sendall(f"HTTP/1.1 {connect_status} No\r\nProxy-Authenticate: Basic "
@@ -279,7 +288,8 @@ def relay_side():
                            b"HTTP/1.1 200 Connection established\r\n\r\nPING")
                 check(f"{label}: CONNECT-туннель", (got.split(b"\r\n", 1)[0][:12], got[-4:]),
                       (b"HTTP/1.1 200", b"PING"))
-                head = up.log[-1] if up.log else ""
+                heads = [e for e in up.log if isinstance(e, str)]
+                head = heads[-1] if heads else ""
                 lines = head.split("\r\n")
                 check(f"{label}: CONNECT наверх", (lines[0], BASIC in lines),
                       ("CONNECT a.example:443 HTTP/1.1", True))
@@ -288,7 +298,8 @@ def relay_side():
                                  b"Proxy-Authorization: Basic Zm9vOmJhcg==\r\n\r\n",
                            b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
                 check(f"{label}: plain HTTP ответ", got, b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
-                head = up.log[-1] if up.log else ""
+                heads = [e for e in up.log if isinstance(e, str)]
+                head = heads[-1] if heads else ""
                 lines = [line.lower() for line in head.split("\r\n")]
                 check(f"{label}: plain HTTP наверх", (
                     head.split("\r\n")[0], BASIC in head.split("\r\n"),
@@ -296,6 +307,12 @@ def relay_side():
                     any(line.startswith("proxy-connection:") for line in lines),
                     "connection: close" in lines),
                     ("GET http://b.example/x?y=1 HTTP/1.1", True, False, False, True))
+                got = talk(port, b"POST http://b.example/form HTTP/1.1\r\nHost: b.example\r\n"
+                                 b"Content-Length: 9\r\n\r\nfield=abc",
+                           b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")
+                bodies = [e[1] for e in up.log if isinstance(e, tuple) and e[0] == "body"]
+                check(f"{label}: тело POST дошло наверх", (got[-2:], bodies[-1:]),
+                      (b"hi", [b"field=abc"]))
             adapter.close()
             if port is not None:
                 try:

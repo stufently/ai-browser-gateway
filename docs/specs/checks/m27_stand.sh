@@ -20,6 +20,9 @@ GOST=gogost/gost:3.3.3@sha256:f266f957c6e4f8d433ed23202a5745fa4969d08f3f0ef034fb
 SECRET='p@ss1'
 ENC='p%40ss1'
 WRONG='wr0ngpw'
+# base64 от "u1:p@ss1" и "u1:wr0ngpw" — так пароль выглядит в Proxy-Authorization.
+B64='dTE6cEBzczE='
+B64_WRONG='dTE6d3Iwbmdwdw=='
 id="m27-$$-$RANDOM"
 work=$(mktemp -d)
 chmod 0755 "$work"
@@ -94,7 +97,7 @@ oneshot() {
     echo "$rc" > "$work/$name.rc"
     unset ABG_PROXY
     for f in json err top; do
-        if grep -qF -e "$SECRET" -e "$ENC" -e "$WRONG" "$work/$name.$f"; then
+        if grep -qF -e "$SECRET" -e "$ENC" -e "$WRONG" -e "$B64" -e "$B64_WRONG" "$work/$name.$f"; then
             fail "$name: пароль прокси в $f"
         fi
     done
@@ -112,7 +115,7 @@ probe() {
         > "$work/$name.json" 2> "$work/$name.err" || :
     unset ABG_PROXY
     for f in json err; do
-        if grep -qF -e "$SECRET" -e "$ENC" -e "$WRONG" "$work/$name.$f"; then
+        if grep -qF -e "$SECRET" -e "$ENC" -e "$WRONG" -e "$B64" -e "$B64_WRONG" "$work/$name.$f"; then
             fail "$name: пароль прокси в $f"
         fi
     done
@@ -247,6 +250,35 @@ tls)
     content tls patchright "m26 rendered by script"
     steps tls '[["curl_cffi","explicit",200,"content_missing"],["patchright","explicit",200,"none"]]'
     relay_only tls
+    # CONNECT поверх TLS до прокси: настоящий _ProxyRelay пробы, сырой
+    # туннель к цели и HTTP-запрос внутри него (https-цели Chromium ходят так же).
+    export ABG_PROXY="https://u1:$ENC@$id-p:8443"
+    docker run --rm --network "$id-int" --user 1002:1002 -e ABG_PROXY -e T_HOST="$A" \
+        -e SSL_CERT_FILE=/ca/ca.pem -v "$CA_FILE":/ca/ca.pem:ro \
+        -v "$PWD/bench/providers/docker/probe.py":/opt/abg/probe.py:ro \
+        --entrypoint python3 "$IMG" -c '
+import os, socket, sys
+sys.path.insert(0, "/opt/abg")
+import probe
+relay = probe._ProxyRelay(os.environ["ABG_PROXY"])
+port = int(relay.start().rsplit(":", 1)[1])
+host = os.environ["T_HOST"]
+s = socket.create_connection(("127.0.0.1", port), 10)
+s.sendall(f"CONNECT {host}:8000 HTTP/1.1\r\nHost: {host}:8000\r\n\r\n".encode())
+head = s.recv(4096)
+s.sendall(f"GET /ok HTTP/1.1\r\nHost: {host}:8000\r\nConnection: close\r\n\r\n".encode())
+body = b""
+while True:
+    chunk = s.recv(65536)
+    if not chunk:
+        break
+    body += chunk
+relay.close()
+print(head.split(b"\r\n")[0].decode(), b"m26 marker text" in body)
+' > "$work/tunnel.out" 2> "$work/tunnel.err" || :
+    unset ABG_PROXY
+    [ "$(cat "$work/tunnel.out")" = "HTTP/1.1 200 Connection established True" ] \
+        || fail "tls: туннель через https-прокси: $(head -c 300 "$work/tunnel.out") $(head -c 300 "$work/tunnel.err")"
     CA_FILE=
     # Без доверия к CA (SSL_CERT_FILE не задан) релей отказывает по TLS.
     probe p-tls-untrusted "https://u1:$ENC@$id-p:8443" patchright "$T/js"

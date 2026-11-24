@@ -69,6 +69,11 @@ curl_cffi, как и сейчас, ходит к внешнему прокси �
   паролем CDP-обработчик отвечал `CancelAuth`, и страница с 401 читалась.
   Это поведение прямого режима, оно вне вехи; чинить отдельно для всех
   режимов сразу. Cross-site картинка с 401 загрузку не держит.
+- **`ABG_PROXY` в окружении процессов браузера** (драйвер и Chrome
+  наследуют окружение пробы, пароль виден в `/proc/<pid>/environ` тому же
+  uid) — так было и до M27, в этой вехе НЕ меняется: правка задела бы
+  `redact` (он читает `ABG_PROXY` из окружения) и запуск scrapling.
+  Открытый вопрос владельцу, отдельная веха.
 - **one-shot:** отказ `proxy_unsupported` убирается совсем (других причин
   у него нет). `proxy_credentials_in_argv` и `invalid_request` — без
   изменений. Кэш сессий не меняется: scope по-прежнему от identity прокси.
@@ -139,22 +144,28 @@ https-прокси с публичным сертификатом — через
    `"http://127.0.0.1:<порт>"`; `close()` закрывает слушающий сокет и все
    живые соединения и дожидается своих потоков (join с таймаутом, потоки
    `daemon=True`); `fatal: str | None` — первый отказ уровня прокси (п. 4).
-   Креды — `unquote` от userinfo; для SOCKS5 логин или пароль длиннее
+   Креды — `unquote` от userinfo; нет пароля в URL (`http://user1@…`) —
+   пароль пустая строка, не ошибка; для SOCKS5 логин или пароль длиннее
    255 байт в UTF-8 — `ProxyRelayError` из конструктора, до запуска браузера.
 2. **Протокол со стороны Chromium.** Заголовок запроса читается до
    `\r\n\r\n`, не больше 64 KiB.
    - `CONNECT host:port` (https, ws, wss): открыть туннель наверх; успех —
      клиенту `HTTP/1.1 200 Connection established\r\n\r\n`, затем байты в
-     обе стороны до закрытия любой стороны.
+     обе стороны до закрытия любой стороны. Байты, прочитанные вместе с
+     заголовком CONNECT (после `\r\n\r\n`), уходят в туннель первыми.
    - Запрос с absolute-URI `http://…` (http-цели у HTTP-прокси): у
      http/https-прокси переслать наверх тот же request line; у SOCKS5 —
      туннель к `host:port` из URI и request line в origin-form
      (`GET /path?query HTTP/1.1`). В обоих случаях убрать заголовки
      клиента `Proxy-Authorization`, `Proxy-Connection`, `Connection`,
      добавить `Connection: close` (и `Proxy-Authorization` — только у
-     http/https), ответ сервера отдать клиенту как есть и закрыть
+     http/https). Тело запроса (байты после `\r\n\r\n`, прочитанные вместе
+     с заголовком, и всё, что клиент пришлёт дальше) пересылается наверх
+     как есть до закрытия. Ответ сервера отдать клиенту как есть и закрыть
      соединение после него: на keep-alive следующий запрос ушёл бы без
-     авторизации или не в тот туннель.
+     авторизации или не в тот туннель. Заголовки ответа не переписывать:
+     запрос наверх уже несёт `Connection: close`, а запрос на соединении,
+     которое закрыл релей, Chromium повторяет сам (стенд зелёный 3/3).
    - Иное (не http-схема в absolute-URI) — `400` и закрыть.
 3. **Протокол наверх.**
    - http: `CONNECT host:port HTTP/1.1` с `Host` и
@@ -176,7 +187,10 @@ https-прокси с публичным сертификатом — через
    reply ≠ 0) — только 502 клиенту, `fatal` НЕ трогает. `run_probe`: если у
    адаптера `fatal` задан — `err` равен `redact("ProxyRelayError: " + fatal)`,
    и при исключении навигации (в том числе таймауте), и после успешной
-   навигации; без `fatal` — прежний `err`. Пароля в `fatal` нет по
+   навигации; во втором случае payload — как у исключения (`ok: false`,
+   `status: null`, без `html`/`text` содержимого страницы), чтобы шлюз не
+   принял страницу, часть которой не получила авторизацию. Без `fatal` —
+   прежний `err`. Пароля в `fatal` нет по
    построению; `redact` не менять.
 5. **Адаптеры.** `PatchrightAdapter` (через `PlaywrightAdapter.start` при
    `package == "patchright"`) и `ScraplingAdapter.start` получают прокси
@@ -204,17 +218,21 @@ https-прокси с публичным сертификатом — через
    `test_proxy_credentials_answer_only_proxy_auth_challenges` и
    `test_both_playwright_packages_get_proxy_server` в `tests/test_probe.py`,
    `test_socks_credentials_require_http_only` в `tests/test_proxy_ladder.py`.
+   ⚠️ Если класс `ProxyWiringTests` после слияния усиления
+   `TurnstileClickTests` изменился — переписывать те же три теста по
+   смыслу, остальное в классе не трогать.
    Остальные существующие тесты не ослаблять и не удалять. Каждый отказ —
    с проверкой ПРИЧИНЫ (точный `err` или точный ответ клиенту) и парным
    входом без нарушения, который проходит. Новые тесты обязаны убивать
    мутантов: релей включается без userinfo; `username`/`password` остались
    в прокси запуска; слушает не `127.0.0.1`; нет `Proxy-Authorization` на
    CONNECT или на plain HTTP; `Proxy-Authorization` клиента проходит
-   наверх; нет `Connection: close`; SOCKS5 шлёт `ATYP=0x01` (резолв у
+   наверх; нет `Connection: close`; тело POST или байты после заголовка
+   CONNECT потеряны; URL без пароля роняет релей; SOCKS5 шлёт `ATYP=0x01` (резолв у
    себя) или не раскодирует `%40` в пароле; 407 наверху отдан клиенту как
    407; отказ цели (SOCKS reply 5, CONNECT 503) записан в `fatal`;
    `run_probe` не подставляет `fatal` в `err` при таймауте или после
-   успешной навигации; `close()` не закрывает живые соединения или
+   успешной навигации, или после успешной навигации оставляет `ok: true`; `close()` не закрывает живые соединения или
    слушающий сокет (порт принимает после `close`); релей не закрыт, если
    `browser.close()` бросил; релей не закрыт при упавшем launch; релей
    включён у пакета `playwright`; флаг WebRTC или `block_webrtc` пропал;
@@ -258,7 +276,7 @@ https-прокси с публичным сертификатом — через
 - **AC-001.** Полный сьют и замороженные пробы зелёные на публичном образе Python:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-002.** Файлы стендов M26/M27 и чекеры M24/M25 не изменены, чекеры M24, M25 и M27 печатают ok:
-  `bash -c 'printf "%s\n" "cfdc8bdf2ee0d5c403302c5d8bf4a715a18be09488da1332be4b887ef00cb3eb  docs/specs/checks/m27_proxy_relay.py" "d42b08bf15e9d5fea3fd75f4c90c4bfa860328dfa33e6c405f6ee866196450c8  docs/specs/checks/m27_stand.sh" "d29a11ae6ce374b8a9f90fe925cd71cd67fd4baf86d569cd496c685b5350f246  docs/specs/checks/m27_target.py" "934e6b16c590b021fa0fb51c5d07edaadc108e503d81dd9f86a1507ade9a287f  docs/specs/checks/m26_proxy_ladder.py" "4aa0bedf53ea6949408a87504a95f25c5e85a4a97c71214b49a3479112992e49  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m27_proxy_relay; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 timeout 300 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
+  `bash -c 'printf "%s\n" "de2dde2910f3da4d0e5955381edfc55869b69591cf5041a38bf0d39ab943db85  docs/specs/checks/m27_proxy_relay.py" "a28bf73bd62ad61567b3380bab2244b34577e3f36d3a75987c620efb2f9aa4b3  docs/specs/checks/m27_stand.sh" "d29a11ae6ce374b8a9f90fe925cd71cd67fd4baf86d569cd496c685b5350f246  docs/specs/checks/m27_target.py" "934e6b16c590b021fa0fb51c5d07edaadc108e503d81dd9f86a1507ade9a287f  docs/specs/checks/m26_proxy_ladder.py" "4aa0bedf53ea6949408a87504a95f25c5e85a4a97c71214b49a3479112992e49  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m27_proxy_relay; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 timeout 300 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
 - **AC-003.** Чекер M26 расходится ровно в двух снятых отказах SOCKS5 с паролем, остальное (лестница, сессии, проба) по-прежнему ok:
   `bash -c 'out=$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/m26_proxy_ladder.py); test "$(printf "%s\n" "$out" | wc -l)" = 4 && test "$(printf "%s\n" "$out" | sed "s/:.*//" | LC_ALL=C sort | uniq -c | tr -s " " | tr "\n" "|")" = " 2 socks5 с паролем и браузерами| 2 socks5h с паролем и браузерами|"'`
 - **AC-004.** Стенд M26 без изменений: curl_cffi через прокси с паролем, SOCKS без кредов у всех ступеней, совместимость с ABG_EGRESS_PROXY:
@@ -273,7 +291,7 @@ https-прокси с публичным сертификатом — через
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh socks)" = ok'`
 - **AC-009.** Стенд: 401 цели без Authorization, неверный пароль даёт точную причину в err пробы:
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh auth)" = ok'`
-- **AC-010.** Стенд: https-прокси с паролем через релей, без доверия к CA отказ по TLS:
+- **AC-010.** Стенд: https-прокси с паролем через релей, CONNECT-туннель поверх TLS, без доверия к CA отказ по TLS:
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh tls)" = ok'`
 - **AC-011.** Стенд: креды в argv по-прежнему отказ без единого запроса через прокси:
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh refuse)" = ok'`
@@ -283,16 +301,20 @@ https-прокси с публичным сертификатом — через
 Что проверяет каждый сценарий стенда — в самом `m27_stand.sh`: сети
 `--internal`, цель только за прокси, `attempts` сверяются целиком
 (провайдер, `egress_profile`, статус, `error_type`), пароль (верный и
-неверный, в сыром и `%40`-виде) ищется в stdout, stderr и `docker top` во
-время каждого прогона; Chrome обязан стоять на
+неверный, в сыром, `%40`- и base64-виде `user:password`) ищется в stdout,
+stderr и `docker top` во время каждого прогона; сценарий `tls` дополнительно
+открывает настоящим `_ProxyRelay` сырой CONNECT-туннель поверх TLS до
+прокси и гонит через него HTTP-запрос; Chrome обязан стоять на
 `--proxy-server=http://127.0.0.1:<порт>` и ни разу на адресе прокси.
 Стенд в интернет не ходит. Сбой Docker (нет образа, не создаётся сеть) —
 `blocked` с дословной ошибкой в `note`, а не правка стенда или кода.
 
 ## Порядок работы
 
-До первой правки — критерий AC-012 на свежем клоне (rc 0 обязателен:
-иначе BASE не тот, это blocker) и чекер M25 (команда из AC-002 для
+До первой правки — первая половина AC-012 на свежем клоне:
+`b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD` (rc 0
+обязателен: иначе BASE не тот, это blocker; вторая половина AC-012 до
+работы падает по построению — новых файлов ещё нет) и чекер M25 (команда из AC-002 для
 `m25_turnstile_click`). Затем пункты 1–5, тесты релея и чекер M27, затем
 п. 7 и AC-003, затем стенд в порядке `relay → frame → sw → socks → auth →
 tls → refuse`, затем AC-004 и полный сьют. На падении сценария смотреть
@@ -328,7 +350,7 @@ sha256, а критерий границ требует чистого дере�
 
 Остановиться и записать один список blocker с уликами в
 `report-blocked.md` (вывод сценария, `attempts`, `err` пробы, хвост лога
-прокси), если: AC-012 на свежем клоне до правок не rc 0 (в базе нет
+прокси), если: первая половина AC-012 на свежем клоне до правок не rc 0 (в базе нет
 слияния `TurnstileClickTests` или лишние коммиты); чекер M25 на BASE не
 `ok`; Chromium в образе не ходит через релей схемой, которую спека
 называет рабочей; для зелёного стенда нужна правка вне разрешённых файлов,
