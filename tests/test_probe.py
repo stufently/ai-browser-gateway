@@ -1503,8 +1503,31 @@ class ProxyWiringTests(unittest.TestCase):
                 self.assertEqual(flag in patchright_flags, bool(proxy))
                 self.assertIs(session.call_args.kwargs.get("block_webrtc", False), bool(proxy))
 
-    def test_proxy_credentials_answer_only_proxy_auth_challenges(self):
-        proxy = "http://user1:p%40ss@proxy.invalid:8080"
+    def test_relay_answers_any_auth_challenge_with_cancel_auth(self):
+        """Креды прокси знает только релей: браузер получает адрес релея, а CDP
+        на любой source отвечает CancelAuth — отдавать браузеру нечего."""
+        proxy = "http://user1:s3cr%40t@127.0.0.1:9"
+        expected = [
+            call("Fetch.enable", {"handleAuthRequests": True, "patterns": [{"urlPattern": "*"}]}),
+            call("Fetch.continueRequest", {"requestId": "request"}),
+            call("Fetch.continueWithAuth", {"requestId": "407",
+                                            "authChallengeResponse": {"response": "CancelAuth"}}),
+            call("Fetch.continueWithAuth", {"requestId": "401",
+                                            "authChallengeResponse": {"response": "CancelAuth"}}),
+        ]
+        events = (("Fetch.requestPaused", {"requestId": "request"}),
+                  ("Fetch.authRequired", {"requestId": "407", "authChallenge": {"source": "Proxy"}}),
+                  ("Fetch.authRequired", {"requestId": "401",
+                                          "authChallenge": {"source": "Server"}}))
+
+        def replay(cdp):
+            # События уходят во ВСЕ подписки сессии: второй подписчик не должен
+            # отвечать на вызов авторизации ничем, кроме CancelAuth.
+            for name, event in events:
+                for entry in cdp.on.call_args_list:
+                    if entry.args[0] == name:
+                        entry.args[1](event)
+
         for adapter_name in ("patchright", "scrapling"):
             runtime = Mock()
             context = Mock()
@@ -1514,11 +1537,19 @@ class ProxyWiringTests(unittest.TestCase):
             sync_playwright.return_value.start.return_value = runtime
             session = MagicMock()
 
-            def fetch(url, *, page_setup, **kwargs):
-                page_setup(page)
+            def fetch(url, *, page_setup=None, **kwargs):
+                if page_setup is not None:
+                    page_setup(page)
                 return types.SimpleNamespace(status=200, url=url, body=b"ok")
 
             session.return_value.fetch.side_effect = fetch
+            created = []
+
+            def new_cdp_session(target):
+                created.append((target, Mock()))
+                return created[-1][1]
+
+            context.new_cdp_session.side_effect = new_cdp_session
             modules = {
                 "patchright.sync_api": types.SimpleNamespace(sync_playwright=sync_playwright),
                 "scrapling.fetchers": types.SimpleNamespace(StealthySession=session),
@@ -1527,36 +1558,34 @@ class ProxyWiringTests(unittest.TestCase):
                     os.environ, {"ABG_PROXY": proxy}):
                 adapter = self.probe.make_adapter(adapter_name)
                 adapter.start()
-                if adapter_name == "scrapling":
-                    for _ in range(2):
-                        adapter.navigate("http://target.invalid/")
-                launch = runtime.chromium.launch if adapter_name == "patchright" else session
-                self.assertEqual(launch.call_args.kwargs["proxy"],
-                                 {"server": "http://proxy.invalid:8080"})
-                self.assertNotIn("http_credentials", launch.call_args.kwargs)
-                context.new_cdp_session.assert_called_once_with(page)
-                cdp = context.new_cdp_session.return_value
-                callbacks = dict(entry.args for entry in cdp.on.call_args_list)
-                callbacks["Fetch.requestPaused"]({"requestId": "request"})
-                challenge = callbacks["Fetch.authRequired"]
-                challenge({"requestId": "407", "authChallenge": {"source": "Proxy"}})
-                challenge({"requestId": "407", "authChallenge": {"source": "Proxy"}})
-                challenge({"requestId": "401", "authChallenge": {"source": "Server"}})
-                self.assertEqual(cdp.send.call_args_list, [
-                    call("Fetch.enable", {"handleAuthRequests": True, "patterns": [{"urlPattern": "*"}]}),
-                    call("Fetch.continueRequest", {"requestId": "request"}),
-                    call("Fetch.continueWithAuth", {"requestId": "407", "authChallengeResponse": {
-                        "response": "ProvideCredentials", "username": "user1", "password": "p@ss"}}),
-                    call("Fetch.continueWithAuth", {"requestId": "407", "authChallengeResponse": {
-                        "response": "CancelAuth"}}),
-                    call("Fetch.continueWithAuth", {"requestId": "401", "authChallengeResponse": {
-                        "response": "CancelAuth"}}),
-                ])
-                if adapter_name == "patchright":
-                    self.assertEqual(context.on.call_args.args[0], "page")
-                    new_page = Mock(context=context)
-                    context.on.call_args.args[1](new_page)
-                    context.new_cdp_session.assert_called_with(new_page)
+                try:
+                    if adapter_name == "scrapling":
+                        for _ in range(2):
+                            adapter.navigate("http://target.invalid/")
+                    launch = runtime.chromium.launch if adapter_name == "patchright" else session
+                    settings = launch.call_args.kwargs["proxy"]
+                    self.assertEqual(list(settings), ["server"])
+                    self.assertRegex(settings["server"], r"^http://127\.0\.0\.1:\d+$")
+                    # Одна CDP-сессия на страницу: повторный page_setup её не множит.
+                    self.assertEqual([target for target, _ in created], [page])
+                    cdp = created[0][1]
+                    replay(cdp)
+                    self.assertEqual(cdp.send.call_args_list, expected)
+                    for needle in ("ProvideCredentials", "s3cr@t", "s3cr%40t", "user1"):
+                        self.assertNotIn(needle, repr(cdp.mock_calls))
+                    if adapter_name == "patchright":
+                        hooks = [entry.args[1] for entry in context.on.call_args_list
+                                 if entry.args[:1] == ("page",)]
+                        self.assertEqual(len(hooks), 1)
+                        popup = Mock(context=context)
+                        hooks[0](popup)
+                        # Новая страница (popup) получает свой обработчик.
+                        self.assertEqual([target for target, _ in created], [page, popup])
+                        replay(created[1][1])
+                        self.assertEqual(created[1][1].send.call_args_list, expected)
+                        self.assertNotIn("ProvideCredentials", repr(created[1][1].mock_calls))
+                finally:
+                    adapter.close()
 
     def test_playwright_proxy_maps_socks5h_to_socks5(self):
         for scheme in ("socks5h", "SOCKS5H", "socks5"):
@@ -1576,6 +1605,9 @@ class ProxyWiringTests(unittest.TestCase):
         self.assertNotIn("pass@", expected["server"])
 
         class Browser:
+            def close(self):
+                pass
+
             def new_page(self):
                 return Mock(context=Mock(pages=[]))
 
@@ -1597,6 +1629,9 @@ class ProxyWiringTests(unittest.TestCase):
             def start(self):
                 return self
 
+            def stop(self):
+                pass
+
         launched = {"playwright": {}, "patchright": {}}
 
         def sync_for(name):
@@ -1615,16 +1650,30 @@ class ProxyWiringTests(unittest.TestCase):
         patchright_sync = types.ModuleType("patchright.sync_api")
         patchright_sync.sync_playwright = sync_for("patchright")
         patchright_mod.sync_api = patchright_sync
+        adapters = {}
         with patch.dict(os.environ, {"ABG_PROXY": proxy}), patch.dict(sys.modules, {
             "playwright": playwright_mod,
             "playwright.sync_api": playwright_sync,
             "patchright": patchright_mod,
             "patchright.sync_api": patchright_sync,
         }):
-            self.probe.PlaywrightAdapter().start()
-            self.probe.PatchrightAdapter().start()
-        self.assertEqual(launched["playwright"]["proxy"], expected)
-        self.assertEqual(launched["patchright"]["proxy"], {"server": expected["server"]})
+            adapters["playwright"] = self.probe.PlaywrightAdapter()
+            adapters["playwright"].start()
+            adapters["patchright"] = self.probe.PatchrightAdapter()
+            adapters["patchright"].start()
+        try:
+            # Пакет playwright (только бенч) получает креды как прежде: нативно.
+            self.assertEqual(launched["playwright"]["proxy"], expected)
+            self.assertIsNone(adapters["playwright"]._relay)
+            # patchright получает один адрес релея: ни хоста прокси, ни кредов.
+            relayed = launched["patchright"]["proxy"]
+            self.assertEqual(list(relayed), ["server"])
+            self.assertRegex(relayed["server"], r"^http://127\.0\.0\.1:\d+$")
+            self.assertIsNotNone(adapters["patchright"]._relay)
+            self.assertNotIn("pass", json.dumps(relayed))
+        finally:
+            for adapter in adapters.values():
+                adapter.close()
 
     def test_result_without_url_key(self):
         with tempfile.TemporaryDirectory() as box:

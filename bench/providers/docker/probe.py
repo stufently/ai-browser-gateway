@@ -9,12 +9,16 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import contextlib
 import html as html_module
 import json
 import os
 import re
 import resource
+import selectors
+import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -920,18 +924,423 @@ class PrimpAdapter:
 _PROXIED_WEBRTC_FLAG = "--webrtc-ip-handling-policy=disable_non_proxied_udp"
 
 
-def _chromium_proxy(url: str) -> tuple[dict[str, str], tuple[str, str] | None]:
-    settings = playwright_proxy(url)
-    if settings["server"].startswith(("http://", "https://")) and "username" in settings:
-        # The driver treats proxy credentials as HTTP credentials for the page.
-        username = settings.pop("username")
-        password = settings.pop("password", "")
-        return settings, (username, password)
-    return settings, None
+class ProxyRelayError(Exception):
+    """Отказ прокси, который проба отдаёт наружу дословным текстом."""
 
 
-def _proxy_auth_handler(credentials: tuple[str, str]):
-    username, password = credentials
+_RELAY_BIND_HOST = "127.0.0.1"
+_RELAY_HEAD_LIMIT = 64 * 1024
+_RELAY_CHUNK = 65536
+_RELAY_TIMEOUT_S = 30.0
+_RELAY_JOIN_TIMEOUT_S = 5.0
+_RELAY_PORTS = {"http": 80, "https": 443, "socks5": 1080, "socks5h": 1080}
+# Заголовки соединения Chromium->релей: наверх они не имеют смысла, а
+# Proxy-Authorization клиента обязан исчезнуть — авторизацию добавляет релей.
+_RELAY_DROP_HEADERS = frozenset({"proxy-authorization", "proxy-connection", "connection"})
+_RELAY_ESTABLISHED = b"HTTP/1.1 200 Connection established\r\n\r\n"
+_RELAY_BAD_REQUEST = (b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n"
+                      b"Connection: close\r\n\r\n")
+_RELAY_BAD_GATEWAY = (b"HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n"
+                      b"Connection: close\r\n\r\n")
+SOCKS5_CREDENTIAL_LIMIT = 255
+
+# Причины уровня прокси: их читает шлюз; пароля в них нет по построению.
+UPSTREAM_UNREACHABLE = "upstream proxy unreachable"
+UPSTREAM_TLS_FAILED = "upstream proxy TLS failed"
+UPSTREAM_REJECTED_HTTP = "upstream proxy rejected credentials (HTTP 407)"
+UPSTREAM_REJECTED_SOCKS = "upstream proxy rejected credentials (SOCKS5)"
+
+
+def _relay_close(sock: socket.socket | None) -> None:
+    if sock is not None:
+        with contextlib.suppress(OSError):
+            sock.close()
+
+
+def _relay_halt(sock: socket.socket | None, mode: int = socket.SHUT_RDWR) -> None:
+    """Разбудить чужой recv/send: close() из другого потока оставляет поток ждать."""
+    if sock is not None:
+        with contextlib.suppress(OSError):
+            sock.shutdown(mode)
+
+
+def _relay_send(sock: socket.socket, data: bytes) -> None:
+    with contextlib.suppress(OSError):
+        sock.sendall(data)
+
+
+def _relay_recv_exact(sock: socket.socket, size: int) -> bytes | None:
+    data = b""
+    while len(data) < size:
+        chunk = sock.recv(size - len(data))
+        if not chunk:
+            return None
+        data += chunk
+    return data
+
+
+def _relay_read_head(sock: socket.socket) -> tuple[str, bytes]:
+    """Заголовок до \\r\\n\\r\\n и байты после него; пустой заголовок — вход не читается."""
+    buffer = b""
+    while b"\r\n\r\n" not in buffer:
+        if len(buffer) >= _RELAY_HEAD_LIMIT:
+            return "", b""
+        chunk = sock.recv(_RELAY_CHUNK)
+        if not chunk:
+            return "", b""
+        buffer += chunk
+    head, _, rest = buffer.partition(b"\r\n\r\n")
+    if len(head) > _RELAY_HEAD_LIMIT:
+        return "", b""
+    return head.decode("latin-1"), rest
+
+
+def _relay_read_line(sock: socket.socket, limit: int = 4096) -> tuple[str, bytes]:
+    """Первая строка ответа и всё прочитанное с ней; пустые байты — ответа нет."""
+    buffer = b""
+    while b"\r\n" not in buffer and len(buffer) < limit:
+        chunk = sock.recv(_RELAY_CHUNK)
+        if not chunk:
+            break
+        buffer += chunk
+    return buffer.partition(b"\r\n")[0].decode("latin-1"), buffer
+
+
+def _relay_status(head: str) -> int | None:
+    parts = head.split("\r\n", 1)[0].split(" ", 2)
+    if len(parts) >= 2 and parts[0].startswith("HTTP/") and parts[1].isdigit():
+        return int(parts[1])
+    return None
+
+
+def _relay_authority(target: str) -> tuple[str, int] | None:
+    """host:port из цели CONNECT; скобки IPv6 сохраняются."""
+    host, separator, port = target.rpartition(":")
+    if not separator or not host or not port.isdigit():
+        return None
+    return host, int(port)
+
+
+def _relay_origin_form(parsed: Any) -> str:
+    return (parsed.path or "/") + (f"?{parsed.query}" if parsed.query else "")
+
+
+class _ProxyRelay:
+    """Релей прокси для браузерных ступеней: Chromium не знает ни адреса прокси,
+    ни кредов. Слушает только loopback и эфемерный порт внутри процесса пробы,
+    пересылает трафик внешнему прокси и сам добавляет авторизацию:
+    `Proxy-Authorization: Basic` для http/https, RFC 1929 для socks5/socks5h.
+    Один daemon-поток на соединение и один на приём.
+    """
+
+    def __init__(self, upstream_url: str) -> None:
+        parsed = urlparse(upstream_url)
+        scheme = parsed.scheme.lower()
+        if scheme not in _RELAY_PORTS or not parsed.hostname:
+            raise ProxyRelayError(f"proxy scheme not relayed: {scheme or 'none'}")
+        self.scheme = scheme
+        self.socks = scheme.startswith("socks5")
+        self.host = parsed.hostname
+        self.port = parsed.port or _RELAY_PORTS[scheme]
+        self.username = unquote(parsed.username or "")
+        self.password = unquote(parsed.password or "")
+        if self.socks and any(len(value.encode("utf-8")) > SOCKS5_CREDENTIAL_LIMIT
+                             for value in (self.username, self.password)):
+            # RFC 1929 хранит длину в одном байте: прокси такой вход не примет.
+            raise ProxyRelayError(f"socks5 credential over {SOCKS5_CREDENTIAL_LIMIT} bytes")
+        self.fatal: str | None = None
+        self._basic = base64.b64encode(
+            f"{self.username}:{self.password}".encode("utf-8")).decode("ascii")
+        self._lock = threading.Lock()
+        self._sockets: set[socket.socket] = set()
+        self._threads: list[threading.Thread] = []
+        self._closed = False
+        self._listener: socket.socket | None = None
+
+    def start(self) -> str:
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind((_RELAY_BIND_HOST, 0))
+        listener.listen(128)
+        self._listener = listener
+        self._track(listener)
+        self._spawn(self._accept_loop, "proxy-relay-accept", listener)
+        return f"http://{_RELAY_BIND_HOST}:{listener.getsockname()[1]}"
+
+    def close(self) -> None:
+        with self._lock:
+            self._closed = True
+        deadline = time.monotonic() + _RELAY_JOIN_TIMEOUT_S
+        while True:
+            with self._lock:
+                sockets, threads = list(self._sockets), list(self._threads)
+            for sock in sockets:
+                _relay_halt(sock)
+            alive = False
+            for thread in threads:
+                thread.join(max(0.0, deadline - time.monotonic()))
+                alive = alive or thread.is_alive()
+            if not alive or time.monotonic() >= deadline:
+                break
+        _relay_close(self._listener)
+        with self._lock:
+            self._sockets.clear()
+            self._threads.clear()
+
+    def _track(self, sock: socket.socket) -> None:
+        with self._lock:
+            self._sockets.add(sock)
+
+    def _release(self, sock: socket.socket | None) -> None:
+        if sock is None:
+            return
+        _relay_halt(sock)
+        _relay_close(sock)
+        with self._lock:
+            self._sockets.discard(sock)
+
+    def _spawn(self, target, name: str, *args) -> threading.Thread:
+        thread = threading.Thread(target=target, args=args, name=name, daemon=True)
+        with self._lock:
+            # Страница открывает десятки соединений: завершившиеся потоки
+            # убираются, чтобы close() не перебирал всю историю сессии.
+            self._threads = [entry for entry in self._threads if entry.is_alive()]
+            self._threads.append(thread)
+        thread.start()
+        return thread
+
+    def _accept_loop(self, listener: socket.socket) -> None:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(listener, selectors.EVENT_READ)
+            while not self._closed:
+                # Опрос с таймаутом: close() не будит заблокированный accept().
+                if not selector.select(0.2):
+                    continue
+                try:
+                    client, _ = listener.accept()
+                except OSError:
+                    return
+                self._track(client)
+                self._spawn(self._serve, "proxy-relay-connection", client)
+        finally:
+            selector.close()
+            _relay_close(listener)
+
+    def _fatal_reason(self, reason: str) -> None:
+        with self._lock:
+            if self.fatal is None:
+                self.fatal = reason
+
+    def _open_upstream(self) -> socket.socket | None:
+        try:
+            sock: socket.socket = socket.create_connection((self.host, self.port),
+                                                           _RELAY_TIMEOUT_S)
+        except OSError:
+            self._fatal_reason(UPSTREAM_UNREACHABLE)
+            return None
+        if self.scheme == "https":
+            try:
+                # Проверки сертификата прокси не ослабляются: доверие из CA
+                # образа, включая SSL_CERT_FILE/SSL_CERT_DIR окружения пробы.
+                sock = ssl.create_default_context().wrap_socket(sock,
+                                                                 server_hostname=self.host)
+            except (OSError, ValueError):
+                _relay_close(sock)
+                self._fatal_reason(UPSTREAM_TLS_FAILED)
+                return None
+        self._track(sock)
+        return sock
+
+    def _proxy_handshake(self, upstream: socket.socket, host: str, port: int) -> bytes | None:
+        """CONNECT внешнему http/https-прокси; None — отказ, иначе байты до туннеля."""
+        authority = f"{host}:{port}"
+        request = (f"CONNECT {authority} HTTP/1.1\r\nHost: {authority}\r\n"
+                   f"Proxy-Authorization: Basic {self._basic}\r\n\r\n")
+        try:
+            upstream.sendall(request.encode("latin-1"))
+        except (OSError, UnicodeError):
+            self._fatal_reason(UPSTREAM_UNREACHABLE)
+            return None
+        head, prelude = _relay_read_head(upstream)
+        status = _relay_status(head)
+        if status == 200:
+            return prelude
+        if status == 407:
+            self._fatal_reason(UPSTREAM_REJECTED_HTTP)
+        elif status is None:
+            # Прокси не ответил вовсе: TCP до него есть, разговора нет.
+            self._fatal_reason(UPSTREAM_UNREACHABLE)
+        # Прочие статусы — отказ цели, а не прокси: fatal остаётся нетронутым.
+        return None
+
+    def _socks_handshake(self, upstream: socket.socket, host: str, port: int) -> bytes | None:
+        """RFC 1929 и CONNECT с ATYP=0x03: имя цели резолвит прокси, не проба."""
+        user = self.username.encode("utf-8")
+        password = self.password.encode("utf-8")
+        name = host.encode("utf-8")
+        try:
+            upstream.sendall(b"\x05\x01\x02")
+            method = _relay_recv_exact(upstream, 2)
+            if method is None or method[1] != 0x02:
+                self._fatal_reason(UPSTREAM_REJECTED_SOCKS)
+                return None
+            upstream.sendall(b"\x01" + bytes((len(user),)) + user
+                             + bytes((len(password),)) + password)
+            verdict = _relay_recv_exact(upstream, 2)
+            if verdict is None or verdict[1] != 0x00:
+                self._fatal_reason(UPSTREAM_REJECTED_SOCKS)
+                return None
+            upstream.sendall(b"\x05\x01\x00\x03" + bytes((len(name),)) + name
+                             + port.to_bytes(2, "big"))
+            reply = _relay_recv_exact(upstream, 4)
+            if reply is None or reply[0] != 0x05:
+                self._fatal_reason(UPSTREAM_UNREACHABLE)
+                return None
+            if reply[1] != 0x00:
+                return None  # отказ цели: прокси жив, адрес ему не отдался
+            if reply[3] == 0x03:
+                length = _relay_recv_exact(upstream, 1)
+                bound = None if length is None else length[0]
+            else:
+                bound = {0x01: 4, 0x04: 16}.get(reply[3])
+            if bound is None or _relay_recv_exact(upstream, bound) is None:
+                return None
+            return b"" if _relay_recv_exact(upstream, 2) is not None else None
+        except (OSError, UnicodeError):
+            self._fatal_reason(UPSTREAM_UNREACHABLE)
+            return None
+
+    def _pump(self, source: socket.socket, target: socket.socket, first: bytes = b"") -> None:
+        try:
+            if first:
+                target.sendall(first)
+            while True:
+                chunk = source.recv(_RELAY_CHUNK)
+                if not chunk:
+                    break
+                target.sendall(chunk)
+        except OSError:
+            pass
+        finally:
+            _relay_halt(target, socket.SHUT_WR)
+
+    def _tunnel(self, upstream_first: bytes, client_first: bytes,
+                client: socket.socket, upstream: socket.socket) -> None:
+        pump = self._spawn(self._pump, "proxy-relay-tunnel", upstream, client, upstream_first)
+        self._pump(client, upstream, client_first)
+        pump.join(_RELAY_JOIN_TIMEOUT_S)
+        if pump.is_alive():
+            _relay_halt(upstream)
+            _relay_halt(client)
+            pump.join(1.0)
+
+    def _serve(self, client: socket.socket) -> None:
+        upstream: socket.socket | None = None
+        try:
+            if self._closed:
+                return
+            client.settimeout(_RELAY_TIMEOUT_S)
+            head, rest = _relay_read_head(client)
+            if not head:
+                _relay_send(client, _RELAY_BAD_REQUEST)
+                return
+            client.settimeout(None)
+            request_line, *header_lines = head.split("\r\n")
+            parts = request_line.split(" ")
+            if len(parts) != 3:
+                _relay_send(client, _RELAY_BAD_REQUEST)
+                return
+            method, target, version = parts
+            if method == "CONNECT":
+                authority = _relay_authority(target)
+                if authority is None:
+                    _relay_send(client, _RELAY_BAD_REQUEST)
+                    return
+                upstream = self._open_upstream()
+                if upstream is None:
+                    _relay_send(client, _RELAY_BAD_GATEWAY)
+                    return
+                handshake = self._socks_handshake if self.socks else self._proxy_handshake
+                prelude = handshake(upstream, *authority)
+                if prelude is None:
+                    _relay_send(client, _RELAY_BAD_GATEWAY)
+                    return
+                _relay_send(client, _RELAY_ESTABLISHED)
+                upstream.settimeout(None)
+                self._tunnel(prelude, rest, client, upstream)
+                return
+            parsed = urlparse(target)
+            if parsed.scheme.lower() != "http" or not parsed.hostname:
+                _relay_send(client, _RELAY_BAD_REQUEST)
+                return
+            port = parsed.port or 80
+            upstream = self._open_upstream()
+            if upstream is None:
+                _relay_send(client, _RELAY_BAD_GATEWAY)
+                return
+            if self.socks:
+                # У SOCKS5 нет absolute-URI: туннель к цели и origin-form запрос.
+                if self._socks_handshake(upstream, parsed.hostname, port) is None:
+                    _relay_send(client, _RELAY_BAD_GATEWAY)
+                    return
+                target = _relay_origin_form(parsed)
+            kept = [line for line in header_lines
+                    if line.partition(":")[0].strip().lower() not in _RELAY_DROP_HEADERS]
+            # Только close: на keep-alive следующий запрос ушёл бы без авторизации.
+            kept.append("Connection: close")
+            if not self.socks:
+                kept.append(f"Proxy-Authorization: Basic {self._basic}")
+            outbound = "\r\n".join([f"{method} {target} {version}", *kept]) + "\r\n\r\n"
+            try:
+                upstream.sendall(outbound.encode("latin-1"))
+            except (OSError, UnicodeError):
+                self._fatal_reason(UPSTREAM_UNREACHABLE)
+                _relay_send(client, _RELAY_BAD_GATEWAY)
+                return
+            body = self._spawn(self._pump, "proxy-relay-body", client, upstream, rest)
+            line, buffered = _relay_read_line(upstream)
+            status = _relay_status(line)
+            if not buffered or status == 407:
+                # Ответ прокси клиенту не отдаётся: 407 значит отказ авторизации,
+                # а пустой ответ — прокси не сказал ничего.
+                self._fatal_reason(UPSTREAM_REJECTED_HTTP if status == 407
+                                   else UPSTREAM_UNREACHABLE)
+                _relay_send(client, _RELAY_BAD_GATEWAY)
+            else:
+                # Заголовки ответа не переписываются: запрос наверх уже несёт
+                # Connection: close, поэтому ответ уходит байт в байт.
+                _relay_send(client, buffered)
+                self._pump(upstream, client)
+            # Ответ отдан: соединение закрывается, спящий насос тела будится.
+            _relay_halt(client)
+            body.join(_RELAY_JOIN_TIMEOUT_S)
+        except (OSError, ValueError, UnicodeError):
+            pass
+        finally:
+            self._release(client)
+            self._release(upstream)
+
+
+def _browser_proxy(url: str) -> tuple[dict[str, str], _ProxyRelay | None]:
+    """Прокси запуска Chromium: с кредами — релей на loopback, без — как прежде.
+
+    Без кредов все схемы у Chromium работают напрямую: прямой путь не добавляет
+    хоп и точку отказа, а SOCKS5 сохраняет нативный удалённый DNS браузера.
+    """
+    if urlparse(url).username is None:
+        return playwright_proxy(url), None
+    relay = _ProxyRelay(url)
+    return {"server": relay.start()}, relay
+
+
+def _cancel_auth_handler():
+    """Обработчик CDP для работы через релей: на любой вызов авторизации CancelAuth.
+
+    Креды прокси знает только релей, браузеру отдавать нечего. Без ответа
+    главный документ с 401 сайта даёт net::ERR_INVALID_AUTH_CREDENTIALS, а
+    same-origin iframe поднимает окно входа headful Chrome и подвешивает
+    загрузку (измерено).
+    """
     attached = WeakSet()
 
     def attach(page):
@@ -945,23 +1354,17 @@ def _proxy_auth_handler(credentials: tuple[str, str]):
         page.route("**/*", passthrough)
         page.unroute("**/*", passthrough)
         cdp = page.context.new_cdp_session(page)
-        attempted = set()
 
         def continue_request(event):
             cdp.send("Fetch.continueRequest", {"requestId": event["requestId"]})
 
-        def authenticate(event):
-            request_id = event["requestId"]
-            response = {"response": "CancelAuth"}
-            if event["authChallenge"].get("source") == "Proxy" and request_id not in attempted:
-                attempted.add(request_id)
-                response = {"response": "ProvideCredentials", "username": username,
-                            "password": password}
-            cdp.send("Fetch.continueWithAuth", {"requestId": request_id,
-                                                "authChallengeResponse": response})
+        def cancel_auth(event):
+            cdp.send("Fetch.continueWithAuth", {"requestId": event["requestId"],
+                                                "authChallengeResponse": {
+                                                    "response": "CancelAuth"}})
 
         cdp.on("Fetch.requestPaused", continue_request)
-        cdp.on("Fetch.authRequired", authenticate)
+        cdp.on("Fetch.authRequired", cancel_auth)
         cdp.send("Fetch.enable", {"handleAuthRequests": True, "patterns": [{"urlPattern": "*"}]})
         attached.add(page)
 
@@ -970,6 +1373,11 @@ def _proxy_auth_handler(credentials: tuple[str, str]):
 
 class PlaywrightAdapter:
     package = "playwright"
+    _relay = None
+
+    @property
+    def fatal(self) -> str | None:
+        return None if self._relay is None else self._relay.fatal
 
     def start(self) -> None:
         if self.package == "playwright":
@@ -982,17 +1390,18 @@ class PlaywrightAdapter:
         if self.package == "patchright":
             launch_options["channel"] = "chrome"
         proxy = _proxy_url()
-        credentials = None
         if proxy:
             if self.package == "patchright":
-                launch_options["proxy"], credentials = _chromium_proxy(proxy)
+                # Релей стартует до launch и хранится в адаптере: упавший
+                # launch не должен оставить слушатель в процессе пробы.
+                launch_options["proxy"], self._relay = _browser_proxy(proxy)
                 launch_options["args"] = [_PROXIED_WEBRTC_FLAG]
             else:
                 launch_options["proxy"] = playwright_proxy(proxy)
         self.browser = self.runtime.chromium.launch(**launch_options)
         self.page = self.browser.new_page()
-        if credentials is not None:
-            attach = _proxy_auth_handler(credentials)
+        if self._relay is not None:
+            attach = _cancel_auth_handler()
             attach(self.page)
             self.page.context.on("page", attach)
 
@@ -1055,10 +1464,15 @@ class PlaywrightAdapter:
         return result
 
     def close(self) -> None:
-        if hasattr(self, "browser"):
-            self.browser.close()
-        if hasattr(self, "runtime"):
-            self.runtime.stop()
+        try:
+            if hasattr(self, "browser"):
+                self.browser.close()
+            if hasattr(self, "runtime"):
+                self.runtime.stop()
+        finally:
+            # Релей закрывается, даже если browser.close() или runtime.stop() бросили.
+            if self._relay is not None:
+                self._relay.close()
 
 
 # Measured: the Qrator loader reloads rbc.ru 1.4–3.3 s after the 401.
@@ -1318,7 +1732,12 @@ def _scrapling_has_clearance(response: Any, final_url: str) -> bool:
 class ScraplingAdapter:
     version = "unknown"
     solve_cloudflare = True
-    _proxy_auth = None
+    _relay = None
+    _cancel_auth = None
+
+    @property
+    def fatal(self) -> str | None:
+        return None if self._relay is None else self._relay.fatal
 
     def start(self) -> None:
         from scrapling.fetchers import StealthySession
@@ -1333,11 +1752,11 @@ class ScraplingAdapter:
             "retries": 1,
         }
         proxy = _proxy_url()
-        credentials = None
         if proxy:
-            options["proxy"], credentials = _chromium_proxy(proxy)
+            options["proxy"], self._relay = _browser_proxy(proxy)
             options["block_webrtc"] = True
-        self._proxy_auth = _proxy_auth_handler(credentials) if credentials is not None else None
+        if self._relay is not None:
+            self._cancel_auth = _cancel_auth_handler()
         self.session = StealthySession(**options)
         self.session.__enter__()
 
@@ -1350,8 +1769,8 @@ class ScraplingAdapter:
         recorded_docs: list[tuple[int | None, Any]] = []
 
         def _page_setup(page: Any) -> None:
-            if self._proxy_auth is not None:
-                self._proxy_auth(page)
+            if self._cancel_auth is not None:
+                self._cancel_auth(page)
 
             def _on_response(response: Any) -> None:
                 try:
@@ -1405,8 +1824,13 @@ class ScraplingAdapter:
         return result
 
     def close(self) -> None:
-        if hasattr(self, "session"):
-            self.session.__exit__(None, None, None)
+        try:
+            if hasattr(self, "session"):
+                self.session.__exit__(None, None, None)
+        finally:
+            # Релей закрывается, даже если сессия браузера бросила на выходе.
+            if self._relay is not None:
+                self._relay.close()
 
 
 class CamoufoxAdapter:
@@ -1610,6 +2034,12 @@ def run_probe(
             adapter.sentinel = sentinel
             navigation_start = clock()
         response = adapter.navigate(url)
+        relay_fatal = getattr(adapter, "fatal", None)
+        if relay_fatal:
+            # Часть запросов страницы не получила авторизации прокси: шлюз не
+            # должен принимать такой результат, поэтому payload строится так же,
+            # как при исключении навигации.
+            raise ProxyRelayError(relay_fatal)
         finished = clock()
         elapsed_ms = round((finished - navigation_start) * 1000)
         body = response.get("body", "")
@@ -1659,7 +2089,12 @@ def run_probe(
         if startup_ms == 0:
             startup_ms = round((finished - start) * 1000)
         name = type(exc).__name__
-        if (
+        relay_fatal = getattr(adapter, "fatal", None)
+        if relay_fatal:
+            # Отказ прокси объясняет и таймаут навигации: без него причина
+            # теряется, а креды в тексте не появляются по построению.
+            err = redact(f"ProxyRelayError: {relay_fatal}")
+        elif (
             isinstance(exc, (TimeoutError, subprocess.TimeoutExpired))
             or name in ("TimeoutError", "TimeoutExpired")
         ):
