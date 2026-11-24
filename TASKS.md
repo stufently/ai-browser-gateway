@@ -4,6 +4,11 @@
 `CHANGELOG.md`, сюда не дублируются. Записи старше ~30–60 дней уезжают в
 `docs/worklog-archive/YYYY-MM.md`.
 
+- [ ] **IN_PROGRESS: Cloudflare Turnstile не проходится (поручение владельца
+  24.11.2026).** Владелец: abg-fetch падает на Cloudflare «везде»
+  (`challenge_suspected на шаге human`). Идёт диагностика на нейтральных
+  стендах и сравнение с FlareSolverr/Byparr/CloakBrowser и др.
+
 - [x] **Кэш сессий и извлечение текста (выбор владельца «всё по очереди»,
   09.10.2026).** Готово 09.10.2026. Кэш сессий по хосту — выпуск `0.1.5`
   (CHANGELOG), выложен в сервис, check-sites и `abg-fetch` на onyx
