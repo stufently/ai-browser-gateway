@@ -218,12 +218,22 @@ auth)
     oneshot a401 "$P_AUTH" "$T/authpage?b=$B" --expected-text "m27 auth page"
     rc_is a401 0
     content a401 patchright "m27 auth page"
+    content a401 patchright "auth required"
     steps a401 '[["curl_cffi","explicit",200,"content_missing"],["patchright","explicit",200,"none"]]'
     relay_only a401
     total=$(hits "$id-target" /auth401)
     clean=$(docker logs "$id-target" 2>&1 | grep -c '^TARGET [^ ]* /auth401 authz=0$' || :)
-    [ "$total" -ge 1 ] && [ "$total" = "$clean" ] \
+    [ "$total" -ge 2 ] && [ "$total" = "$clean" ] \
         || fail "auth: запросов /auth401 $total, без Authorization $clean"
+    # Главный документ с 401 Basic: страница читается (CancelAuth), как на BASE.
+    for provider in patchright scrapling; do
+        probe "p-$provider-401" "$P_AUTH" "$provider" "$T/auth401"
+        jq -e '.status == 401 and .err == "" and (.text | contains("auth required"))' \
+            "$work/p-$provider-401.json" >/dev/null \
+            || fail "auth: $provider на 401 Basic: $(jq -c '{status,err}' "$work/p-$provider-401.json")"
+    done
+    clean=$(docker logs "$id-target" 2>&1 | grep -c '^TARGET [^ ]* /auth401 authz=0$' || :)
+    [ "$(hits "$id-target" /auth401)" = "$clean" ] || fail "auth: Authorization ушёл сайту"
     # Неверный пароль у http-прокси: curl_cffi видит 407 и лестница сдаётся
     # на нём (поведение до M27); у SOCKS5 curl_cffi падает, и браузеры
     # получают отказ релея как provider_error.

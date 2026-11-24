@@ -2,13 +2,15 @@
 
 ## Шапка и где работать
 
-Репозиторий ai-browser-gateway, 24.11.2026. Базовый коммит — вершина
-`main` в момент создания клона; в нём уже есть код M26 (выпуск 0.1.7), эта
-спека и три файла стенда `docs/specs/checks/m27_*`. 🚨 **Запускать только
-после того, как в `main` влито усиление тестов `TurnstileClickTests`**
-(параллельная работа в отдельном клоне правит `tests/test_probe.py`):
-иначе обе ветки правят один файл, а критерий границ считает чужие правки
-своими. Критерий границ считает дифф от `git merge-base HEAD origin/main`,
+Репозиторий ai-browser-gateway, 24.11.2026.
+
+BASE_SHA: (ставится отдельным коммитом сразу после коммита этой спеки)
+
+Клон делается от вершины `main` не раньше BASE_SHA; в базе уже есть код
+M26 (выпуск 0.1.7), усиление `TurnstileClickTests` (`1d5cd18`), эта спека и
+три файла стенда `docs/specs/checks/m27_*`. Коммиты спеки M28
+(`docs/specs/m28-*`, `docs/specs/checks/m28_*`) в базе — чужие, их не
+трогать. Критерий границ считает дифф от `git merge-base HEAD origin/main`,
 поэтому клон делается только `make_clone.sh`. Исполнитель — `auto`;
 мутации по новым тестам потом гоняет противоположный исполнитель отдельной
 вехой.
@@ -56,24 +58,29 @@ curl_cffi, как и сейчас, ходит к внешнему прокси �
   бы правок вне вехи. Только stdlib (`socket`, `ssl`, `threading`, `base64`;
   `selectors` по желанию) — в образе Python 3.14.7, OpenSSL 3.0.20, всё
   импортируется (проверено).
-- **CDP-обработчик авторизации удаляется целиком** вместе с трюком
-  `page.route`/`page.unroute`: релей покрывает любую цель, потому что
-  Chromium вообще не знает кредов. Защита WebRTC остаётся при ЛЮБОМ прокси:
-  флаг `--webrtc-ip-handling-policy=disable_non_proxied_udp` у patchright и
+- **CDP-обработчик сужается до `CancelAuth` (решение владельца
+  24.11.2026).** Креды прокси через CDP больше не отдаются НИКОГДА
+  (`ProvideCredentials` из кода исчезает): их знает только релей. Но
+  обработчик остаётся, когда работает релей, и на ЛЮБОЙ
+  `Fetch.authRequired` отвечает `CancelAuth`: на `source=Server` (401
+  сайта) — чтобы страница с 401 читалась, как на BASE; на `source=Proxy` —
+  при релее такого быть не должно, а если случится, Chromium всё равно
+  нечего отдать. Подключение — как на BASE (страница запуска,
+  `context.on("page", …)` для новых страниц у patchright, `page_setup` у
+  scrapling, трюк `page.route`/`page.unroute`, чтобы Patchright отпустил
+  свой перехватчик Fetch). Без релея (прокси без кредов или без прокси)
+  обработчик не включается — прямой режим не меняется. Измерено: без
+  `CancelAuth` главный документ с `401 Basic` даёт
+  `net::ERR_INVALID_AUTH_CREDENTIALS`, а same-origin iframe с таким 401
+  поднимает окно входа headful Chrome и подвешивает загрузку до таймаута;
+  с обработчиком (BASE и эталон) страница читается со статусом 401. Защита
+  WebRTC остаётся при ЛЮБОМ прокси: флаг
+  `--webrtc-ip-handling-policy=disable_non_proxied_udp` у patchright и
   `block_webrtc=True` у scrapling.
-- **Плата за удаление (измерено, принять осознанно).** Сервер с `401` и
-  `WWW-Authenticate: Basic` у прокси с паролем начинает вести себя так же,
-  как сейчас без прокси и у прокси без пароля: главный документ —
-  `net::ERR_INVALID_AUTH_CREDENTIALS`, iframe с таким 401 подвешивает
-  загрузку до таймаута (окно входа headful Chrome). На BASE у прокси с
-  паролем CDP-обработчик отвечал `CancelAuth`, и страница с 401 читалась.
-  Это поведение прямого режима, оно вне вехи; чинить отдельно для всех
-  режимов сразу. Cross-site картинка с 401 загрузку не держит.
-- **`ABG_PROXY` в окружении процессов браузера** (драйвер и Chrome
-  наследуют окружение пробы, пароль виден в `/proc/<pid>/environ` тому же
-  uid) — так было и до M27, в этой вехе НЕ меняется: правка задела бы
-  `redact` (он читает `ABG_PROXY` из окружения) и запуск scrapling.
-  Открытый вопрос владельцу, отдельная веха.
+- **Вне скоупа: `ABG_PROXY` в окружении процессов браузера** (драйвер и
+  Chrome наследуют окружение пробы, пароль виден в `/proc/<pid>/environ`
+  тому же uid). Так было и до M27; решение владельца — отдельная веха после
+  выпуска 0.1.8. В этой вехе окружение запуска браузеров не трогать.
 - **one-shot:** отказ `proxy_unsupported` убирается совсем (других причин
   у него нет). `proxy_credentials_in_argv` и `invalid_request` — без
   изменений. Кэш сессий не меняется: scope по-прежнему от identity прокси.
@@ -86,8 +93,13 @@ scrapling 0.4.15, Chrome 156), Docker под 1002:1002, gost 3.3.3 в
 изолированных сетях:
 
 - Все семь сценариев `m27_stand.sh` — `ok` три прогона подряд (2–17 с на
-  сценарий). Чекер `m27_proxy_relay.py` — `ok` трижды. Полный сьют на
-  эталоне — 834 теста, падают ровно три старых теста, которые веха обязана
+  сценарий). Чекер `m27_proxy_relay.py` — `ok` трижды; шесть мутантов
+  узкого обработчика (`ProvideCredentials`, обработчик снят у patchright
+  или scrapling, включён без релея, нет на новых страницах,
+  `handleAuthRequests: False`) чекер убивает все. Сценарий `auth` на
+  эталоне без обработчика падает (страница с 401 виснет), на BASE с
+  отключённой проверкой релея — `ok`: поведение на 401 сайта как на BASE.
+  Полный сьют на эталоне (база с усилением `TurnstileClickTests`) — 838 тестов, падают ровно три старых теста, которые веха обязана
   переписать (см. «Что сделать», п. 8); замороженные пробы M9–M13 (125)
   и чекеры M24/M25 зелёные.
 - На эталоне стенд M26: `http`, `socks`, `compat` — `ok`; `browser` и
@@ -103,15 +115,15 @@ scrapling 0.4.15, Chrome 156), Docker под 1002:1002, gost 3.3.3 в
   Дыра реальна только когда ПЕРВЫЙ запрос сессии идёт не от страницы;
   стенд такого не воспроизводит. Поэтому доказательство вехи — не эти
   сценарии, а то, что Chromium не видит ни адреса внешнего прокси, ни кредов
-  (`docker top`), CDP-обработчика нет (чекер), а iframe, воркер и SOCKS5 с
-  паролем через релей работают (стенд).
+  (`docker top`), CDP-обработчик никогда не отдаёт креды (чекер), а iframe,
+  воркер и SOCKS5 с паролем через релей работают (стенд).
 - **Popup (`window.open`) на стенде невозможен:** у Chrome обоих
   провайдеров нет `--disable-popup-blocking` (видно в `docker top`), и
   `window.open` без жеста пользователя блокируется — окно не создаётся,
-  цель его адреса не получает ни одного запроса (измерено). Замена: чекер
-  требует, чтобы ни к странице, ни к контексту ничего не подключалось
-  (`new_cdp_session`, `route` не вызываются) — релей уровня запуска
-  обслуживает любую будущую цель, включая popup.
+  цель его адреса не получает ни одного запроса (измерено). Замена: релей
+  уровня запуска обслуживает любую будущую цель, включая popup, а чекер
+  требует, чтобы новая страница контекста получила тот же обработчик
+  `CancelAuth`.
 - Service worker получает secure context через `http://localhost:8000`:
   вторая цель живёт в сетевом пространстве прокси, Playwright запускает
   Chrome с `--proxy-bypass-list=<-loopback>`, так что loopback тоже идёт
@@ -199,11 +211,18 @@ https-прокси с публичным сертификатом — через
    `username`, ни `password`), без userinfo — `playwright_proxy(url)`.
    Релей стартует ДО запуска браузера и сохраняется в адаптере до вызова
    launch, чтобы `close()` закрыл его и при упавшем launch. `close()`
-   закрывает релей в `finally` после браузера/сессии. `_chromium_proxy`,
-   `_proxy_auth_handler`, `page_setup`-вызов обработчика у scrapling,
-   `context.on("page", …)` и импорт `WeakSet`, если не нужен, — удалить.
-   Остальной код `PlaywrightAdapter.navigate` и `ScraplingAdapter.navigate`
-   не трогать.
+   закрывает релей в `finally` после браузера/сессии. `_chromium_proxy`
+   удалить. `_proxy_auth_handler` заменить обработчиком без кредов
+   (`_cancel_auth_handler()` → `attach(page)`), который включается ТОЛЬКО
+   при релее: одна CDP-сессия на страницу (повторный `attach` той же
+   страницы ничего не делает), трюк `page.route("**/*", …)` +
+   `page.unroute`, `Fetch.enable` с `handleAuthRequests: True` и
+   `patterns: [{"urlPattern": "*"}]`, `Fetch.requestPaused` →
+   `Fetch.continueRequest`, `Fetch.authRequired` (любой `source`) →
+   `Fetch.continueWithAuth` с `{"response": "CancelAuth"}` и ничем иным.
+   Подключение: patchright — страница запуска и `context.on("page", attach)`;
+   scrapling — из `page_setup`. Остальной код
+   `PlaywrightAdapter.navigate` и `ScraplingAdapter.navigate` не трогать.
 6. **Прерывание.** One-shot убивает группу процесса пробы `SIGKILL`
    (`LocalLauncher.kill_active`) — релей живёт в том же процессе и умирает
    с ним; порт освобождает ядро. Отдельных обработчиков сигналов в пробе
@@ -236,6 +255,10 @@ https-прокси с публичным сертификатом — через
    слушающий сокет (порт принимает после `close`); релей не закрыт, если
    `browser.close()` бросил; релей не закрыт при упавшем launch; релей
    включён у пакета `playwright`; флаг WebRTC или `block_webrtc` пропал;
+   обработчик CDP отвечает `ProvideCredentials` (или шлёт логин/пароль)
+   хоть на какой-то `source`; обработчик не включён при релее (у
+   patchright или у scrapling) или включён без релея; новая страница
+   patchright без обработчика; `handleAuthRequests` выключен;
    one-shot всё ещё отказывает SOCKS5 с паролем; `--proxy` с userinfo
    перестал отказывать.
 
@@ -276,7 +299,7 @@ https-прокси с публичным сертификатом — через
 - **AC-001.** Полный сьют и замороженные пробы зелёные на публичном образе Python:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-002.** Файлы стендов M26/M27 и чекеры M24/M25 не изменены, чекеры M24, M25 и M27 печатают ok:
-  `bash -c 'printf "%s\n" "de2dde2910f3da4d0e5955381edfc55869b69591cf5041a38bf0d39ab943db85  docs/specs/checks/m27_proxy_relay.py" "a28bf73bd62ad61567b3380bab2244b34577e3f36d3a75987c620efb2f9aa4b3  docs/specs/checks/m27_stand.sh" "d29a11ae6ce374b8a9f90fe925cd71cd67fd4baf86d569cd496c685b5350f246  docs/specs/checks/m27_target.py" "934e6b16c590b021fa0fb51c5d07edaadc108e503d81dd9f86a1507ade9a287f  docs/specs/checks/m26_proxy_ladder.py" "4aa0bedf53ea6949408a87504a95f25c5e85a4a97c71214b49a3479112992e49  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m27_proxy_relay; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 timeout 300 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
+  `bash -c 'printf "%s\n" "e1505262287c2b33acd7e596d96664016684f53282ad92b2fd87c0141a2ff9a4  docs/specs/checks/m27_proxy_relay.py" "3270966807135f578d52a7802e320fad5e2ffd0fa712794de38cd5a26cd701b7  docs/specs/checks/m27_stand.sh" "c657ac0d254fa65fcbeb837b039964f00ec5be45bd59c9a3741c667a462877a0  docs/specs/checks/m27_target.py" "934e6b16c590b021fa0fb51c5d07edaadc108e503d81dd9f86a1507ade9a287f  docs/specs/checks/m26_proxy_ladder.py" "4aa0bedf53ea6949408a87504a95f25c5e85a4a97c71214b49a3479112992e49  docs/specs/checks/m26_stand.sh" "79cfb736d9eb73c0a107670c29b1e8e0de9b1ed983d525c47743970fec7f6074  docs/specs/checks/m26_target.py" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "087f0534692c114e7358c72ddaa974639d5c8398c250ef13592e1f2cafe76b2d  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click m27_proxy_relay; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 timeout 300 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
 - **AC-003.** Чекер M26 расходится ровно в двух снятых отказах SOCKS5 с паролем, остальное (лестница, сессии, проба) по-прежнему ok:
   `bash -c 'out=$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/m26_proxy_ladder.py); test "$(printf "%s\n" "$out" | wc -l)" = 4 && test "$(printf "%s\n" "$out" | sed "s/:.*//" | LC_ALL=C sort | uniq -c | tr -s " " | tr "\n" "|")" = " 2 socks5 с паролем и браузерами| 2 socks5h с паролем и браузерами|"'`
 - **AC-004.** Стенд M26 без изменений: curl_cffi через прокси с паролем, SOCKS без кредов у всех ступеней, совместимость с ABG_EGRESS_PROXY:
@@ -289,7 +312,7 @@ https-прокси с публичным сертификатом — через
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh sw)" = ok'`
 - **AC-008.** Стенд: SOCKS5 и socks5h с паролем у patchright и scrapling, сессии u1 в логе прокси:
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh socks)" = ok'`
-- **AC-009.** Стенд: 401 цели без Authorization, неверный пароль даёт точную причину в err пробы:
+- **AC-009.** Стенд: 401 Basic сайта через прокси с паролем читается (главный документ и iframe) без Authorization сайту, неверный пароль даёт точную причину в err пробы:
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh auth)" = ok'`
 - **AC-010.** Стенд: https-прокси с паролем через релей, CONNECT-туннель поверх TLS, без доверия к CA отказ по TLS:
   `bash -c 'test "$(bash docs/specs/checks/m27_stand.sh tls)" = ok'`

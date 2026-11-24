@@ -7,6 +7,8 @@
 сокетом по 127.0.0.1, а вместо внешнего прокси поднимает свой поддельный
 upstream на 127.0.0.1 и сверяет, что релей ему прислал. Каждый отказ
 сверяется с ПРИЧИНОЙ (текст err), пароль ищется во всём, что видно наружу.
+Узкий обработчик CDP (только CancelAuth, только при релее) проверяется на
+подделке CDP-сессии.
 """
 import base64
 import contextlib
@@ -278,9 +280,6 @@ def relay_side():
             if adapter_name == "patchright":
                 check(f"{label}: WebRTC флаг", runtime.chromium.launch.call_args.kwargs.get("args"),
                       ["--webrtc-ip-handling-policy=disable_non_proxied_udp"])
-                page = runtime.chromium.launch.return_value.new_page.return_value
-                check(f"{label}: без CDP-обработчика", (page.context.new_cdp_session.called,
-                                                        page.route.called), (False, False))
             else:
                 check(f"{label}: block_webrtc", session.call_args.kwargs.get("block_webrtc"), True)
             if port is not None:
@@ -371,6 +370,84 @@ def relay_side():
                 adapter.close()
 
 
+def cdp_world(adapter_name):
+    """Подделка браузера, у которой scrapling вызывает page_setup на каждом fetch."""
+    modules, runtime, session = browser_modules()
+    if adapter_name == "patchright":
+        page = runtime.chromium.launch.return_value.new_page.return_value
+    else:
+        page = Mock()
+
+        def fetch(url, *, page_setup=None, **kwargs):
+            if page_setup is not None:
+                page_setup(page)
+            return types.SimpleNamespace(status=200, url=url, body=b"ok")
+
+        session.return_value.fetch.side_effect = fetch
+    return modules, page
+
+
+def cancel_auth_side():
+    """С релеем остаётся узкий обработчик CDP: на любой вызов авторизации — CancelAuth."""
+    from unittest.mock import call
+    expected = [
+        call("Fetch.enable", {"handleAuthRequests": True, "patterns": [{"urlPattern": "*"}]}),
+        call("Fetch.continueRequest", {"requestId": "r1"}),
+        call("Fetch.continueWithAuth", {"requestId": "407",
+                                        "authChallengeResponse": {"response": "CancelAuth"}}),
+        call("Fetch.continueWithAuth", {"requestId": "401",
+                                        "authChallengeResponse": {"response": "CancelAuth"}}),
+    ]
+    for proxy in (f"http://user1:{ENC}@127.0.0.1:9", f"socks5h://user1:{ENC}@127.0.0.1:9",
+                  "http://user1@127.0.0.1:9"):
+        for adapter_name in ("patchright", "scrapling"):
+            label = f"CancelAuth {adapter_name} {proxy.split(':')[0]}"
+            modules, page = cdp_world(adapter_name)
+            with patch.dict(sys.modules, modules), patch.dict(os.environ, {"ABG_PROXY": proxy}):
+                adapter = PROBE.make_adapter(adapter_name)
+                adapter.start()
+                try:
+                    if adapter_name == "scrapling":
+                        for _ in range(2):
+                            adapter.navigate("http://target.invalid/")
+                    context = page.context
+                    check(f"{label}: одна CDP-сессия на страницу",
+                          context.new_cdp_session.call_args_list, [call(page)])
+                    cdp = context.new_cdp_session.return_value
+                    callbacks = dict(entry.args for entry in cdp.on.call_args_list)
+                    if {"Fetch.requestPaused", "Fetch.authRequired"} <= set(callbacks):
+                        callbacks["Fetch.requestPaused"]({"requestId": "r1"})
+                        callbacks["Fetch.authRequired"]({"requestId": "407",
+                                                         "authChallenge": {"source": "Proxy"}})
+                        callbacks["Fetch.authRequired"]({"requestId": "401",
+                                                         "authChallenge": {"source": "Server"}})
+                    check(f"{label}: только CancelAuth", cdp.send.call_args_list, expected)
+                    sent = repr(cdp.send.call_args_list) + repr(context.mock_calls)
+                    for needle in ("ProvideCredentials", SECRET, ENC, "user1"):
+                        if needle in sent:
+                            FAILURES.append(f"{label}: {needle!r} ушло в CDP")
+                    if adapter_name == "patchright":
+                        pages = [c.args[1] for c in context.on.call_args_list if c.args[:1] == ("page",)]
+                        new_page = Mock(context=context)
+                        for hook in pages:
+                            hook(new_page)
+                        check(f"{label}: новые страницы (popup) тоже с CancelAuth",
+                              context.new_cdp_session.call_args_list[-1:], [call(new_page)])
+                finally:
+                    adapter.close()
+    for proxy in ("", "http://127.0.0.1:9", "socks5h://127.0.0.1:9"):
+        for adapter_name in ("patchright", "scrapling"):
+            modules, page = cdp_world(adapter_name)
+            with patch.dict(sys.modules, modules), patch.dict(os.environ, {"ABG_PROXY": proxy}):
+                adapter = PROBE.make_adapter(adapter_name)
+                adapter.start()
+                if adapter_name == "scrapling":
+                    adapter.navigate("http://target.invalid/")
+                adapter.close()
+            check(f"без кредов {adapter_name} {proxy or 'без прокси'}: обработчик не включён",
+                  (page.context.new_cdp_session.called, page.route.called), (False, False))
+
+
 def failing_probe(proxy, connect):
     """run_probe с patchright, чей goto ходит через релей и падает, как Chromium."""
     modules, runtime, session = browser_modules()
@@ -439,7 +516,7 @@ def failure_side():
 
 
 def main():
-    for part in (oneshot_side, relay_side, failure_side):
+    for part in (oneshot_side, relay_side, cancel_auth_side, failure_side):
         try:
             part()
         except Exception as exc:  # A crash is a failed check, not a pass.

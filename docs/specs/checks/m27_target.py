@@ -9,10 +9,10 @@
                     /via-sw, воркер отвечает своим fetch('/sw-backend'),
                     текст «m27 service worker text» (нужен secure context:
                     стенд открывает /sw как http://localhost:8000);
-  /authpage?b=B     текст «m27 auth page» только из JS и картинка
-                    http://B:8000/auth401 (cross-site: Chromium не показывает
-                    окно входа, а iframe или главный документ с 401 Basic
-                    без обработчика CDP подвешивают или роняют загрузку);
+  /authpage?b=B     текст «m27 auth page» только из JS, same-origin iframe
+                    /auth401 и cross-site картинка http://B:8000/auth401
+                    (без CancelAuth через CDP iframe с 401 Basic поднимает
+                    окно входа headful Chrome и подвешивает загрузку);
   /auth401          401 с WWW-Authenticate: Basic.
 Страница /sw держит событие load картинкой /hold?k=K, пока
 страница не запросит /release?k=K (после записи текста) или 15 с.
@@ -108,7 +108,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path == "/authpage":
             code, body = 200, (f"<html><head><title>M27 auth</title></head><body><div id=m></div>"
                                f"<script>document.getElementById('m').textContent='m27 auth'+' page';"
-                               f"</script><img src='http://{other}:8000/auth401' alt=''>"
+                               f"</script><iframe src='/auth401'></iframe>"
+                               f"<img src='http://{other}:8000/auth401' alt=''>"
                                f"</body></html>").encode()
         elif path == "/auth401":
             code, body = 401, b"<html><body><p>auth required</p></body></html>"
