@@ -2079,10 +2079,12 @@ class TurnstileClickTests(unittest.TestCase):
             return 0
 
         def bounding_box(self, timeout=None):
+            self.page.pw_calls.append(("bounding_box", timeout, self.page._now()))
             depth = self._depth()
             return dict(self.page.boxes[depth]) if depth in self.page.boxes else None
 
         def input_value(self, timeout=None):
+            self.page.pw_calls.append(("input_value", timeout, self.page._now()))
             return self.page.token
 
         def wait_for(self, *args, **kwargs):
@@ -2097,8 +2099,7 @@ class TurnstileClickTests(unittest.TestCase):
             self.at = (x, y)
 
         def down(self, **kwargs):
-            import time as _time
-            self.page.downs.append((round(_time.monotonic() - self.page.t0, 2), self.at))
+            self.page.downs.append((round(self.page._now() - self.page.t0, 2), self.at))
 
         def up(self, **kwargs):
             self.page.on_click()
@@ -2113,8 +2114,14 @@ class TurnstileClickTests(unittest.TestCase):
 
     class Page:
         def __init__(self, test, *, pass_on_click_after_s=1.0, passes_by_itself_after_s=None,
-                     sets_clearance=True, token="", boxes=None, body=None, status=403, headers=None):
+                     sets_clearance=True, token="", boxes=None, body=None, status=403, headers=None,
+                     clock=None):
             self.test = test
+            # clock: a VirtualClock; wait_for_timeout then advances it instead of sleeping.
+            self.clock = clock
+            self.waits = []  # (virtual time, ms) for every wait_for_timeout
+            self.pw_calls = []  # (method, timeout=, virtual time)
+            self.gone_reads = []  # virtual times of title() reads with the interstitial gone
             self.INTERSTITIAL = test.INTERSTITIAL
             self.REAL = test.REAL
             self.pass_on_click_after_s = pass_on_click_after_s
@@ -2134,9 +2141,18 @@ class TurnstileClickTests(unittest.TestCase):
             self.frames = [self.main_frame]
             self.url = "https://site.invalid/"
             self.up = True
+            self.t0 = self._now()
+            self.cookie_reads = []
+            def cookies(*a, **k):
+                self.cookie_reads.append(self._now())
+                return list(self.cookies_list)
+            self.context = types.SimpleNamespace(cookies=cookies)
+
+        def _now(self):
+            if self.clock is not None:
+                return self.clock()
             import time as _time
-            self.t0 = _time.monotonic()
-            self.context = types.SimpleNamespace(cookies=lambda *a, **k: list(self.cookies_list))
+            return _time.monotonic()
 
         def on(self, event, handler):
             self.handlers.append(handler)
@@ -2150,8 +2166,7 @@ class TurnstileClickTests(unittest.TestCase):
                 handler(response)
 
         def goto(self, url, **kwargs):
-            import time as _time
-            self.t0 = _time.monotonic()
+            self.t0 = self._now()
             response = self.test.Response(self.first_status, self.first_headers, self.main_frame)
             self._emit(response)
             if self.first_body is not None:
@@ -2168,19 +2183,19 @@ class TurnstileClickTests(unittest.TestCase):
             self._emit(self.test.Response(200, self.test.FINAL_HEADERS, self.main_frame))
 
         def _tick(self):
-            import time as _time
             if (self.up and self.passes_by_itself_after_s is not None
-                    and _time.monotonic() - self.t0 >= self.passes_by_itself_after_s):
+                    and self._now() - self.t0 >= self.passes_by_itself_after_s):
                 self._pass()
 
         def on_click(self):
-            import time as _time
             if (self.pass_on_click_after_s is not None
-                    and _time.monotonic() - self.t0 >= self.pass_on_click_after_s):
+                    and self._now() - self.t0 >= self.pass_on_click_after_s):
                 self._pass()
 
         def title(self):
             self._tick()
+            if not self.up:
+                self.gone_reads.append(self._now())
             if self.first_body is not None:
                 return "Access Denied"
             return "Just a moment..." if self.up else "Real page"
@@ -2190,8 +2205,12 @@ class TurnstileClickTests(unittest.TestCase):
             return self.test.Locator(self, selector)
 
         def wait_for_timeout(self, ms):
-            import time as _time
-            _time.sleep(ms / 1000)
+            if self.clock is not None:
+                self.waits.append((self.clock(), ms))
+                self.clock.advance(ms / 1000)
+            else:
+                import time as _time
+                _time.sleep(ms / 1000)
             self._tick()
 
         def evaluate(self, expression, *args):
@@ -2204,6 +2223,77 @@ class TurnstileClickTests(unittest.TestCase):
 
         def content(self):
             return self.main_frame.content()
+
+    class VirtualClock:
+        """Deterministic monotonic clock; time moves only when advanced."""
+
+        def __init__(self, start=1000.0):
+            self.now = start
+
+        def __call__(self):
+            return self.now
+
+        def advance(self, seconds):
+            self.now += seconds
+
+    def click_on_virtual_clock(self, page, budget_ms=None):
+        """Run _try_turnstile_click with probe's time.monotonic bound to page.clock.
+
+        Only the probe module's own `time` name is replaced, so the real clock
+        stays untouched for unittest. The budget deadline runs on the same
+        virtual clock (None: no budget, cap is TURNSTILE_CLICK_CAP_MS).
+        """
+        clock = page.clock
+        deadline = None if budget_ms is None else self.probe._Deadline(clock(), budget_ms, clock)
+        fake_time = types.SimpleNamespace(monotonic=clock)
+        with patch.object(self.probe, "time", fake_time), \
+                patch.object(self.probe, "_DEADLINE", deadline):
+            return self.probe._try_turnstile_click(page, [], "")
+
+    def never_passing_virtual_page(self):
+        clock = self.VirtualClock()
+        # No widget box: every container lookup misses.
+        page = self.Page(self, pass_on_click_after_s=None, boxes={}, clock=clock)
+        start = clock()
+        # Half of 19.25 s: a 9625 ms cap, not a multiple of the 250 ms poll.
+        # All times stay exact binary fractions, so no float rounding.
+        self.assertFalse(self.click_on_virtual_clock(page, budget_ms=19_250))
+        return page, start, start + 9.625
+
+    def test_last_poll_pause_is_capped_by_remaining_time(self):
+        page, start, deadline = self.never_passing_virtual_page()
+        last_at, last_ms = page.waits[-1]
+        self.assertEqual(last_at, start + 9.5)
+        self.assertEqual(last_ms, 125)
+        self.assertEqual([ms for _, ms in page.waits[:-1]], [250] * (len(page.waits) - 1))
+        # The loop ends on the cap, not one full poll past it.
+        self.assertEqual(page.clock(), deadline)
+
+    def test_playwright_timeout_is_capped_by_remaining_time(self):
+        page, start, deadline = self.never_passing_virtual_page()
+        reads = [(timeout, at) for method, timeout, at in page.pw_calls if method == "input_value"]
+        self.assertEqual(reads[0], (1000, start))
+        # The last token read, 125 ms before the cap, gets only those 125 ms.
+        self.assertEqual(reads[-1], (125, start + 9.5))
+        boxes = [(timeout, at) for method, timeout, at in page.pw_calls if method == "bounding_box"]
+        self.assertEqual(boxes[-4:], [(125, start + 9.5)] * 4)
+
+    def test_next_lookup_is_exactly_500_ms_after_a_miss(self):
+        page, start, deadline = self.never_passing_virtual_page()
+        lookups = [at - start for method, _, at in page.pw_calls if method == "input_value"]
+        self.assertEqual(lookups, [0.5 * i for i in range(20)])
+
+    def test_success_waits_250_ms_after_interstitial_first_seen_gone(self):
+        clock = self.VirtualClock()
+        page = self.Page(self, pass_on_click_after_s=0.0, clock=clock)
+        self.assertTrue(self.click_on_virtual_clock(page))
+        self.assertEqual(len(page.downs), 1)
+        first_gone = page.gone_reads[0]
+        # The confirming re-read and the cookie check come 250 ms later, not at once.
+        self.assertEqual(round((page.gone_reads[-1] - first_gone) * 1000), 250)
+        self.assertEqual(len(page.cookie_reads), 1)
+        self.assertGreaterEqual(round((page.cookie_reads[0] - first_gone) * 1000), 250)
+        self.assertEqual(round((clock() - first_gone) * 1000), 250)
 
     def navigate(self, page, *, adapter="patchright", budget_ms=30_000):
         base = self.probe.PatchrightAdapter if adapter == "patchright" else self.probe.PlaywrightAdapter
