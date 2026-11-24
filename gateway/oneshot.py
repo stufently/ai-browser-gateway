@@ -1,19 +1,24 @@
 """Self-contained product CLI with local provider processes.
 
-The ladder runs direct; ABG_EGRESS_PROXY (a proxy URL, read from the
-environment so credentials stay out of argv) adds one curl_cffi step through
-that proxy after the browsers, for sites that block the host's address.
-ABG_SESSION_DIR (a mounted directory) keeps solved-challenge sessions between
-runs, so a later run of the same host can skip the browser.
+ABG_PROXY routes curl_cffi, patchright and scrapling through a single proxy.
+--proxy URL takes precedence and rejects userinfo (proxy_credentials_in_argv).
+Pass proxy credentials through ABG_PROXY. SOCKS5 credentials with browser
+steps enabled report proxy_unsupported. Invalid URLs report invalid_request.
+
+With no explicit proxy, the ladder starts direct and ABG_EGRESS_PROXY can
+add a final curl_cffi step. ABG_SESSION_DIR keeps sessions across runs,
+with a separate directory for each explicit proxy identity.
 """
 import argparse
 from dataclasses import asdict
+from hashlib import sha256
 import json
 import os
+from pathlib import Path
 import signal
 import subprocess
 import sys
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from bench.providers.registry import PROVIDERS
 from gateway.fetch import ProductFetcher
@@ -24,7 +29,16 @@ from gateway.product import ProductRequest, plan_product, run_product
 EGRESS_ENV = 'ABG_EGRESS_PROXY'
 SESSION_DIR_ENV = 'ABG_SESSION_DIR'
 EGRESS_PROFILE = 'proxy'
-_PROXY_SCHEMES = frozenset({'http', 'https', 'socks5', 'socks5h'})
+EXPLICIT_PROFILE = 'explicit'
+_PROXY_PORTS = {'http': 80, 'https': 443, 'socks5': 1080, 'socks5h': 1080}
+
+
+def _proxy_parts(proxy):
+    parts = urlsplit(proxy)
+    if parts.scheme not in _PROXY_PORTS or not parts.hostname:
+        raise ValueError('invalid proxy')
+    parts.port  # ValueError on a malformed port.
+    return parts
 
 
 def egress_profiles(environ=os.environ):
@@ -32,11 +46,34 @@ def egress_profiles(environ=os.environ):
     proxy = environ.get(EGRESS_ENV, '').strip()
     if not proxy:
         return {}
-    parts = urlsplit(proxy)
-    if parts.scheme not in _PROXY_SCHEMES or not parts.hostname:
-        raise ValueError('invalid egress proxy')
-    parts.port  # ValueError on a malformed port.
+    _proxy_parts(proxy)
     return {EGRESS_PROFILE: proxy}
+
+
+class _ProxyRefusal(ValueError):
+    """A proxy input rejected with a specific CLI error."""
+
+
+def _explicit_proxy(flags, *, allow_browser):
+    if flags:
+        candidates = flags
+    else:
+        proxy = os.environ.get('ABG_PROXY', '')
+        if not proxy.strip():
+            return None
+        candidates = [proxy]
+    for proxy in candidates:
+        if any(char.isspace() or ord(char) < 32 or 127 <= ord(char) <= 159
+               for char in proxy):
+            raise ValueError('invalid proxy')
+        parts = _proxy_parts(proxy)
+        if parts.username is not None:
+            if flags:
+                raise _ProxyRefusal('proxy_credentials_in_argv')
+            if parts.scheme in ('socks5', 'socks5h') and allow_browser:
+                raise _ProxyRefusal('proxy_unsupported')
+    # curl_cffi must resolve names at the proxy, as Chromium does with SOCKS5.
+    return 'socks5h' + proxy[len(parts.scheme):] if parts.scheme == 'socks5' else proxy
 
 
 class _Interrupted(BaseException):
@@ -73,7 +110,8 @@ class LocalLauncher:
         child_env = {name: value for name, value in child_env.items()
                      if name.lower() not in {'http_proxy', 'https_proxy', 'all_proxy',
                                              'ftp_proxy', 'no_proxy'}
-                     and name != EGRESS_ENV}
+                     and name not in {EGRESS_ENV,
+                                      'PLAYWRIGHT_DISABLE_FORCED_CHROMIUM_PROXIED_LOOPBACK'}}
         child_env['ABG_PROVIDER'] = provider.name
         proc = None
         try:
@@ -112,13 +150,23 @@ class _Parser(argparse.ArgumentParser):
         raise ValueError('invalid_request')
 
 
-def session_store():
-    """Sessions persist between runs only in a directory the caller mounts."""
+def session_store(proxy=None):
+    """Persist sessions in the mounted directory, scoped by proxy identity."""
     directory = os.environ.get(SESSION_DIR_ENV)
     if not directory:
         return None
     from gateway.sessions import FileSessionStore
-    return FileSessionStore(directory)
+    root = FileSessionStore(directory)
+    if proxy is None:
+        return root
+    if not root._private():
+        return None
+    parts = urlsplit(proxy)
+    identity = '|'.join((parts.scheme, parts.hostname,
+                         str(parts.port or _PROXY_PORTS[parts.scheme]),
+                         unquote(parts.username or '')))
+    scope = 'proxy-' + sha256(identity.encode('utf-8')).hexdigest()[:16]
+    return FileSessionStore(Path(directory) / scope)
 
 
 def main(argv=None):
@@ -130,12 +178,23 @@ def main(argv=None):
             parser.add_argument('--expected-text')
             parser.add_argument('--budget-ms', type=int, default=30000)
             parser.add_argument('--no-browser', action='store_true')
+            parser.add_argument('--proxy', action='append')
             args = parser.parse_args(argv)
             profiles = egress_profiles()
-            request = ProductRequest(args.url, max_age_hours=0, egress_profiles=tuple(profiles),
+            proxy = _explicit_proxy(args.proxy, allow_browser=not args.no_browser)
+            egress = tuple(profiles)
+            route = 'direct'
+            if proxy is not None:
+                route = EXPLICIT_PROFILE
+                profiles = {route: proxy}
+                egress = ()
+            request = ProductRequest(args.url, max_age_hours=0, egress_profiles=egress,
                                      budget_ms=args.budget_ms, allow_browser=not args.no_browser,
-                                     expected_text=args.expected_text)
+                                     expected_text=args.expected_text, route_profile=route)
             plan_product(request)
+        except _ProxyRefusal as error:
+            print(json.dumps({'error': str(error)}), file=sys.stderr)
+            return 2
         except (ValueError, TypeError, OverflowError, RecursionError, OSError):
             print('{"error": "invalid_request"}', file=sys.stderr)
             return 2
@@ -153,7 +212,8 @@ def main(argv=None):
             for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
                 previous[signum] = signal.signal(signum, interrupt)
             result = run_product(request, ProductFetcher(
-                request.url, profiles=profiles, launcher=launcher, sessions=session_store()))
+                request.url, profiles=profiles, launcher=launcher,
+                sessions=session_store(proxy), route=request.route_profile))
         except _Interrupted:
             print('{"error": "interrupted"}', file=sys.stderr)
             return 4

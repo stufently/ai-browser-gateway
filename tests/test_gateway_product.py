@@ -19,6 +19,21 @@ def page(**changes):
 
 
 class ProductTests(unittest.TestCase):
+    def test_route_profile_applies_to_entrances_http_and_browsers(self):
+        request = ProductRequest('https://target.invalid', max_age_hours=1,
+                                 egress_profiles=('fallback',), route_profile='explicit')
+        self.assertEqual(plan_product(request), (
+            PlanStep('rss', 'explicit', 'entrance'),
+            PlanStep('wayback', 'explicit', 'entrance'),
+            PlanStep('curl_cffi', 'explicit', 'http'),
+            PlanStep('patchright', 'explicit', 'browser'),
+            PlanStep('scrapling', 'explicit', 'browser'),
+            PlanStep('curl_cffi', 'fallback', 'egress'),
+        ))
+        for route in ('', None, 1, 'fallback'):
+            with self.subTest(route=route), self.assertRaises(ValueError):
+                plan_product(replace(request, route_profile=route))
+
     def test_http_only_plan_preserves_egress_order_and_deduplicates(self):
         request = ProductRequest('https://a.test', allow_browser=False,
                                  egress_profiles=('silver', 'gold', 'silver'))

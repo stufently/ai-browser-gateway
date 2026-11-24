@@ -39,22 +39,21 @@ class BenchFetcher:
 class ProductFetcher:
     """One content-only cold request, with per-instance route configuration.
 
-    With a session store, the direct HTTP step replays the cookies and UA a
-    browser left for this host, and a direct browser that passes leaves its
-    own. A replay that does not pass is dropped, unless a newer session took
-    its place. Cookies are bound to the address that solved them, so egress
-    steps never use or leave one; plain http never does either, since the
-    stored cookies carry no Secure flag.
+    With a session store, the HTTP step replays the cookies and UA a browser
+    on the same route left for this host. A replay that does not pass is
+    dropped, unless a newer session took its place. The store belongs to
+    the primary route, with sessions available only for HTTPS targets.
     """
 
     def __init__(self, url, *, entrances=None, profiles=None,
-                 launcher=None, network=None, sessions=None):
+                 launcher=None, network=None, sessions=None, route='direct'):
         self.url = url
         self.entrances = dict(entrances or {})
         self.profiles = dict(profiles or {})
         self.launcher = launcher
         self.network = network
         self.sessions = sessions
+        self.route = route
         self.host = urlsplit(url).hostname
 
     def __call__(self, step: PlanStep, budget_ms: int) -> ProviderReply:
@@ -63,7 +62,7 @@ class ProductFetcher:
                   (step.egress_profile, self.profiles.get(step.egress_profile)))
         options = {}
         replay = None
-        if (self.sessions is not None and egress is None and self.host
+        if (self.sessions is not None and step.egress_profile == self.route and self.host
                 and urlsplit(self.url).scheme == 'https'):
             if step.purpose == 'http':
                 replay = self.sessions.get(self.host)
