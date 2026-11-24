@@ -27,6 +27,7 @@ from urllib.error import HTTPError
 from urllib.parse import unquote, urlencode, urljoin, urlparse, urlunparse
 from urllib.request import ProxyHandler, Request, build_opener
 from urllib.request import urlopen as _stdlib_urlopen
+from weakref import WeakSet
 from xml.etree import ElementTree
 
 
@@ -233,14 +234,13 @@ _USERINFO_URL = re.compile(r"([a-z][a-z0-9+.\-]*://)([^/@\s'\"]+)@", re.I)
 
 def redact(text: str) -> str:
     """Убирает userinfo из URL и пароль текущего прокси из текста."""
-    text = _USERINFO_URL.sub(r"\1***@", text)
     try:
         password = urlparse(os.environ.get("ABG_PROXY", "")).password
     except ValueError:
-        return text
+        password = None
     if password:
         text = text.replace(password, "***").replace(unquote(password), "***")
-    return text
+    return _USERINFO_URL.sub(r"\1***@", text)
 
 
 def _live_rss_kb() -> int:
@@ -904,6 +904,57 @@ class PrimpAdapter:
         pass
 
 
+_PROXIED_WEBRTC_FLAG = "--webrtc-ip-handling-policy=disable_non_proxied_udp"
+
+
+def _chromium_proxy(url: str) -> tuple[dict[str, str], tuple[str, str] | None]:
+    settings = playwright_proxy(url)
+    if settings["server"].startswith(("http://", "https://")) and "username" in settings:
+        # The driver treats proxy credentials as HTTP credentials for the page.
+        username = settings.pop("username")
+        password = settings.pop("password", "")
+        return settings, (username, password)
+    return settings, None
+
+
+def _proxy_auth_handler(credentials: tuple[str, str]):
+    username, password = credentials
+    attached = WeakSet()
+
+    def attach(page):
+        if page in attached:
+            return
+        # Register and remove a route so Patchright releases its default Fetch
+        # interceptor and this session receives the auth challenges.
+        def passthrough(route):
+            route.fallback()
+
+        page.route("**/*", passthrough)
+        page.unroute("**/*", passthrough)
+        cdp = page.context.new_cdp_session(page)
+        attempted = set()
+
+        def continue_request(event):
+            cdp.send("Fetch.continueRequest", {"requestId": event["requestId"]})
+
+        def authenticate(event):
+            request_id = event["requestId"]
+            response = {"response": "CancelAuth"}
+            if event["authChallenge"].get("source") == "Proxy" and request_id not in attempted:
+                attempted.add(request_id)
+                response = {"response": "ProvideCredentials", "username": username,
+                            "password": password}
+            cdp.send("Fetch.continueWithAuth", {"requestId": request_id,
+                                                "authChallengeResponse": response})
+
+        cdp.on("Fetch.requestPaused", continue_request)
+        cdp.on("Fetch.authRequired", authenticate)
+        cdp.send("Fetch.enable", {"handleAuthRequests": True, "patterns": [{"urlPattern": "*"}]})
+        attached.add(page)
+
+    return attach
+
+
 class PlaywrightAdapter:
     package = "playwright"
 
@@ -918,10 +969,19 @@ class PlaywrightAdapter:
         if self.package == "patchright":
             launch_options["channel"] = "chrome"
         proxy = _proxy_url()
+        credentials = None
         if proxy:
-            launch_options["proxy"] = playwright_proxy(proxy)
+            if self.package == "patchright":
+                launch_options["proxy"], credentials = _chromium_proxy(proxy)
+                launch_options["args"] = [_PROXIED_WEBRTC_FLAG]
+            else:
+                launch_options["proxy"] = playwright_proxy(proxy)
         self.browser = self.runtime.chromium.launch(**launch_options)
         self.page = self.browser.new_page()
+        if credentials is not None:
+            attach = _proxy_auth_handler(credentials)
+            attach(self.page)
+            self.page.context.on("page", attach)
 
     def navigate(self, url: str) -> dict[str, Any]:
         documents: list[Any] = []
@@ -1245,6 +1305,7 @@ def _scrapling_has_clearance(response: Any, final_url: str) -> bool:
 class ScraplingAdapter:
     version = "unknown"
     solve_cloudflare = True
+    _proxy_auth = None
 
     def start(self) -> None:
         from scrapling.fetchers import StealthySession
@@ -1259,8 +1320,11 @@ class ScraplingAdapter:
             "retries": 1,
         }
         proxy = _proxy_url()
+        credentials = None
         if proxy:
-            options["proxy"] = playwright_proxy(proxy)
+            options["proxy"], credentials = _chromium_proxy(proxy)
+            options["block_webrtc"] = True
+        self._proxy_auth = _proxy_auth_handler(credentials) if credentials is not None else None
         self.session = StealthySession(**options)
         self.session.__enter__()
 
@@ -1273,6 +1337,9 @@ class ScraplingAdapter:
         recorded_docs: list[tuple[int | None, Any]] = []
 
         def _page_setup(page: Any) -> None:
+            if self._proxy_auth is not None:
+                self._proxy_auth(page)
+
             def _on_response(response: Any) -> None:
                 try:
                     if (response.request.resource_type == "document"

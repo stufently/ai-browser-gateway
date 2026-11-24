@@ -12,7 +12,7 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, Mock, call, patch
 
 from bench.egress import load_profiles
 
@@ -348,7 +348,7 @@ class AdapterContractTests(unittest.TestCase):
 
         class Browser:
             def new_page(self):
-                return object()
+                return Mock(context=Mock(pages=[]))
 
             def close(self):
                 pass
@@ -1467,6 +1467,90 @@ class ProxyWiringTests(unittest.TestCase):
                 self.assertEqual(self.probe.redact(f"{url} refused"),
                                  "http://***@proxy.invalid:8080 refused")
 
+    def test_redact_masks_password_before_stripping_userinfo(self):
+        for configured in ("p@ss%40w", "p%40ss%40w", "p@ss@w"):
+            proxy = f"http://user1:{configured}@proxy.invalid:8080"
+            for shown in (configured, "p@ss@w"):
+                with self.subTest(configured=configured, shown=shown), patch.dict(
+                        os.environ, {"ABG_PROXY": proxy}):
+                    logged = f"launch failed via http://user1:{shown}@proxy.invalid:8080"
+                    self.assertEqual(self.probe.redact(logged),
+                                     "launch failed via http://***@proxy.invalid:8080")
+
+    def test_proxied_chromium_disables_non_proxied_webrtc_udp(self):
+        flag = "--webrtc-ip-handling-policy=disable_non_proxied_udp"
+        for proxy in ("", "http://proxy.invalid:8080"):
+            runtime = Mock()
+            sync_playwright = Mock()
+            sync_playwright.return_value.start.return_value = runtime
+            session = MagicMock()
+            modules = {
+                "patchright.sync_api": types.SimpleNamespace(sync_playwright=sync_playwright),
+                "scrapling.fetchers": types.SimpleNamespace(StealthySession=session),
+            }
+            with self.subTest(proxy=proxy), patch.dict(sys.modules, modules), patch.dict(
+                    os.environ, {"ABG_PROXY": proxy}):
+                self.probe.PatchrightAdapter().start()
+                self.probe.ScraplingAdapter().start()
+                patchright_flags = runtime.chromium.launch.call_args.kwargs.get("args", [])
+                self.assertEqual(flag in patchright_flags, bool(proxy))
+                self.assertIs(session.call_args.kwargs.get("block_webrtc", False), bool(proxy))
+
+    def test_proxy_credentials_answer_only_proxy_auth_challenges(self):
+        proxy = "http://user1:p%40ss@proxy.invalid:8080"
+        for adapter_name in ("patchright", "scrapling"):
+            runtime = Mock()
+            context = Mock()
+            page = Mock(context=context)
+            runtime.chromium.launch.return_value.new_page.return_value = page
+            sync_playwright = Mock()
+            sync_playwright.return_value.start.return_value = runtime
+            session = MagicMock()
+
+            def fetch(url, *, page_setup, **kwargs):
+                page_setup(page)
+                return types.SimpleNamespace(status=200, url=url, body=b"ok")
+
+            session.return_value.fetch.side_effect = fetch
+            modules = {
+                "patchright.sync_api": types.SimpleNamespace(sync_playwright=sync_playwright),
+                "scrapling.fetchers": types.SimpleNamespace(StealthySession=session),
+            }
+            with self.subTest(adapter=adapter_name), patch.dict(sys.modules, modules), patch.dict(
+                    os.environ, {"ABG_PROXY": proxy}):
+                adapter = self.probe.make_adapter(adapter_name)
+                adapter.start()
+                if adapter_name == "scrapling":
+                    for _ in range(2):
+                        adapter.navigate("http://target.invalid/")
+                launch = runtime.chromium.launch if adapter_name == "patchright" else session
+                self.assertEqual(launch.call_args.kwargs["proxy"],
+                                 {"server": "http://proxy.invalid:8080"})
+                self.assertNotIn("http_credentials", launch.call_args.kwargs)
+                context.new_cdp_session.assert_called_once_with(page)
+                cdp = context.new_cdp_session.return_value
+                callbacks = dict(entry.args for entry in cdp.on.call_args_list)
+                callbacks["Fetch.requestPaused"]({"requestId": "request"})
+                challenge = callbacks["Fetch.authRequired"]
+                challenge({"requestId": "407", "authChallenge": {"source": "Proxy"}})
+                challenge({"requestId": "407", "authChallenge": {"source": "Proxy"}})
+                challenge({"requestId": "401", "authChallenge": {"source": "Server"}})
+                self.assertEqual(cdp.send.call_args_list, [
+                    call("Fetch.enable", {"handleAuthRequests": True, "patterns": [{"urlPattern": "*"}]}),
+                    call("Fetch.continueRequest", {"requestId": "request"}),
+                    call("Fetch.continueWithAuth", {"requestId": "407", "authChallengeResponse": {
+                        "response": "ProvideCredentials", "username": "user1", "password": "p@ss"}}),
+                    call("Fetch.continueWithAuth", {"requestId": "407", "authChallengeResponse": {
+                        "response": "CancelAuth"}}),
+                    call("Fetch.continueWithAuth", {"requestId": "401", "authChallengeResponse": {
+                        "response": "CancelAuth"}}),
+                ])
+                if adapter_name == "patchright":
+                    self.assertEqual(context.on.call_args.args[0], "page")
+                    new_page = Mock(context=context)
+                    context.on.call_args.args[1](new_page)
+                    context.new_cdp_session.assert_called_with(new_page)
+
     def test_playwright_proxy_maps_socks5h_to_socks5(self):
         for scheme in ("socks5h", "SOCKS5H", "socks5"):
             with self.subTest(scheme=scheme):
@@ -1478,7 +1562,7 @@ class ProxyWiringTests(unittest.TestCase):
         settings = self.probe.playwright_proxy("http://user:pass@[fd00::1]:8080")
         self.assertEqual(settings["server"], "http://[fd00::1]:8080")
 
-    def test_both_playwright_packages_get_proxy(self):
+    def test_both_playwright_packages_get_proxy_server(self):
         proxy = "http://user:pass@proxy.invalid:8080"
         expected = self.probe.playwright_proxy(proxy)
         self.assertEqual(expected["password"], "pass")
@@ -1486,7 +1570,7 @@ class ProxyWiringTests(unittest.TestCase):
 
         class Browser:
             def new_page(self):
-                return object()
+                return Mock(context=Mock(pages=[]))
 
         class Runtime:
             def __init__(self, bucket):
@@ -1533,7 +1617,7 @@ class ProxyWiringTests(unittest.TestCase):
             self.probe.PlaywrightAdapter().start()
             self.probe.PatchrightAdapter().start()
         self.assertEqual(launched["playwright"]["proxy"], expected)
-        self.assertEqual(launched["patchright"]["proxy"], expected)
+        self.assertEqual(launched["patchright"]["proxy"], {"server": expected["server"]})
 
     def test_result_without_url_key(self):
         with tempfile.TemporaryDirectory() as box:
