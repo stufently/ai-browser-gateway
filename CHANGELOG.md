@@ -13,7 +13,14 @@
   6/6 за 9–13 с (patchright), nowsecure и lowendtalk — 6/6 за ~1,8 с;
   через прокси с паролем — steamdb, gitlab, lowendtalk открыты, в журнале
   прокси есть все три хоста, SOCKS5 с паролем — `proxy_unsupported`.
-  Боевой сервис на этот выпуск не переводился.
+  Перевод боевого сервиса 24.11 на релиз `0b8951244e6c` (образ
+  `abg-runtime:0b8951244e6c`, конфиг до него — `compose.env.pre-cfclick`)
+  откатан на `407c1ba5b265`: `--check-deploy` прошёл, `--check-bizprofile`
+  упал (`api_provider_infrastructure_error`), все вызовы API —
+  `environment_error` на curl_cffi за ~0,5 с. Причина не в релизе: на хосте
+  нет ни одного образа провайдеров (`abg-curl_cffi:m2`, `abg-scrapling:m8`
+  и др.), откаченный релиз падает так же — сервис не отдаёт страницы и до
+  выкладки.
 
 ### Исправлено
 
