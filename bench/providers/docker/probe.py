@@ -933,11 +933,13 @@ class PlaywrightAdapter:
             status = latest.status if latest is not None else None
             headers = None if latest is None else _normalize_headers(latest.headers)
             # Turnstile click for patchright only, before the JS-wait branch.
+            turnstile_attempted = False
             if self.package == "patchright" and latest is not None:
                 verdict, rules = detect_challenge(status, headers, body)
                 rules_set = set(rules)
                 if verdict in ("suspected", "interactive") and "header_cf_mitigated" in rules_set and (
                         "body_just_a_moment" in rules_set or "body_cf_chl_opt" in rules_set):
+                    turnstile_attempted = True
                     if _try_turnstile_click(self.page, documents, sentinel):
                         latest, body = _document_and_body(self.page, documents, response, sentinel)
                         if latest is not None:
@@ -946,9 +948,11 @@ class PlaywrightAdapter:
             # A document after goto's own may still be loading: only a settled
             # read past the challenge is trusted. An unsettled one reports the
             # challenge as such, so the ladder moves on instead of giving up.
+            # Skip the JS-wait branch if Turnstile click was attempted but failed:
+            # the original 403 interstitial must not be replaced by a 200 without cf_clearance.
             unsettled = False
-            if latest is not response or detect_challenge(
-                    status, headers, body)[0] == "javascript_required":
+            if not turnstile_attempted and (latest is not response or detect_challenge(
+                    status, headers, body)[0] == "javascript_required"):
                 settled = _await_reload(self.page, documents, sentinel)
                 if settled is None:
                     unsettled = True
@@ -1085,11 +1089,24 @@ def _turnstile_gone(page: Any, pw_timeout: int) -> bool:
     return True
 
 
-def _turnstile_has_clearance(context: Any) -> bool:
-    """True when context cookies carry cf_clearance."""
+def _turnstile_has_clearance(context: Any, url: str) -> bool:
+    """True when context cookies carry cf_clearance applicable to url's host."""
     try:
         cookies = context.cookies()
-        return any(c.get("name") == "cf_clearance" for c in cookies if isinstance(c, dict))
+        host = urlparse(url).hostname or ""
+        if not host:
+            return False
+        for c in cookies:
+            if not isinstance(c, dict):
+                continue
+            if c.get("name") != "cf_clearance":
+                continue
+            domain = c.get("domain", "").lstrip(".").lower()
+            if not domain:
+                continue
+            if host == domain or host.endswith("." + domain):
+                return True
+        return False
     except Exception:
         return False
 
@@ -1100,7 +1117,6 @@ def _turnstile_find_container(page: Any, pw_timeout: int) -> tuple[float, float,
     Returns (click_x, click_y, box_height) or None.
     """
     try:
-        token_input = page.locator('input[name="cf-turnstile-response"]').first
         for depth in range(1, 5):
             try:
                 ancestor = page.locator(
@@ -1150,13 +1166,17 @@ def _try_turnstile_click(page: Any, documents: list[Any], sentinel: str) -> bool
             gone_confirmed_at = time.monotonic()
         if gone_confirmed_at is not None:
             if time.monotonic() - gone_confirmed_at >= 0.25:
-                if _turnstile_gone(page, pw_timeout) and _turnstile_has_clearance(page.context):
+                pw_timeout = _turnstile_pw_timeout(deadline)
+                if _turnstile_gone(page, pw_timeout) and _turnstile_has_clearance(page.context, page.url):
                     return True
                 gone_confirmed_at = None
         if time.monotonic() >= deadline:
             break
-        if time.monotonic() >= next_click_at:
+        # Do not click or query the DOM after the interstitial is gone.
+        if gone_confirmed_at is None and time.monotonic() >= next_click_at:
+            pw_timeout = _turnstile_pw_timeout(deadline)
             if not _turnstile_token_filled(page, pw_timeout):
+                pw_timeout = _turnstile_pw_timeout(deadline)
                 container = _turnstile_find_container(page, pw_timeout)
                 if container is not None:
                     click_x, click_y, _ = container
@@ -1172,9 +1192,11 @@ def _try_turnstile_click(page: Any, documents: list[Any], sentinel: str) -> bool
             else:
                 next_click_at = time.monotonic() + TURNSTILE_MISS_COOLDOWN_MS / 1000
         try:
-            page.wait_for_timeout(TURNSTILE_POLL_MS)
+            remaining_ms = max(1, int((deadline - time.monotonic()) * 1000))
+            poll_ms = min(TURNSTILE_POLL_MS, remaining_ms)
+            page.wait_for_timeout(poll_ms)
         except Exception:
-            pass
+            return False
     return False
 
 

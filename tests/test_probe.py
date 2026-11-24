@@ -2220,6 +2220,74 @@ class TurnstileClickTests(unittest.TestCase):
             else:
                 os.environ["ABG_SESSION_EXPORT"] = old
 
+    def test_no_click_or_dom_queries_after_interstitial_gone(self):
+        page = self.Page(self, pass_on_click_after_s=0.0)
+        result = self.navigate(page, budget_ms=30_000)
+        self.assertEqual(result["status"], 200)
+        clicks_after_gone = [d for d in page.downs if d[0] > 0.3]
+        self.assertEqual(clicks_after_gone, [])
+
+    def test_cycle_time_does_not_exceed_cap_by_more_than_0_3s(self):
+        page = self.Page(self, pass_on_click_after_s=None)
+        import time as _time
+        started = _time.monotonic()
+        self.navigate(page, budget_ms=30_000)
+        elapsed = _time.monotonic() - started
+        self.assertLessEqual(elapsed, 10.3)
+
+    def test_failed_click_does_not_get_replaced_by_200_without_clearance(self):
+        page = self.Page(self, pass_on_click_after_s=None, passes_by_itself_after_s=0.5, sets_clearance=False)
+        result = self.navigate(page, budget_ms=30_000)
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
+
+    def test_clearance_cookie_wrong_domain_not_accepted(self):
+        page = self.Page(self, pass_on_click_after_s=0.0, sets_clearance=False)
+        page.cookies_list.append({"name": "cf_clearance", "value": "c",
+                                  "domain": ".other.invalid", "path": "/"})
+        result = self.navigate(page, budget_ms=3_000)
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
+
+    def test_clearance_cookie_bare_suffix_not_accepted(self):
+        page = self.Page(self, pass_on_click_after_s=0.0, sets_clearance=False)
+        page.cookies_list.append({"name": "cf_clearance", "value": "c",
+                                  "domain": "ite.invalid", "path": "/"})
+        result = self.navigate(page, budget_ms=3_000)
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
+
+    def test_clearance_cookie_subdomain_accepted(self):
+        page = self.Page(self, pass_on_click_after_s=0.0, sets_clearance=False)
+        page.cookies_list.append({"name": "cf_clearance", "value": "c",
+                                  "domain": ".site.invalid", "path": "/"})
+        page.url = "https://sub.site.invalid/"
+        result = self.navigate(page, budget_ms=30_000)
+        self.assertEqual(result["status"], 200)
+
+    def test_wait_for_timeout_exception_exits_cycle_immediately(self):
+        page = self.Page(self, pass_on_click_after_s=None)
+        call_count = [0]
+        original_wait = page.wait_for_timeout
+        def failing_wait(ms):
+            call_count[0] += 1
+            if call_count[0] > 1:
+                raise RuntimeError("page closed")
+            original_wait(ms)
+        page.wait_for_timeout = failing_wait
+        import time as _time
+        started = _time.monotonic()
+        result = self.navigate(page, budget_ms=30_000)
+        elapsed = _time.monotonic() - started
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
+        self.assertLess(elapsed, 2.0)
+
+    def test_half_budget_cap_with_small_budget(self):
+        page = self.Page(self, pass_on_click_after_s=None)
+        import time as _time
+        started = _time.monotonic()
+        self.navigate(page, budget_ms=4_000)
+        elapsed = _time.monotonic() - started
+        self.assertGreaterEqual(elapsed, 1.5)
+        self.assertLessEqual(elapsed, 3.0)
+
 
 if __name__ == "__main__":
     unittest.main()
