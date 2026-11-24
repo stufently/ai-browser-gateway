@@ -1,6 +1,19 @@
 # CHANGELOG
 
-## 2026-11-24 (не выпущено)
+## 2026-11-24 (0.1.7)
+
+### Выпуск
+
+- Образ `ghcr.io/stufently/ai-browser-gateway-oneshot` — теги `0.1.7`,
+  `sha-efb169c`, `latest` (`sha256:2e4e57de…`). На него переведены
+  check-sites (джоба `verify_challenged`, до этого стояла 0.1.5) и
+  `abg-fetch` в ансибле (флаг `--proxy`, `ABG_PROXY` передаётся по имени);
+  скил выложен на onyx для deploy и deploy2. Серия перед выпуском через
+  `fetch.sh` без кэша сессий: gitlab sign-in, scrapingcourse, steamdb — по
+  6/6 за 9–13 с (patchright), nowsecure и lowendtalk — 6/6 за ~1,8 с;
+  через прокси с паролем — steamdb, gitlab, lowendtalk открыты, в журнале
+  прокси есть все три хоста, SOCKS5 с паролем — `proxy_unsupported`.
+  Боевой сервис на этот выпуск не переводился.
 
 ### Исправлено
 
