@@ -181,8 +181,8 @@ def oversized_head(limit):
     return b"HTTP/1.1 503 Server Error\r\nX-Pad: " + b"a" * limit + b"\r\n\r\n"
 
 
-def make_certificates(directory):
-    """CA и листовой сертификат для 127.0.0.1 через openssl, как в стенде M27.
+def make_certificates(directory, san="IP:127.0.0.1", cn="127.0.0.1", leaf="leaf"):
+    """CA (если ещё нет) и подписанный им листовой сертификат через openssl.
 
     Ключи живут только во временном каталоге, в репозиторий не попадают.
     Python 3.14 включает VERIFY_X509_STRICT: CA нужен keyUsage, листу —
@@ -196,22 +196,23 @@ def make_certificates(directory):
         assert proc.returncode == 0, (args[:2], proc.returncode,
                                       proc.stderr.decode(errors="replace")[:400])
 
-    (directory / "ext.cnf").write_text(
-        "subjectAltName=IP:127.0.0.1\n"
+    if not (directory / "ca.pem").exists():
+        run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key",
+            "-out", "ca.pem", "-days", "2", "-subj", "/CN=relay-test-ca",
+            "-addext", "basicConstraints=critical,CA:TRUE",
+            "-addext", "keyUsage=critical,keyCertSign,cRLSign")
+    (directory / f"{leaf}.cnf").write_text(
+        f"subjectAltName={san}\n"
         "authorityKeyIdentifier=keyid,issuer\n"
         "basicConstraints=CA:FALSE\n"
         "keyUsage=digitalSignature,keyEncipherment\n"
         "extendedKeyUsage=serverAuth\n", encoding="utf-8")
-    run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key",
-        "-out", "ca.pem", "-days", "2", "-subj", "/CN=relay-test-ca",
-        "-addext", "basicConstraints=critical,CA:TRUE",
-        "-addext", "keyUsage=critical,keyCertSign,cRLSign")
-    run("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "key.pem",
-        "-out", "leaf.csr", "-subj", "/CN=127.0.0.1")
-    run("x509", "-req", "-in", "leaf.csr", "-CA", "ca.pem", "-CAkey", "ca.key",
-        "-CAcreateserial", "-out", "cert.pem", "-days", "2", "-extfile", "ext.cnf")
-    return {"ca": str(directory / "ca.pem"), "cert": str(directory / "cert.pem"),
-            "key": str(directory / "key.pem")}
+    run("req", "-newkey", "rsa:2048", "-nodes", "-keyout", f"{leaf}.key",
+        "-out", f"{leaf}.csr", "-subj", f"/CN={cn}")
+    run("x509", "-req", "-in", f"{leaf}.csr", "-CA", "ca.pem", "-CAkey", "ca.key",
+        "-CAcreateserial", "-out", f"{leaf}.crt", "-days", "2", "-extfile", f"{leaf}.cnf")
+    return {"ca": str(directory / "ca.pem"), "cert": str(directory / f"{leaf}.crt"),
+            "key": str(directory / f"{leaf}.key")}
 
 
 class TlsUpstream:
@@ -525,6 +526,60 @@ class RelayHttpUpstreamTests(RelayCase):
                 got = self.talk_eof(port, PLAIN_REQUEST)
                 self.assertEqual(got, GATEWAY_RESPONSE)
                 self.assertEqual(relay.fatal, UNREACHABLE)
+
+    def test_proxy_prelude_after_connect_reaches_client_first(self):
+        """Байты, пришедшие вместе с 200 на CONNECT, клиент получает первыми."""
+        for interim in (None, INTERIM_100):
+            with self.subTest(interim=bool(interim)):
+                def handler(conn, log, interim=interim):
+                    log.append(read_head_rest(conn)[0])
+                    # Всё одной порцией: промежуточный 1xx, 200 и первые байты туннеля.
+                    conn.sendall((interim or b"") + ESTABLISHED + b"EARLY")
+
+                up = Upstream(handler)
+                self.addCleanup(up.close)
+                relay, port = self.start_relay(self.proxy_url(port=up.port))
+                got = self.talk_eof(port, CONNECT)
+                self.assertEqual(got, ESTABLISHED + b"EARLY")
+                self.assertIsNone(relay.fatal)
+
+    def test_response_block_over_limit_is_refused_promptly(self):
+        """Граница лимита — сам лимит: без разделителя релей не читает вдвое больше."""
+        limit = self.probe._RELAY_RESPONSE_LIMIT
+        held = threading.Event()
+
+        def overflow(conn, log):
+            read_head_rest(conn)
+            conn.sendall(b"X" * (limit + 100))  # блок без разделителя и без конца
+            log.append("sent")
+            held.wait(30)
+
+        up = Upstream(overflow)
+        self.addCleanup(up.close)
+        self.addCleanup(held.set)
+        relay, port = self.start_relay(self.proxy_url(port=up.port))
+        started = time.monotonic()
+        got = self.talk_eof(port, PLAIN_REQUEST)
+        self.assertLess(time.monotonic() - started, 5.0)
+        self.assertEqual(got, GATEWAY_RESPONSE)
+        self.assertEqual(relay.fatal, UNREACHABLE)
+        self.assertEqual(up.log, ["sent"])
+
+    def test_response_block_just_under_limit_passes(self):
+        limit = self.probe._RELAY_RESPONSE_LIMIT
+        head = b"HTTP/1.1 503 Server Error\r\nX-Pad: " + b"a" * (limit - 100) + b"\r\n\r\n"
+        self.assertLessEqual(len(head) - 4, limit)
+
+        def handler(conn, log):
+            read_head_rest(conn)
+            conn.sendall(head + b"tail")
+
+        up = Upstream(handler)
+        self.addCleanup(up.close)
+        relay, port = self.start_relay(self.proxy_url(port=up.port))
+        got = self.talk_eof(port, PLAIN_REQUEST)
+        self.assertEqual(got, head + b"tail")
+        self.assertIsNone(relay.fatal)
 
     def test_silent_upstream_is_502_with_reason(self):
         """Прокси принял TCP и закрыл соединение: клиенту 502, а не голый обрыв."""
@@ -1105,7 +1160,12 @@ class RelayTlsUpstreamTests(RelayCase):
     def setUpClass(cls):
         super().setUpClass()
         cls._box = tempfile.TemporaryDirectory()
-        cls.certs = make_certificates(Path(cls._box.name))
+        box = Path(cls._box.name)
+        cls.certs = make_certificates(box)
+        # Тот же CA, но имя в SAN не совпадает с адресом прокси: для проверки
+        # сравнения имени, которое отключается вместе с проверкой цепочки.
+        cls.other_host_certs = None if cls.certs is None else make_certificates(
+            box, san="DNS:proxy.invalid", cn="proxy.invalid", leaf="other")
 
     @classmethod
     def tearDownClass(cls):
@@ -1115,12 +1175,15 @@ class RelayTlsUpstreamTests(RelayCase):
         if self.certs is None:
             self.skipTest("openssl в образе нет: настоящий TLS-тест невозможен")
 
-    def tls_proxy(self, handler):
-        up = TlsUpstream(handler, self.certs)
+    def tls_proxy(self, handler, certs=None, trusted=True):
+        up = TlsUpstream(handler, self.certs if certs is None else certs)
         self.addCleanup(up.close)
         patcher = patch.dict(os.environ, {"SSL_CERT_FILE": self.certs["ca"]})
         patcher.start()
         self.addCleanup(patcher.stop)
+        if not trusted:
+            # Доверия к CA нет: проверка цепочки обязана сработать.
+            del os.environ["SSL_CERT_FILE"]
         relay, port = self.start_relay(self.proxy_url(scheme="https", port=up.port))
         return up, relay, port
 
@@ -1162,6 +1225,29 @@ class RelayTlsUpstreamTests(RelayCase):
             self.assertEqual(client.recv(4096), b"PONG")
         self.assertEqual(seen, ["open"])
         self.assertIsNone(relay.fatal)
+
+    def test_untrusted_proxy_certificate_is_refused_without_credentials(self):
+        """Проверка цепочки не отключена: недоверенный CA — отказ до запроса."""
+        def handler(conn, log):
+            log.append(read_head_rest(conn)[0])
+
+        up, relay, port = self.tls_proxy(handler, trusted=False)
+        got = self.talk_eof(port, CONNECT)
+        self.assertEqual(got, GATEWAY_RESPONSE)
+        self.assertEqual(relay.fatal, TLS_FAILED)
+        # Рукопожатие не прошло: запрос с Proxy-Authorization наверх не ушёл.
+        self.assertEqual(up.log, [])
+
+    def test_proxy_certificate_name_mismatch_is_refused_without_credentials(self):
+        """Цепочка доверенная, но имя в SAN не совпадает с адресом прокси."""
+        def handler(conn, log):
+            log.append(read_head_rest(conn)[0])
+
+        up, relay, port = self.tls_proxy(handler, certs=self.other_host_certs)
+        got = self.talk_eof(port, CONNECT)
+        self.assertEqual(got, GATEWAY_RESPONSE)
+        self.assertEqual(relay.fatal, TLS_FAILED)
+        self.assertEqual(up.log, [])
 
 
 class ModuleShapeTests(RelayCase):
