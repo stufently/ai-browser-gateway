@@ -1477,6 +1477,13 @@ class ProxyWiringTests(unittest.TestCase):
                     self.assertEqual(self.probe.redact(logged),
                                      "launch failed via http://***@proxy.invalid:8080")
 
+    def test_redact_password_that_decodes_to_url_syntax(self):
+        proxy = "http://user1:%2F@proxy.invalid:8080"
+        with patch.dict(os.environ, {"ABG_PROXY": proxy}):
+            logged = f"err via {proxy} at /path"
+            self.assertEqual(self.probe.redact(logged),
+                             "err via http://***@proxy.invalid:8080 at /path")
+
     def test_proxied_chromium_disables_non_proxied_webrtc_udp(self):
         flag = "--webrtc-ip-handling-policy=disable_non_proxied_udp"
         for proxy in ("", "http://proxy.invalid:8080"):

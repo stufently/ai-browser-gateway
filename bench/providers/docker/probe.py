@@ -233,14 +233,27 @@ _USERINFO_URL = re.compile(r"([a-z][a-z0-9+.\-]*://)([^/@\s'\"]+)@", re.I)
 
 
 def redact(text: str) -> str:
-    """Убирает userinfo из URL и пароль текущего прокси из текста."""
+    """Убирает userinfo из URL и пароль текущего прокси из текста.
+
+    Сначала снимается точный userinfo текущего прокси (пароль может содержать
+    «@»), затем любые userinfo по регулярке, и только потом голый пароль:
+    иначе пароль вроде «%2F» испортил бы «://» и регулярка пропустила бы URL.
+    """
     try:
-        password = urlparse(os.environ.get("ABG_PROXY", "")).password
+        parts = urlparse(os.environ.get("ABG_PROXY", ""))
+        password = parts.password
+        userinfo = parts.netloc.rpartition("@")[0]
     except ValueError:
-        password = None
+        password, userinfo = None, ""
+    if userinfo:
+        for form in (userinfo, unquote(userinfo)):
+            text = text.replace(form + "@", "***@")
+    text = _USERINFO_URL.sub(r"\1***@", text)
     if password:
-        text = text.replace(password, "***").replace(unquote(password), "***")
-    return _USERINFO_URL.sub(r"\1***@", text)
+        for form in (password, unquote(password)):
+            if len(form) >= 3:
+                text = text.replace(form, "***")
+    return text
 
 
 def _live_rss_kb() -> int:
