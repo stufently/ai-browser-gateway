@@ -565,6 +565,13 @@ class MonitorLogTests(unittest.TestCase):
             stdout = json.dumps([self.entries[command[1]]])
         elif command == ['image', 'inspect', d.IMAGE]:
             stdout = json.dumps([{'Id': 'image-id'}])
+        elif command[:2] == ['image', 'ls']:
+            filters = []
+            for image in d.PROVIDER_IMAGES:
+                filters.extend(('--filter', 'reference=' + image))
+            self.assertEqual(command[2:], ['--format', '{{.Repository}}:{{.Tag}}', *filters])
+            self.assertEqual(kwargs['timeout'], 30)
+            stdout = '\n'.join(d.PROVIDER_IMAGES)
         elif command[0] == 'logs':
             self.log_commands.append(command)
             if command == ['logs', '--since', '150s', 'monitor']:
@@ -782,6 +789,33 @@ class WorkerTests(unittest.TestCase):
 
 
 class ArgumentTests(unittest.TestCase):
+    def test_deploy_inventory_matches_route(self):
+        from gateway.provider_images import route_images
+        self.assertEqual(tuple(d.PROVIDER_IMAGES), route_images())
+
+    def test_missing_images_stop_deploy_before_config(self):
+        with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
+            folder = Path(tmp)
+            for name in ('SHA', 'RELEASE', 'IMAGE', 'EVIDENCE', 'SERVICE', 'INSTANCE'):
+                stack.enter_context(patch.object(d, name, getattr(d, name)))
+            stdout = stack.enter_context(patch.object(d.sys, 'stdout', io.StringIO()))
+            stderr = stack.enter_context(patch.object(d.sys, 'stderr', io.StringIO()))
+            verify = stack.enter_context(patch.object(d, 'verify_release'))
+            def inventory(*args, **kwargs):
+                verify.assert_called_once()
+                return '\n'.join(d.PROVIDER_IMAGES[1:-1])
+            listing = stack.enter_context(patch.object(d, 'docker', side_effect=inventory))
+            with patch.object(Path, 'read_text') as config:
+                self.assertEqual(run_main(['--check-deploy', '--service-root', tmp,
+                                           '--evidence', tmp]), 1)
+                config.assert_not_called()
+            listing.assert_called_once()
+            expected = dict(ok=False, internal_error='provider_images_missing',
+                            missing_images=[d.PROVIDER_IMAGES[0], d.PROVIDER_IMAGES[-1]])
+            self.assertEqual(stdout.getvalue(), '')
+            self.assertEqual(json.loads(stderr.getvalue()), expected)
+            self.assertEqual(json.loads((folder / 'check_deploy-result.json').read_text()), expected)
+
     def test_defaults_remain_compatible_without_creating_default_evidence(self):
         with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
             folder = Path(tmp)
@@ -913,6 +947,46 @@ class BizprofileTests(unittest.TestCase):
         self.assertTrue(all(row['marker_found'] for row in evidence['pages']))
         self.assertEqual(evidence['pages'][0]['api_evidence']['attempts'], self.values[0]['attempts'])
 
+    def assert_success_providers(self, card):
+        providers = {'home': 'curl_cffi', 'card': card}
+        for value, provider in zip(self.values, providers.values()):
+            value['provider'] = value['attempts'][-1]['provider'] = provider
+        self.assertEqual(self.run_check(), 0, self.stderr.getvalue())
+        self.assertEqual(json.loads(self.stdout.getvalue()),
+                         dict(ok=True, mode='check_bizprofile', providers=providers))
+        self.assertEqual(json.loads((self.folder / 'check_bizprofile-result.json').read_text()),
+                         dict(ok=True, providers=providers))
+        self.assertEqual({p['id']: p['provider'] for p in self.evidence()['pages']}, providers)
+
+    def test_curl_pages(self):
+        self.assert_success_providers('curl_cffi')
+
+    def test_mixed_pages(self):
+        self.assert_success_providers('scrapling')
+
+    def test_distinct_providers_with_same_redaction_fail(self):
+        provider, last = 'a' * 64, 'b' * 64
+        self.values[0]['provider'] = provider
+        self.values[0]['attempts'][-1]['provider'] = last
+        self.assertEqual(self.run_check(), 1)
+        failure = json.loads(self.stderr.getvalue())
+        self.assertEqual(failure['internal_error'], 'bizprofile_not_passed')
+        self.assertEqual(failure['providers']['home'], '[redacted]')
+        page = self.evidence()['pages'][0]
+        self.assertEqual(page['provider'], '[redacted]')
+        self.assertEqual(page['api_evidence']['attempts'][-1]['provider'], '[redacted]')
+        for path in self.folder.glob('*.json'):
+            contents = path.read_text()
+            self.assertNotIn(provider, contents)
+            self.assertNotIn(last, contents)
+
+    def test_matching_empty_providers_fail(self):
+        self.values[0]['provider'] = self.values[0]['attempts'][-1]['provider'] = ''
+        self.assertEqual(self.run_check(), 1)
+        failure = json.loads(self.stderr.getvalue())
+        self.assertEqual(failure['internal_error'], 'bizprofile_not_passed')
+        self.assertEqual(failure['providers']['home'], '')
+
     def test_each_failure_records_both_pages_without_retry(self):
         mutations = [lambda v: v.update(ok=False), lambda v: v.update(provider='curl'),
                      lambda v: v['attempts'][-1].update(provider='curl'),
@@ -944,6 +1018,12 @@ class BizprofileTests(unittest.TestCase):
         evidence = self.evidence()
         self.assertFalse(evidence['pages'][0]['marker_found'])
         self.assertTrue(evidence['pages'][1]['marker_found'])
+        providers = {'home': None, 'card': 'scrapling'}
+        self.assertEqual({p['id']: p['provider'] for p in evidence['pages']}, providers)
+        failure = dict(ok=False, internal_error='bizprofile_not_passed', providers=providers)
+        self.assertEqual(self.stdout.getvalue(), '')
+        self.assertEqual(json.loads(self.stderr.getvalue()), failure)
+        self.assertEqual(json.loads((self.folder / 'check_bizprofile-result.json').read_text()), failure)
 
     def test_archive_collision_never_overwrites_previous_measurement(self):
         self.folder.mkdir()

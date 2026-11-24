@@ -78,7 +78,14 @@ class Handler(BaseHTTPRequestHandler):
             if self.command != expected:
                 return self.respond(405, {'error': 'method_not_allowed'})
             if self.path == '/health':
-                return self.respond(200, {'ok': True})
+                check = self.server.health_check
+                try:
+                    health = {'ok': True} if check is None else check()
+                except Exception:
+                    health = None
+                if not isinstance(health, dict):
+                    health = {'ok': False, 'error': 'provider_images_unknown'}
+                return self.respond(200 if health.get('ok') is True else 503, health)
             auth = self.headers.get_all('Authorization', [])
             if len(auth) != 1 or not hmac.compare_digest(
                     auth[0].encode('utf-8'), b'Bearer ' + self.server.token):
