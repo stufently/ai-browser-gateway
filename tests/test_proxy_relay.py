@@ -12,9 +12,13 @@ import importlib.util
 import json
 import os
 import re
+import shutil
 import socket
+import ssl
 import struct
+import subprocess
 import sys
+import tempfile
 import threading
 import time
 import types
@@ -120,7 +124,7 @@ def read_eof(conn):
         data += chunk
 
 
-def http_upstream(connect_status=200, plain_status=200, interim=None):
+def http_upstream(connect_status=200, plain_status=200, interim=None, connect_interim=None):
     """Поддельный http-прокси: пишет заголовки каждого запроса в log."""
     responses = {
         200: b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi",
@@ -133,6 +137,8 @@ def http_upstream(connect_status=200, plain_status=200, interim=None):
         head, rest = read_head_rest(conn)
         log.append(head)
         if head.startswith("CONNECT "):
+            if connect_interim:
+                conn.sendall(connect_interim)
             if connect_status != 200:
                 conn.sendall(responses[connect_status])
                 return
@@ -168,6 +174,84 @@ def reset_upstream():
         conn.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 0))
 
     return Upstream(handler)
+
+
+def oversized_head(limit):
+    """Блок заголовков ответа длиннее лимита: разделитель стоит за пределом."""
+    return b"HTTP/1.1 503 Server Error\r\nX-Pad: " + b"a" * limit + b"\r\n\r\n"
+
+
+def make_certificates(directory):
+    """CA и листовой сертификат для 127.0.0.1 через openssl, как в стенде M27.
+
+    Ключи живут только во временном каталоге, в репозиторий не попадают.
+    Python 3.14 включает VERIFY_X509_STRICT: CA нужен keyUsage, листу —
+    authorityKeyIdentifier. Возвращает None, если openssl в образе нет.
+    """
+    if shutil.which("openssl") is None:
+        return None
+
+    def run(*args):
+        proc = subprocess.run(("openssl", *args), cwd=directory, capture_output=True)
+        assert proc.returncode == 0, (args[:2], proc.returncode,
+                                      proc.stderr.decode(errors="replace")[:400])
+
+    (directory / "ext.cnf").write_text(
+        "subjectAltName=IP:127.0.0.1\n"
+        "authorityKeyIdentifier=keyid,issuer\n"
+        "basicConstraints=CA:FALSE\n"
+        "keyUsage=digitalSignature,keyEncipherment\n"
+        "extendedKeyUsage=serverAuth\n", encoding="utf-8")
+    run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key",
+        "-out", "ca.pem", "-days", "2", "-subj", "/CN=relay-test-ca",
+        "-addext", "basicConstraints=critical,CA:TRUE",
+        "-addext", "keyUsage=critical,keyCertSign,cRLSign")
+    run("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "key.pem",
+        "-out", "leaf.csr", "-subj", "/CN=127.0.0.1")
+    run("x509", "-req", "-in", "leaf.csr", "-CA", "ca.pem", "-CAkey", "ca.key",
+        "-CAcreateserial", "-out", "cert.pem", "-days", "2", "-extfile", "ext.cnf")
+    return {"ca": str(directory / "ca.pem"), "cert": str(directory / "cert.pem"),
+            "key": str(directory / "key.pem")}
+
+
+class TlsUpstream:
+    """Поддельный https-прокси на настоящем TLS: handler(tls_conn, log)."""
+
+    def __init__(self, handler, certs):
+        self.handler = handler
+        self.log = []
+        self.context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        self.context.load_cert_chain(certs["cert"], certs["key"])
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(16)
+        self.port = self.sock.getsockname()[1]
+        threading.Thread(target=self._loop, daemon=True).start()
+
+    def _loop(self):
+        while True:
+            try:
+                conn, _ = self.sock.accept()
+            except OSError:
+                return
+            threading.Thread(target=self._one, args=(conn,), daemon=True).start()
+
+    def _one(self, conn):
+        conn.settimeout(10)
+        try:
+            tls = self.context.wrap_socket(conn, server_side=True)
+        except (OSError, ValueError):
+            conn.close()
+            return
+        try:
+            self.handler(tls, self.log)
+        except (OSError, ValueError):
+            pass
+        finally:
+            tls.close()
+
+    def close(self):
+        self.sock.close()
 
 
 def socks_upstream(auth_ok=True, offers_method=True, reply=0x00,
@@ -397,6 +481,50 @@ class RelayHttpUpstreamTests(RelayCase):
         got = self.talk_eof(port, PLAIN_REQUEST)
         self.assertEqual(got, INTERIM_103 + PLAIN_OK)
         self.assertIsNone(relay.fatal)
+
+    def test_connect_interim_1xx_before_200_opens_tunnel(self):
+        up, proxy = self.upstream(http_upstream, connect_interim=INTERIM_100)
+        relay, port = self.start_relay(proxy)
+        got = self.talk(port, CONNECT + b"ping", ESTABLISHED + b"PING")
+        self.assertEqual(got, ESTABLISHED + b"PING")
+        self.assertEqual(up.log[0].split("\r\n")[0], "CONNECT a.example:443 HTTP/1.1")
+        self.assertIsNone(relay.fatal)
+
+    def test_connect_interim_1xx_before_407_reports_reason(self):
+        up, proxy = self.upstream(http_upstream, connect_status=407,
+                                  connect_interim=INTERIM_100)
+        relay, port = self.start_relay(proxy)
+        got = self.talk_eof(port, CONNECT)
+        self.assertEqual(got, GATEWAY_RESPONSE)
+        self.assertNotIn(b"407", got)
+        self.assertNotIn(b"Proxy-Authenticate", got)
+        self.assertEqual(relay.fatal, REJECTED_HTTP)
+
+    def test_oversized_response_block_refused_whatever_the_chunking(self):
+        """Лимит блока не должен зависеть от того, какими порциями он пришёл."""
+        limit = self.probe._RELAY_RESPONSE_LIMIT
+        head = oversized_head(limit)
+        self.assertGreater(len(head) - 4, limit)
+        for mode in ("one-shot", "split"):
+            with self.subTest(mode=mode):
+                def handler(conn, log, mode=mode, head=head):
+                    read_head_rest(conn)
+                    log.append(mode)
+                    if mode == "one-shot":
+                        conn.sendall(head + b"tail")
+                    else:
+                        # Первая порция короче лимита: предварительная проверка
+                        # предела не срабатывает, решает только длина блока.
+                        conn.sendall(head[:limit - 10])
+                        time.sleep(0.05)
+                        conn.sendall(head[limit - 10:] + b"tail")
+
+                up = Upstream(handler)
+                self.addCleanup(up.close)
+                relay, port = self.start_relay(self.proxy_url(port=up.port))
+                got = self.talk_eof(port, PLAIN_REQUEST)
+                self.assertEqual(got, GATEWAY_RESPONSE)
+                self.assertEqual(relay.fatal, UNREACHABLE)
 
     def test_silent_upstream_is_502_with_reason(self):
         """Прокси принял TCP и закрыл соединение: клиенту 502, а не голый обрыв."""
@@ -675,6 +803,66 @@ class RelayCloseTests(RelayCase):
         self.assertIsNone(worker[0][1])  # поток ещё не стартовал
         self.assertNotIn("proxy-relay-connection", worker[0][2])
 
+    def test_tls_registration_window_is_supervised(self):
+        """Между wrap_socket и регистрацией обёртки сокет ядра должен быть под надзором.
+
+        Обёртка отсоединяет сырой объект (fileno() == -1), поэтому shutdown по нему
+        до fd не доходит: без дубликата зависшее в окне рукопожатие не разбудить.
+        """
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        self.addCleanup(listener.close)
+        relay = self.probe._ProxyRelay(
+            self.proxy_url(scheme="https", port=listener.getsockname()[1]))
+        port = int(RELAY_SERVER.match(relay.start()).group(1))
+        self.addCleanup(relay.close)
+        closed = threading.Event()
+        watched = []
+        real_wrap = ssl.SSLContext.wrap_socket
+
+        def closer():
+            try:
+                relay.close()
+            finally:
+                closed.set()
+
+        def wrap_in_window(context_self, sock, *args, **kwargs):
+            wrapped = real_wrap(context_self, sock, *args, **kwargs)
+            inode = os.fstat(wrapped.fileno()).st_ino
+            with relay._lock:
+                tracked = list(relay._sockets)
+            # В надзоре обязан быть объект на ТОТ ЖЕ сокет ядра (тот же inode).
+            watched.append(any(item.fileno() != -1
+                               and os.fstat(item.fileno()).st_ino == inode
+                               for item in tracked))
+            threading.Thread(target=closer, daemon=True).start()
+            closed.wait(30)  # close() отрабатывает внутри окна регистрации
+            return wrapped
+
+        client = upstream = None
+        try:
+            with patch.object(ssl.SSLContext, "wrap_socket", wrap_in_window):
+                client = socket.create_connection(("127.0.0.1", port), 10)
+                client.settimeout(30)
+                client.sendall(CONNECT)
+                upstream, _ = listener.accept()
+                read_eof(client)
+        finally:
+            for sock in (client, upstream):
+                if sock is not None:
+                    sock.close()
+        self.assertEqual(watched, [True])
+        # Без надзора рукопожатие висело бы весь таймаут сокета (30 с).
+        deadline = time.monotonic() + 10
+        while (any(t.name == "proxy-relay-connection" for t in threading.enumerate())
+               and time.monotonic() < deadline):
+            time.sleep(0.05)
+        self.assertEqual([t.name for t in threading.enumerate()
+                          if t.name == "proxy-relay-connection"], [],
+                         "поток соединения не завершился: рукопожатие не разбужено")
+        self.assertEqual(relay.fatal, TLS_FAILED)
+
 
 class BrowserWiringTests(RelayCase):
     """Прокси запуска браузеров и закрытие релея вместе с адаптером."""
@@ -907,6 +1095,96 @@ class RunProbeRelayReasonTests(RelayCase):
         blob = json.dumps(payload)
         self.assertNotIn(SECRET, blob)
         self.assertNotIn(ENC, blob)
+
+
+class RelayTlsUpstreamTests(RelayCase):
+    """Настоящий TLS до https-прокси: сертификат генерируется openssl во временный
+    каталог и передаётся через SSL_CERT_FILE, как это делает стенд M27."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls._box = tempfile.TemporaryDirectory()
+        cls.certs = make_certificates(Path(cls._box.name))
+
+    @classmethod
+    def tearDownClass(cls):
+        cls._box.cleanup()
+
+    def setUp(self):
+        if self.certs is None:
+            self.skipTest("openssl в образе нет: настоящий TLS-тест невозможен")
+
+    def tls_proxy(self, handler):
+        up = TlsUpstream(handler, self.certs)
+        self.addCleanup(up.close)
+        patcher = patch.dict(os.environ, {"SSL_CERT_FILE": self.certs["ca"]})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        relay, port = self.start_relay(self.proxy_url(scheme="https", port=up.port))
+        return up, relay, port
+
+    def test_tls_tunnel_adds_credentials_and_carries_bytes(self):
+        def handler(conn, log):
+            log.append(read_head_rest(conn)[0])
+            conn.sendall(ESTABLISHED)
+            conn.sendall(recv_exact(conn, 4).upper())
+
+        up, relay, port = self.tls_proxy(handler)
+        got = self.talk(port, CONNECT + b"ping", ESTABLISHED + b"PING")
+        self.assertEqual(got, ESTABLISHED + b"PING")
+        self.assertEqual(up.log[0].split("\r\n"),
+                         ["CONNECT a.example:443 HTTP/1.1", "Host: a.example:443", BASIC_LINE])
+        self.assertIsNone(relay.fatal)
+
+    def test_client_half_close_does_not_close_tls_tunnel(self):
+        """SHUT_WR на ssl.SSLSocket шлёт close_notify и рвёт туннель целиком."""
+        seen = []
+
+        def handler(conn, log):
+            log.append(read_head_rest(conn)[0])
+            conn.sendall(ESTABLISHED)
+            conn.settimeout(0.5)
+            try:
+                # EOF здесь означает, что релей полузакрыл TLS-соединение наверх.
+                seen.append("eof" if not conn.recv(1) else "data")
+            except TimeoutError:
+                seen.append("open")
+            conn.settimeout(5)
+            conn.sendall(b"PONG")
+
+        up, relay, port = self.tls_proxy(handler)
+        with socket.create_connection(("127.0.0.1", port), 5) as client:
+            client.settimeout(5)
+            client.sendall(CONNECT)
+            self.assertEqual(recv_exact(client, len(ESTABLISHED)), ESTABLISHED)
+            client.shutdown(socket.SHUT_WR)  # клиент больше не пишет, но ещё читает
+            self.assertEqual(client.recv(4096), b"PONG")
+        self.assertEqual(seen, ["open"])
+        self.assertIsNone(relay.fatal)
+
+
+class ModuleShapeTests(RelayCase):
+    """Защита от молчаливого снятия класса с прогона (находка ревью M27)."""
+
+    def test_no_test_class_shadows_unittest_run(self):
+        module = sys.modules[__name__]
+        loader = unittest.TestLoader()
+        classes = []
+        for name in dir(module):
+            value = getattr(module, name)
+            if not (isinstance(value, type) and issubclass(value, unittest.TestCase)):
+                continue
+            classes.append(name)
+            # Перекрытый run() ломает TestCase.__call__: класс даёт «Ran 0 tests».
+            self.assertIs(getattr(value, "run", None), unittest.TestCase.run,
+                          f"{name} перекрывает unittest.TestCase.run")
+            own_tests = [attr for attr in vars(value) if attr.startswith("test_")]
+            if own_tests:
+                collected = loader.loadTestsFromTestCase(value).countTestCases()
+                self.assertEqual(collected, len(own_tests), f"{name}: собрано {collected}")
+        self.assertIn("RunProbeRelayReasonTests", classes)
+        self.assertGreater(len(classes), 5)
 
 
 if __name__ == "__main__":

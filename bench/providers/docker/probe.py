@@ -1022,8 +1022,12 @@ def _relay_read_block(sock: socket.socket, buffer: bytes = b"",
             buffer += chunk
     except OSError:
         return None
-    end = buffer.find(b"\r\n\r\n") + 4
-    return buffer[:end], buffer[end:]
+    index = buffer.find(b"\r\n\r\n")
+    if index > limit:
+        # Лимит не должен зависеть от того, какими порциями пришёл блок: одна
+        # большая порция с разделителем за пределом даёт тот же отказ.
+        return None
+    return buffer[:index + 4], buffer[index + 4:]
 
 
 def _relay_status(head: str) -> int | None:
@@ -1060,6 +1064,7 @@ class _ProxyRelay:
             raise ProxyRelayError(f"proxy scheme not relayed: {scheme or 'none'}")
         self.scheme = scheme
         self.socks = scheme.startswith("socks5")
+        self.tls = scheme == "https"
         self.host = parsed.hostname
         self.port = parsed.port or _RELAY_PORTS[scheme]
         self.username = unquote(parsed.username or "")
@@ -1160,33 +1165,42 @@ class _ProxyRelay:
         except OSError:
             self._fatal_reason(UPSTREAM_UNREACHABLE)
             return None
-        # Сокет регистрируется до рукопожатия: зависший TLS иначе некому
-        # разбудить, и close() ждёт весь свой дедлайн, оставляя поток жить.
-        self._track(sock)
-        if self.scheme == "https":
-            try:
-                # Проверки сертификата прокси не ослабляются: доверие из CA
-                # образа, включая SSL_CERT_FILE/SSL_CERT_DIR окружения пробы.
-                # do_handshake_on_connect=False обязателен: wrap_socket сразу
-                # отбирает fd у сырого сокета (fileno() даёт -1), поэтому
-                # разбудить рукопожатие может только зарегистрированная обёртка.
-                wrapped = ssl.create_default_context().wrap_socket(
-                    sock, server_hostname=self.host, do_handshake_on_connect=False)
-            except (OSError, ValueError):
-                self._release(sock)
-                self._fatal_reason(UPSTREAM_TLS_FAILED)
-                return None
-            with self._lock:
-                self._sockets.discard(sock)
-                self._sockets.add(wrapped)
-            try:
-                wrapped.do_handshake()
-            except (OSError, ValueError):
-                self._release(wrapped)
-                self._fatal_reason(UPSTREAM_TLS_FAILED)
-                return None
-            sock = wrapped
-        return sock
+        if not self.tls:
+            self._track(sock)
+            return sock
+        # До wrap_socket надзор ведёт дубликат fd: обёртка отсоединяет сырой
+        # объект (fileno() == -1), а shutdown по дубликату бьёт по тому же сокету
+        # ядра, поэтому окна, где зависшее рукопожатие некому разбудить, нет.
+        try:
+            watcher = sock.dup()
+        except OSError:
+            _relay_close(sock)
+            self._fatal_reason(UPSTREAM_UNREACHABLE)
+            return None
+        self._track(watcher)
+        try:
+            # Проверки сертификата прокси не ослабляются: доверие из CA образа,
+            # включая SSL_CERT_FILE/SSL_CERT_DIR окружения пробы.
+            # do_handshake_on_connect=False: обёртка регистрируется до
+            # рукопожатия, и close() может его разбудить.
+            wrapped = ssl.create_default_context().wrap_socket(
+                sock, server_hostname=self.host, do_handshake_on_connect=False)
+        except (OSError, ValueError):
+            self._release(watcher)
+            _relay_close(sock)
+            self._fatal_reason(UPSTREAM_TLS_FAILED)
+            return None
+        with self._lock:
+            self._sockets.discard(watcher)
+            self._sockets.add(wrapped)
+        _relay_close(watcher)
+        try:
+            wrapped.do_handshake()
+        except (OSError, ValueError):
+            self._release(wrapped)
+            self._fatal_reason(UPSTREAM_TLS_FAILED)
+            return None
+        return wrapped
 
     def _proxy_handshake(self, upstream: socket.socket, host: str, port: int) -> bytes | None:
         """CONNECT внешнему http/https-прокси; None — отказ, иначе байты до туннеля."""
@@ -1198,17 +1212,24 @@ class _ProxyRelay:
         except (OSError, UnicodeError):
             self._fatal_reason(UPSTREAM_UNREACHABLE)
             return None
-        head, prelude = _relay_read_head(upstream)
-        status = _relay_status(head)
-        if status == 200:
-            return prelude
-        if status == 407:
-            self._fatal_reason(UPSTREAM_REJECTED_HTTP)
-        elif status is None:
-            # Прокси не ответил вовсе: TCP до него есть, разговора нет.
-            self._fatal_reason(UPSTREAM_UNREACHABLE)
-        # Прочие статусы — отказ цели, а не прокси: fatal остаётся нетронутым.
-        return None
+        pending = b""
+        while True:
+            block = _relay_read_block(upstream, pending)
+            if block is None:
+                # Прокси не ответил вовсе: TCP до него есть, разговора нет.
+                self._fatal_reason(UPSTREAM_UNREACHABLE)
+                return None
+            head, pending = block
+            status = _relay_status(head.decode("latin-1"))
+            if status == 200:
+                return pending  # прелюдия — байты после финального блока
+            if status == 407:
+                self._fatal_reason(UPSTREAM_REJECTED_HTTP)
+                return None
+            if status is not None and 100 <= status < 200:
+                continue  # промежуточный 1xx ответом на CONNECT не является
+            # Прочие статусы — отказ цели, а не прокси: fatal остаётся нетронутым.
+            return None
 
     def _socks_handshake(self, upstream: socket.socket, host: str, port: int) -> bytes | None:
         """RFC 1929 и CONNECT с ATYP=0x03: имя цели резолвит прокси, не проба."""
@@ -1277,7 +1298,11 @@ class _ProxyRelay:
     def _tunnel(self, upstream_first: bytes, client_first: bytes,
                 client: socket.socket, upstream: socket.socket) -> None:
         pump = self._spawn(self._pump, "proxy-relay-tunnel", upstream, client, upstream_first)
-        self._pump(client, upstream, client_first)
+        # На ssl.SSLSocket полузакрытие отправляет close_notify и рвёт соединение
+        # целиком, поэтому направление «клиент -> прокси» его не делает: туннель
+        # закрывается полностью, когда встречное направление закончилось или
+        # дедлайн join истёк.
+        self._pump(client, upstream, client_first, halt=not self.tls)
         pump.join(_RELAY_JOIN_TIMEOUT_S)
         if pump.is_alive():
             _relay_halt(upstream)
