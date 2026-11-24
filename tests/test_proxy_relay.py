@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import importlib.util
 import json
 import os
@@ -391,6 +392,24 @@ class RelayCase(unittest.TestCase):
         if adapter_name == "patchright":
             return runtime.chromium.launch.call_args.kwargs.get("proxy")
         return session.call_args.kwargs.get("proxy")
+
+    @contextlib.contextmanager
+    def spy_dups(self):
+        """Список объектов, созданных socket.dup(): надзор за дубликатом прокси.
+
+        Других вызовов dup() на этом пути нет: ssl.wrap_socket забирает fd через
+        fileno() и detach(), поэтому список указывает ровно на наблюдателя релея.
+        """
+        created = []
+        real_dup = socket.socket.dup
+
+        def duplicate(sock):
+            clone = real_dup(sock)
+            created.append(clone)
+            return clone
+
+        with patch.object(socket.socket, "dup", duplicate):
+            yield created
 
 
 class RelayHttpUpstreamTests(RelayCase):
@@ -1337,6 +1356,63 @@ class RelayTlsUpstreamTests(RelayCase):
             self.assertEqual(len(tracked), 3)
             self.assertIn(BASIC_LINE, up.log[0].split("\r\n"))
             self.assertIsNone(relay.fatal)
+
+    def test_duplicate_is_closed_while_holding_the_lock(self):
+        """Наблюдателя закрывает тот же владелец, который снял его под блокировкой:
+        иначе close() может получить в снимке сокет, который здесь же закрывают."""
+        held = threading.Event()
+        self.addCleanup(held.set)
+
+        def handler(conn, log):
+            log.append(read_head_rest(conn)[0])
+            conn.sendall(ESTABLISHED)
+            held.wait(30)
+
+        up, relay, port = self.tls_proxy(handler)
+        lock_states = []
+        real_close = self.probe._relay_close
+
+        def spy_close(sock):
+            if any(sock is watcher for watcher in watchers):
+                lock_states.append(relay._lock.locked())
+            return real_close(sock)
+
+        with self.spy_dups() as watchers, patch.object(self.probe, "_relay_close", spy_close):
+            with socket.create_connection(("127.0.0.1", port), 5) as client:
+                client.settimeout(5)
+                client.sendall(CONNECT)
+                self.assertEqual(recv_exact(client, len(ESTABLISHED)), ESTABLISHED)
+                self.assertEqual(len(watchers), 1)
+                held.set()  # отпускаем прокси: туннель закрывается без дедлайна
+        self.assertEqual(lock_states, [True])
+        self.assertIsNone(relay.fatal)
+        self.assertIn(BASIC_LINE, up.log[0].split("\r\n"))
+
+    def test_duplicate_is_closed_and_unlisted_after_handover(self):
+        """После рукопожатия дубликат закрыт (fd не течёт) и снят с надзора."""
+        held = threading.Event()
+        self.addCleanup(held.set)
+
+        def handler(conn, log):
+            log.append(read_head_rest(conn)[0])
+            conn.sendall(ESTABLISHED)
+            held.wait(30)
+
+        up, relay, port = self.tls_proxy(handler)
+        with self.spy_dups() as watchers:
+            with socket.create_connection(("127.0.0.1", port), 5) as client:
+                client.settimeout(5)
+                client.sendall(CONNECT)
+                self.assertEqual(recv_exact(client, len(ESTABLISHED)), ESTABLISHED)
+                self.assertEqual(len(watchers), 1)
+                watcher = watchers[0]
+                self.assertEqual(watcher.fileno(), -1)
+                with relay._lock:
+                    self.assertNotIn(watcher, relay._sockets)
+                    self.assertEqual(len(relay._sockets), 3)
+                held.set()
+        self.assertIsNone(relay.fatal)
+        self.assertIn(BASIC_LINE, up.log[0].split("\r\n"))
 
 
 class ModuleShapeTests(RelayCase):
