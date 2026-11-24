@@ -89,8 +89,10 @@ git pull в клоне не делать; push в origin запрещён, ра�
    его не подделать) И `body_just_a_moment` или `body_cf_chl_opt`. Тело
    заглушки без заголовка — без клика и без ожидания. Иначе поведение прежнее
    (playwright, страницы без заглушки, 403 Akamai — без ожидания вообще).
-2. **Потолок ожидания.** `min(12 000 мс, половина остатка общего
-   дедлайна)` через `_bound_timeout_ms`; при `TimeoutError` — не ждать.
+2. **Потолок ожидания.** Сначала `limit = _bound_timeout_ms(12_000)`
+   (сама функция режет только по ВСЕМУ остатку, пополам не делит), затем,
+   если общий дедлайн задан, `limit = min(limit, int(_DEADLINE.remaining_s()
+   * 1000 / 2))`; при `TimeoutError` — не ждать.
    Константа 12 000 мс в модуле с комментарием-происхождением (замер:
    проход за ≤7,3 с; половина остатка оставляет scrapling время, если клик
    не прошёл).
@@ -164,7 +166,7 @@ git pull в клоне не делать; push в origin запрещён, ра�
 - **AC-001.** Полный сьют и замороженные пробы зелёные на публичном образе Python:
   `bash -c 'docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest discover -q -s tests -t . && docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 -e PYTHONHASHSEED=0 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 -m unittest -q tests.probe_m9_transport tests.probe_m10_product tests.probe_m11_api_cli tests.probe_m12_service tests.probe_m12_service_regressions tests.probe_m13_late_container'`
 - **AC-002.** Чекеры обеих вех не изменены и печатают ok:
-  `bash -c 'printf "%s\n" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "3e788084ea88b7046cf0d26c651f88d8e822c1bae18acdf6dfdffcb5d96ad11c  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
+  `bash -c 'printf "%s\n" "a92dd6e7ffa446540acc4d26ed073853d64fcede4b855ccd2f2fcc2016e23533  docs/specs/checks/m24_cf_detector.py" "90b8ea94df0f3036db09af65219ac441b9004618c96992f26a1575ad027c1f9f  docs/specs/checks/m25_turnstile_click.py" | sha256sum -c --quiet && for c in m24_cf_detector m25_turnstile_click; do test "$(docker run --rm --network none --user 1002:1002 -v "$PWD":/work:ro -w /work -e HOME=/tmp -e PYTHONDONTWRITEBYTECODE=1 python:3.14.7-slim-bookworm@sha256:82bc3c539b8813ada9d68c63b40158fa002f7f33de9bf3312a3dfdc0620dff56 python3 docs/specs/checks/$c.py)" = ok || exit 1; done'`
 - **AC-003.** Живой прогон, steamdb трижды проходит ступенью patchright в дефолтном бюджете:
   `bash -c 'd=$(mktemp -d) && for i in 1 2 3; do docker run --rm --user 1002:1002 -v "$PWD/bench":/opt/abg-src/bench:ro -v "$PWD/gateway":/opt/abg-src/gateway:ro -v "$PWD/bench/providers/docker/probe.py":/opt/abg/probe.py:ro ghcr.io/stufently/ai-browser-gateway-oneshot@sha256:bb1d5f0817d2db585def9389be12044ab19c9a7f578de735f5b5cba6aece195e https://steamdb.info/ > "$d/$i.json" && jq -e ".ok and .provider == \"patchright\" and .attempts[-1].status == 200 and .attempts[-1].challenge == \"none\" and .elapsed_ms < 20000" "$d/$i.json" || exit 1; done'`
 - **AC-004.** Живой прогон, scrapingcourse трижды проходит ступенью patchright в дефолтном бюджете:

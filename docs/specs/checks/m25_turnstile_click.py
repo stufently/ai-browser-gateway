@@ -255,7 +255,8 @@ def scenarios(probe):
     result, elapsed = run(probe, page, budget_ms=8_000)
     check("no cf_clearance: not accepted", (result["status"], result["challenge"]), (403, "suspected"))
     check("no cf_clearance: clicked once", len(page.downs), 1)
-    check("no cf_clearance: bounded by half the budget", elapsed < 5.5, True)
+    # Gone without the cookie is not success: the loop waits up to its cap (~3.9 s here).
+    check("no cf_clearance: waits to the cap, bounded by half the budget", 3.0 <= elapsed < 5.5, True)
 
     page = Page(pass_on_click_after_s=None)
     result, elapsed = run(probe, page, budget_ms=30_000)
