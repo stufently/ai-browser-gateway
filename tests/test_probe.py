@@ -1915,5 +1915,311 @@ class JsChallengeReloadTests(unittest.TestCase):
         self.assertEqual(page.listeners, [])
 
 
+class TurnstileClickTests(unittest.TestCase):
+    """M25: patchright clicks the Turnstile checkbox on CF interstitial."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+        cls.INTERSTITIAL = (ROOT / "tests" / "fixtures" / "cf_managed_interstitial_403.html").read_text(encoding="utf-8")
+        cls.AKAMAI = (ROOT / "tests" / "fixtures" / "akamai_access_denied_403.html").read_text(encoding="utf-8")
+        cls.REAL = "<html><head><title>Real page</title></head><body>REAL-CONTENT</body></html>"
+        cls.CF_HEADERS = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        cls.FINAL_HEADERS = {"server": "cloudflare", "x-final": "1"}
+        cls.BOXES = {1: {"x": 10, "y": 10, "width": 30, "height": 10},
+                     2: {"x": 100, "y": 200, "width": 300, "height": 65},
+                     3: {"x": 0, "y": 0, "width": 1280, "height": 720},
+                     4: {"x": 0, "y": 0, "width": 1280, "height": 720}}
+
+    class Response:
+        def __init__(self, status, headers, frame):
+            self.status = status
+            self.headers = dict(headers)
+            self.frame = frame
+            self.request = types.SimpleNamespace(resource_type="document",
+                                                 is_navigation_request=lambda: True)
+
+        def all_headers(self):
+            return dict(self.headers)
+
+    class Locator:
+        def __init__(self, page, selector):
+            self.page = page
+            self.selector = selector
+
+        @property
+        def first(self):
+            return self
+
+        def _depth(self):
+            if "cf-turnstile-response" in self.selector and "ancestor" in self.selector:
+                digits = [c for c in self.selector.rsplit("ancestor", 1)[1] if c.isdigit()]
+                return int("".join(digits)) if digits else 1
+            return None
+
+        def count(self):
+            if not self.page.up:
+                return 0
+            if "cf-turnstile-response" in self.selector:
+                depth = self._depth()
+                return 1 if depth is None or self.page.boxes.get(depth) else 0
+            if "challenge-platform" in self.selector or "challenge" in self.selector:
+                return 1
+            return 0
+
+        def bounding_box(self, timeout=None):
+            depth = self._depth()
+            return dict(self.page.boxes[depth]) if depth in self.page.boxes else None
+
+        def input_value(self, timeout=None):
+            return self.page.token
+
+        def wait_for(self, *args, **kwargs):
+            return None
+
+    class Mouse:
+        def __init__(self, page):
+            self.page = page
+            self.at = None
+
+        def move(self, x, y, **kwargs):
+            self.at = (x, y)
+
+        def down(self, **kwargs):
+            import time as _time
+            self.page.downs.append((round(_time.monotonic() - self.page.t0, 2), self.at))
+
+        def up(self, **kwargs):
+            self.page.on_click()
+
+    class Frame:
+        def __init__(self, page):
+            self.page = page
+            self.url = "https://site.invalid/"
+
+        def content(self):
+            return self.page.INTERSTITIAL if self.page.up else self.page.REAL
+
+    class Page:
+        def __init__(self, test, *, pass_on_click_after_s=1.0, passes_by_itself_after_s=None,
+                     sets_clearance=True, token="", boxes=None, body=None, status=403, headers=None):
+            self.test = test
+            self.INTERSTITIAL = test.INTERSTITIAL
+            self.REAL = test.REAL
+            self.pass_on_click_after_s = pass_on_click_after_s
+            self.passes_by_itself_after_s = passes_by_itself_after_s
+            self.sets_clearance = sets_clearance
+            self.token = token
+            self.boxes = test.BOXES if boxes is None else boxes
+            self.first_body = body
+            self.first_status = status
+            self.first_headers = test.CF_HEADERS if headers is None else headers
+            self.handlers = []
+            self.downs = []
+            self.evaluates_while_up = 0
+            self.cookies_list = [{"name": "__cf_bm", "value": "b", "domain": ".site.invalid", "path": "/"}]
+            self.mouse = self.test.Mouse(self)
+            self.main_frame = self.test.Frame(self)
+            self.frames = [self.main_frame]
+            self.url = "https://site.invalid/"
+            self.up = True
+            import time as _time
+            self.t0 = _time.monotonic()
+            self.context = types.SimpleNamespace(cookies=lambda *a, **k: list(self.cookies_list))
+
+        def on(self, event, handler):
+            self.handlers.append(handler)
+
+        def remove_listener(self, event, handler):
+            if handler in self.handlers:
+                self.handlers.remove(handler)
+
+        def _emit(self, response):
+            for handler in list(self.handlers):
+                handler(response)
+
+        def goto(self, url, **kwargs):
+            import time as _time
+            self.t0 = _time.monotonic()
+            response = self.test.Response(self.first_status, self.first_headers, self.main_frame)
+            self._emit(response)
+            if self.first_body is not None:
+                self.up = False
+            return response
+
+        def _pass(self):
+            if not self.up:
+                return
+            self.up = False
+            if self.sets_clearance:
+                self.cookies_list.append({"name": "cf_clearance", "value": "c",
+                                          "domain": ".site.invalid", "path": "/"})
+            self._emit(self.test.Response(200, self.test.FINAL_HEADERS, self.main_frame))
+
+        def _tick(self):
+            import time as _time
+            if (self.up and self.passes_by_itself_after_s is not None
+                    and _time.monotonic() - self.t0 >= self.passes_by_itself_after_s):
+                self._pass()
+
+        def on_click(self):
+            import time as _time
+            if (self.pass_on_click_after_s is not None
+                    and _time.monotonic() - self.t0 >= self.pass_on_click_after_s):
+                self._pass()
+
+        def title(self):
+            self._tick()
+            if self.first_body is not None:
+                return "Access Denied"
+            return "Just a moment..." if self.up else "Real page"
+
+        def locator(self, selector):
+            self._tick()
+            return self.test.Locator(self, selector)
+
+        def wait_for_timeout(self, ms):
+            import time as _time
+            _time.sleep(ms / 1000)
+            self._tick()
+
+        def evaluate(self, expression, *args):
+            self._tick()
+            if self.up:
+                self.evaluates_while_up += 1
+            if "userAgent" in expression:
+                return "Mozilla/5.0 fixture"
+            return "complete"
+
+        def content(self):
+            return self.main_frame.content()
+
+    def navigate(self, page, *, adapter="patchright", budget_ms=30_000):
+        base = self.probe.PatchrightAdapter if adapter == "patchright" else self.probe.PlaywrightAdapter
+
+        class Fake(base):
+            def start(self):
+                self.version = "fixture"
+                self.page = page
+
+            def close(self):
+                pass
+
+        if page.first_body is not None:
+            page.main_frame.content = lambda: page.first_body
+        return self.probe.run_probe(adapter, "https://site.invalid/", mode="cold", content_only=True,
+                                    budget_ms=budget_ms, adapter_factory=lambda _: Fake(),
+                                    metrics=lambda: (0, 0))
+
+    def test_pass_with_second_click_and_correct_point(self):
+        page = self.Page(self, pass_on_click_after_s=1.0)
+        result = self.navigate(page, budget_ms=30_000)
+        self.assertEqual(result["status"], 200)
+        self.assertEqual(result["challenge"], "none")
+        self.assertEqual(result["headers"], self.FINAL_HEADERS)
+        self.assertIn("REAL-CONTENT", result["html"])
+        self.assertEqual(len(page.downs), 2)
+        click_point = (125, 232.5)
+        self.assertEqual([at for _, at in page.downs], [click_point] * 2)
+
+    def test_pause_between_clicks_is_about_4_seconds(self):
+        page = self.Page(self, pass_on_click_after_s=1.0)
+        self.navigate(page, budget_ms=30_000)
+        self.assertEqual(len(page.downs), 2)
+        gap = page.downs[1][0] - page.downs[0][0]
+        self.assertGreaterEqual(gap, 3.5)
+        self.assertLessEqual(gap, 5.0)
+
+    def test_no_click_when_token_already_filled(self):
+        page = self.Page(self, pass_on_click_after_s=None, passes_by_itself_after_s=1.0, token="already-filled")
+        result = self.navigate(page, budget_ms=30_000)
+        self.assertEqual(page.downs, [])
+        self.assertEqual(result["status"], 200)
+
+    def test_gone_without_clearance_returns_403(self):
+        page = self.Page(self, pass_on_click_after_s=0.0, sets_clearance=False)
+        result = self.navigate(page, budget_ms=8_000)
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
+        self.assertEqual(len(page.downs), 1)
+
+    def test_never_passes_returns_403_and_hits_cap(self):
+        page = self.Page(self, pass_on_click_after_s=None)
+        import time as _time
+        started = _time.monotonic()
+        result = self.navigate(page, budget_ms=30_000)
+        elapsed = _time.monotonic() - started
+        self.assertEqual((result["status"], result["challenge"], result.get("err", "")),
+                         (403, "suspected", ""))
+        self.assertGreaterEqual(len(page.downs), 2)
+        self.assertGreaterEqual(elapsed, 8.5)
+        self.assertLessEqual(elapsed, 12.0)
+
+    def test_container_too_narrow_no_click(self):
+        box = {"x": 100, "y": 200, "width": 40, "height": 65}
+        page = self.Page(self, pass_on_click_after_s=0.0, boxes={d: dict(box) for d in (1, 2, 3, 4)})
+        self.navigate(page, budget_ms=3_000)
+        self.assertEqual(page.downs, [])
+
+    def test_container_too_low_no_click(self):
+        box = {"x": 100, "y": 200, "width": 300, "height": 20}
+        page = self.Page(self, pass_on_click_after_s=0.0, boxes={d: dict(box) for d in (1, 2, 3, 4)})
+        self.navigate(page, budget_ms=3_000)
+        self.assertEqual(page.downs, [])
+
+    def test_container_too_tall_no_click(self):
+        box = {"x": 100, "y": 200, "width": 300, "height": 120}
+        page = self.Page(self, pass_on_click_after_s=0.0, boxes={d: dict(box) for d in (1, 2, 3, 4)})
+        self.navigate(page, budget_ms=3_000)
+        self.assertEqual(page.downs, [])
+
+    def test_interstitial_body_without_cf_mitigated_no_click(self):
+        page = self.Page(self, pass_on_click_after_s=0.0, headers={"server": "cloudflare"})
+        import time as _time
+        started = _time.monotonic()
+        result = self.navigate(page, budget_ms=30_000)
+        elapsed = _time.monotonic() - started
+        self.assertEqual(page.downs, [])
+        self.assertLess(elapsed, 2.0)
+
+    def test_playwright_adapter_no_click(self):
+        page = self.Page(self, pass_on_click_after_s=0.0)
+        import time as _time
+        started = _time.monotonic()
+        result = self.navigate(page, budget_ms=30_000, adapter="playwright")
+        elapsed = _time.monotonic() - started
+        self.assertEqual(page.downs, [])
+        self.assertLess(elapsed, 2.0)
+
+    def test_akamai_403_no_click(self):
+        page = self.Page(self, pass_on_click_after_s=0.0, body=self.AKAMAI, headers={"server": "AkamaiGHost"})
+        import time as _time
+        started = _time.monotonic()
+        result = self.navigate(page, budget_ms=30_000)
+        elapsed = _time.monotonic() - started
+        self.assertEqual(page.downs, [])
+        self.assertLess(elapsed, 2.0)
+        self.assertEqual(result["challenge"], "ip_blocked")
+
+    def test_no_evaluate_while_interstitial_up(self):
+        page = self.Page(self, pass_on_click_after_s=1.0)
+        self.navigate(page, budget_ms=30_000)
+        self.assertEqual(page.evaluates_while_up, 0)
+
+    def test_session_carries_cf_clearance_after_pass(self):
+        import os
+        old = os.environ.get("ABG_SESSION_EXPORT")
+        os.environ["ABG_SESSION_EXPORT"] = "1"
+        try:
+            page = self.Page(self, pass_on_click_after_s=1.0)
+            result = self.navigate(page, budget_ms=30_000)
+            names = [c["name"] for c in (result.get("session") or {}).get("cookies", [])]
+            self.assertIn("cf_clearance", names)
+        finally:
+            if old is None:
+                os.environ.pop("ABG_SESSION_EXPORT", None)
+            else:
+                os.environ["ABG_SESSION_EXPORT"] = old
+
+
 if __name__ == "__main__":
     unittest.main()
