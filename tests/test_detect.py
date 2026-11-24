@@ -1239,5 +1239,25 @@ class DecisiveTitleTests(unittest.TestCase):
         self.assertEqual(self.probe._decisive_title(body), "Real")
 
 
+class M24InterstitialVerdictTests(unittest.TestCase):
+    """Real CF interstitials stay suspected on both 200 and 403 bodies."""
+
+    MARKERS = ("body_cf_challenges_host", "body_cf_chl_opt", "body_cf_chl",
+               "body_cf_challenge_platform", "body_just_a_moment",
+               "body_noindex_nofollow")
+
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def test_interstitials_exact_verdict_on_200_and_403(self):
+        for name in ("cf_interstitial_200body_403.html", "cf_managed_interstitial_403.html"):
+            for status in (200, 403):
+                with self.subTest(fixture=name, status=status):
+                    self.assertEqual(
+                        self.probe.detect_challenge(status, {}, fixture(name)),
+                        ("suspected", self.MARKERS))
+
+
 if __name__ == "__main__":
     unittest.main()

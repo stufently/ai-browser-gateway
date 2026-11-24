@@ -1214,7 +1214,7 @@ class M24ScraplingHeaderTests(unittest.TestCase):
                                 self.request = Req()
 
                             def all_headers(self):
-                                return dict(self.headers)
+                                return {**self.headers, "set-cookie": "sid=secret"}
 
                         response = Resp(code, headers, frame_obj)
                         for name, callback in handlers:
@@ -1259,9 +1259,28 @@ class M24ScraplingHeaderTests(unittest.TestCase):
         gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
         result, _ = self._run_scrapling(
             status=200, first_headers=stale, html=gitlab,
-            cookies=(({"name": "session", "value": "v", "domain": ".site.invalid"},),),
+            cookies=({"name": "session", "value": "v", "domain": ".site.invalid"},),
             events=mismatch)
         self.assertEqual(result["headers"], stale)
+
+    def test_scrapling_status_mismatch_with_clearance_uses_fallback(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        mismatch = [(403, {"cf-mitigated": "challenge"}, "main", "document")]
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=({"name": "cf_clearance", "value": "v", "domain": ".site.invalid"},),
+            events=mismatch)
+        self.assertEqual(result["headers"], {"server": "cloudflare"})
+
+    def test_scrapling_primary_path_omits_set_cookie(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        final = [(200, {"server": "cloudflare"}, "main", "document")]
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab, cookies=(),
+            events=final)
+        self.assertEqual(result["headers"], {"server": "cloudflare"})
 
     def test_scrapling_fallback_drops_header_with_clearance(self):
         stale = {"cf-mitigated": "challenge", "server": "cloudflare"}

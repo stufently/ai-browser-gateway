@@ -1085,8 +1085,9 @@ class ScraplingAdapter:
                 try:
                     if (response.request.resource_type == "document"
                             and response.frame is page.main_frame):
-                        recorded_docs.append(
-                            (response.status, response.all_headers()))
+                        # response.headers is synchronous (no reordering between
+                        # handlers) and omits Set-Cookie, unlike all_headers().
+                        recorded_docs.append((response.status, response.headers))
                 except Exception:
                     pass
             page.on("response", _on_response)
@@ -1104,12 +1105,11 @@ class ScraplingAdapter:
         status = getattr(response, "status", None)
         final_url = str(getattr(response, "url", url) or url)
         # Primary path: last recorded main-frame document with matching status.
-        if recorded_docs:
-            last_status, last_resp_headers = recorded_docs[-1]
-            if last_status == status:
-                headers = _normalize_headers(last_resp_headers)
-        # Fallback: strip cf-mitigated when the body is clean and cf_clearance
-        # cookie covers the final host.
+        primary = bool(recorded_docs) and recorded_docs[-1][0] == status
+        if primary:
+            headers = _normalize_headers(recorded_docs[-1][1])
+        # Fallback (no document recorded or status mismatch): strip cf-mitigated
+        # when the body is clean and cf_clearance covers the final host.
         elif (headers is not None and "cf-mitigated" in headers
               and status is not None and 200 <= status < 300
               and detect_challenge(status, None, body)[0] == "none"
