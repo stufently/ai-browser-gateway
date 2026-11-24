@@ -1,6 +1,25 @@
 # CHANGELOG
 
-## Не выпущено
+## 2026-11-24 (0.1.8)
+
+### Выпуск
+
+- Образ `ghcr.io/stufently/ai-browser-gateway-oneshot` — теги `0.1.8`,
+  `sha-0c3df98`, `latest` (`sha256:59031eef…`). На него переведены
+  check-sites (джоба `verify_challenged`, до этого 0.1.7) и `abg-fetch` в
+  ансибле; в описании скила снят отказ `proxy_unsupported` и ограничения
+  браузеров с прокси по паролю. Скил выложен для обоих пользователей
+  рабочего хоста, смоук `fetch.sh … meta` на scrapingcourse и lowendtalk —
+  rc 0. Серия перед выпуском — образ напрямую (`docker run --init`), без
+  кэша сессий, по 6 прогонов: gitlab sign-in, scrapingcourse, steamdb — 6/6
+  за 9–13 с (patchright), nowsecure и lowendtalk — 6/6 за 1,7–2,3 с
+  (curl_cffi); у gitlab один прогон из шести отдал облегчённый вариант
+  страницы (~39 КБ вместо ~176 КБ, заголовок «Sign in · GitLab»). Стенды
+  `m27_stand.sh` (relay, frame, sw, socks, auth, tls, refuse) и
+  `m26_stand.sh` (http, socks, compat) прошли на самом образе, без
+  монтирования кода ветки. Живой прокси с паролем: http и SOCKS5 —
+  steamdb, gitlab, lowendtalk открыты (браузерные ступени через
+  ретранслятор), в журнале прокси все три хоста, пароля в выводе нет.
 
 ### Добавлено
 
