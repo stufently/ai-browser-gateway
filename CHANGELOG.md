@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-11-24 (не выпущено)
+
+### Исправлено
+
+- **Ложные `challenge_suspected` на пройденных страницах Cloudflare (M24).**
+  Scrapling проходил управляемый вызов, но шлюз отвергал страницу:
+  - адаптер scrapling берёт заголовки последнего документа главного фрейма
+    (`page_setup`, `response.headers`), а не устаревший `cf-mitigated` первого
+    ответа 403. Запасное правило снимает этот заголовок только при 2xx,
+    чистом теле и `cf_clearance` для хоста итогового адреса. Вето по словам
+    в теле удалено;
+  - пассивный JSD (`/cdn-cgi/challenge-platform/scripts/jsd/`) и загрузчик
+    Turnstile (`challenges.cloudflare.com/turnstile/v0/api.js`) больше не
+    считаются решающими правилами;
+  - тело страницы у patchright собирается без iframe виджета
+    `challenges.cloudflare.com`.
+
+  Живые прогоны: gitlab sign-in и scrapingcourse после вызова приняты,
+  nowsecure принят первой ступенью, настоящая заглушка steamdb по-прежнему
+  ловится. Разбор — `docs/research/13-cloudflare-turnstile.md`, мутации
+  новых тестов: 18 убито, 3 выживших закрыты тестами, 2 эквивалентны.
+
 ## 2026-10-09 (0.1.5)
 
 ### Выпуск
