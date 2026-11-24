@@ -2262,6 +2262,35 @@ class TurnstileClickTests(unittest.TestCase):
         result = self.navigate(page, budget_ms=30_000)
         self.assertEqual(result["status"], 200)
 
+    def test_no_second_click_after_gone_without_clearance(self):
+        # The page left the interstitial but no cookie arrived; the fake still
+        # reports a widget box, as a real page with its own Turnstile would.
+        page = self.Page(self, pass_on_click_after_s=0.0, sets_clearance=False)
+        result = self.navigate(page, budget_ms=30_000)
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
+        self.assertEqual(len(page.downs), 1)
+
+    def test_successful_click_still_waits_for_document_to_settle(self):
+        page = self.Page(self, pass_on_click_after_s=1.0)
+        calls_after_pass = []
+        original = page.evaluate
+        def evaluate(expression, *args):
+            if not page.up:
+                calls_after_pass.append(expression)
+            return original(expression, *args)
+        page.evaluate = evaluate
+        result = self.navigate(page, budget_ms=30_000)
+        self.assertEqual(result["status"], 200)
+        self.assertTrue(any("readyState" in e for e in calls_after_pass), calls_after_pass)
+
+    def test_host_only_clearance_cookie_not_accepted_on_subdomain(self):
+        page = self.Page(self, pass_on_click_after_s=0.0, sets_clearance=False)
+        page.cookies_list.append({"name": "cf_clearance", "value": "c",
+                                  "domain": "site.invalid", "path": "/"})
+        page.url = "https://sub.site.invalid/"
+        result = self.navigate(page, budget_ms=3_000)
+        self.assertEqual((result["status"], result["challenge"]), (403, "suspected"))
+
     def test_wait_for_timeout_exception_exits_cycle_immediately(self):
         page = self.Page(self, pass_on_click_after_s=None)
         call_count = [0]
