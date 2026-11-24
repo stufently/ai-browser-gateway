@@ -936,9 +936,11 @@ class ScraplingAdapterTests(unittest.TestCase):
                 b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">'
                 b'</script></html>')
         clearance = ({"name": "cf_clearance", "value": "v", "domain": ".final.invalid"},)
-        result = self._probe_response(200, body, {"cf-mitigated": "challenge"}, cookies=clearance)
+        headers = {"cf-mitigated": "challenge"}
+        result = self._probe_response(200, body, headers, cookies=clearance)
         self.assertEqual(result["err"], "")
         self.assertEqual(result["headers"], {})
+        self.assertEqual(headers, {"cf-mitigated": "challenge"})
         self.assertEqual(result["challenge"], "none")
         self.assertEqual(result["challenge_markers"], [])
 
@@ -1197,7 +1199,9 @@ class M24ScraplingHeaderTests(unittest.TestCase):
                 handlers = []
                 page = types.SimpleNamespace(
                     main_frame=main,
-                    on=lambda name, cb: handlers.append((name, cb)))
+                    on=lambda name, cb: handlers.append((name, cb)),
+                    remove_listener=lambda name, cb: handlers.remove((name, cb)))
+                seen["handlers"] = handlers
                 if calls_setup and callable(kwargs.get("page_setup")):
                     kwargs["page_setup"](page)
                     for code, headers, where, kind in events:
@@ -1272,6 +1276,15 @@ class M24ScraplingHeaderTests(unittest.TestCase):
             cookies=({"name": "cf_clearance", "value": "v", "domain": ".site.invalid"},),
             events=mismatch)
         self.assertEqual(result["headers"], {"server": "cloudflare"})
+
+    def test_scrapling_removes_response_listener_after_fetch(self):
+        final = [(200, {"server": "cloudflare"}, "main", "document")]
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, seen = self._run_scrapling(
+            status=200, first_headers={"server": "cloudflare"}, html=gitlab,
+            cookies=(), events=final)
+        self.assertEqual(result["headers"], {"server": "cloudflare"})
+        self.assertEqual(seen["handlers"], [])
 
     def test_scrapling_primary_path_omits_set_cookie(self):
         stale = {"cf-mitigated": "challenge", "server": "cloudflare"}

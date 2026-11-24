@@ -1091,9 +1091,20 @@ class ScraplingAdapter:
                 except Exception:
                     pass
             page.on("response", _on_response)
+            hooked.append((page, _on_response))
 
+        hooked: list[tuple[Any, Any]] = []
         fetch_kwargs["page_setup"] = _page_setup
-        response = self.session.fetch(url, **fetch_kwargs)
+        try:
+            response = self.session.fetch(url, **fetch_kwargs)
+        finally:
+            # Scrapling reuses its page across fetches: drop our listener so
+            # later navigations do not keep recording into a stale list.
+            for hooked_page, callback in hooked:
+                try:
+                    hooked_page.remove_listener("response", callback)
+                except Exception:
+                    pass
         body = getattr(response, "body", b"")
         if callable(body):
             body = body()
