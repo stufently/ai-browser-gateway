@@ -964,6 +964,29 @@ class BizprofileTests(unittest.TestCase):
     def test_mixed_pages(self):
         self.assert_success_providers('scrapling')
 
+    def test_distinct_providers_with_same_redaction_fail(self):
+        provider, last = 'a' * 64, 'b' * 64
+        self.values[0]['provider'] = provider
+        self.values[0]['attempts'][-1]['provider'] = last
+        self.assertEqual(self.run_check(), 1)
+        failure = json.loads(self.stderr.getvalue())
+        self.assertEqual(failure['internal_error'], 'bizprofile_not_passed')
+        self.assertEqual(failure['providers']['home'], '[redacted]')
+        page = self.evidence()['pages'][0]
+        self.assertEqual(page['provider'], '[redacted]')
+        self.assertEqual(page['api_evidence']['attempts'][-1]['provider'], '[redacted]')
+        for path in self.folder.glob('*.json'):
+            contents = path.read_text()
+            self.assertNotIn(provider, contents)
+            self.assertNotIn(last, contents)
+
+    def test_matching_empty_providers_fail(self):
+        self.values[0]['provider'] = self.values[0]['attempts'][-1]['provider'] = ''
+        self.assertEqual(self.run_check(), 1)
+        failure = json.loads(self.stderr.getvalue())
+        self.assertEqual(failure['internal_error'], 'bizprofile_not_passed')
+        self.assertEqual(failure['providers']['home'], '')
+
     def test_each_failure_records_both_pages_without_retry(self):
         mutations = [lambda v: v.update(ok=False), lambda v: v.update(provider='curl'),
                      lambda v: v['attempts'][-1].update(provider='curl'),

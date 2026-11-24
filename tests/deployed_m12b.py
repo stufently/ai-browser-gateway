@@ -128,6 +128,12 @@ def api_evidence(value):
                        'attempts': [{k: a[k] for k in ATTEMPT_KEYS} for a in value['attempts']]})
 
 
+def provider_matches(value):
+    provider = value['provider']
+    return (isinstance(provider, str) and provider != '' and bool(value['attempts'])
+            and value['attempts'][-1]['provider'] == provider)
+
+
 def echo_result(status, body):
     result = dict(status=status, ip=None, error=None)
     if status == 200:
@@ -289,7 +295,8 @@ def worker():
                 except CheckError as exc:
                     raise CheckError(f'{exc}:{status}') from None
                 if action == 'bizprofile':
-                    value = {'api_evidence': api_evidence(parsed),
+                    value = {'provider_matches': provider_matches(parsed),
+                             'api_evidence': api_evidence(parsed),
                              'marker_found': data['marker'] in parsed['content']}
                 else:
                     value = api_evidence(parsed)
@@ -343,8 +350,14 @@ def check_bizprofile():
             value = row['api_evidence']
             last = value['attempts'][-1] if value['attempts'] else {}
             provider = value['provider']
-            passed = all((passed, value['ok'] is True, isinstance(provider, str) and provider,
-                          last.get('provider') == provider, last.get('success') is True,
+            # The worker compares original names before redacting its output.
+            if 'provider_matches' in row:
+                matches = row.pop('provider_matches')
+            else:
+                # Older worker rows can establish equality only for unmasked names.
+                matches = (provider_matches(value) and '[redacted]' not in provider
+                           and '[url]' not in provider)
+            passed = all((passed, value['ok'] is True, matches is True, last.get('success') is True,
                           last.get('challenge') == 'none', last.get('error_type') == 'none',
                           row['marker_found'] is True))
         except Exception as exc:
