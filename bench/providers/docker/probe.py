@@ -1072,8 +1072,11 @@ def _turnstile_pw_timeout(cap_deadline: float) -> int:
     return max(1, min(TURNSTILE_PLAYWRIGHT_TIMEOUT_MS, remaining_ms))
 
 
-def _turnstile_gone(page: Any, pw_timeout: int) -> bool:
-    """True when the interstitial is gone: title and challenge script both clear."""
+def _turnstile_gone(page: Any) -> bool:
+    """True when the interstitial is gone: title and challenge script both clear.
+
+    page.title() and locator.count() take no timeout: both read the current DOM.
+    """
     try:
         title = page.title().lower()
         if "just a moment" in title:
@@ -1111,7 +1114,7 @@ def _turnstile_has_clearance(context: Any, url: str) -> bool:
         return False
 
 
-def _turnstile_find_container(page: Any, pw_timeout: int) -> tuple[float, float, float] | None:
+def _turnstile_find_container(page: Any, cap_deadline: float) -> tuple[float, float, float] | None:
     """Find the Turnstile widget container by Byparr pattern.
 
     Returns (click_x, click_y, box_height) or None.
@@ -1122,7 +1125,8 @@ def _turnstile_find_container(page: Any, pw_timeout: int) -> tuple[float, float,
                 ancestor = page.locator(
                     f'input[name="cf-turnstile-response"] >> xpath=ancestor::div[{depth}]'
                 ).first
-                box = ancestor.bounding_box(timeout=pw_timeout)
+                # Re-measured per call: four lookups must not overrun the cap.
+                box = ancestor.bounding_box(timeout=_turnstile_pw_timeout(cap_deadline))
                 if box is None:
                     continue
                 width = box.get("width", 0)
@@ -1161,13 +1165,11 @@ def _try_turnstile_click(page: Any, documents: list[Any], sentinel: str) -> bool
     gone_confirmed_at = None
 
     while time.monotonic() < deadline:
-        pw_timeout = _turnstile_pw_timeout(deadline)
-        if gone_confirmed_at is None and _turnstile_gone(page, pw_timeout):
+        if gone_confirmed_at is None and _turnstile_gone(page):
             gone_confirmed_at = time.monotonic()
         if gone_confirmed_at is not None:
             if time.monotonic() - gone_confirmed_at >= 0.25:
-                pw_timeout = _turnstile_pw_timeout(deadline)
-                if _turnstile_gone(page, pw_timeout) and _turnstile_has_clearance(page.context, page.url):
+                if _turnstile_gone(page) and _turnstile_has_clearance(page.context, page.url):
                     return True
                 gone_confirmed_at = None
         if time.monotonic() >= deadline:
@@ -1176,8 +1178,7 @@ def _try_turnstile_click(page: Any, documents: list[Any], sentinel: str) -> bool
         if gone_confirmed_at is None and time.monotonic() >= next_click_at:
             pw_timeout = _turnstile_pw_timeout(deadline)
             if not _turnstile_token_filled(page, pw_timeout):
-                pw_timeout = _turnstile_pw_timeout(deadline)
-                container = _turnstile_find_container(page, pw_timeout)
+                container = _turnstile_find_container(page, deadline)
                 if container is not None:
                     click_x, click_y, _ = container
                     try:
