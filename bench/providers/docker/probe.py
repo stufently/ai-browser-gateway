@@ -494,6 +494,19 @@ def _normalize_headers(raw: Any) -> dict[str, str] | None:
     return folded
 
 
+def _needle_not_followed(text: str, needle: str, suffix: str) -> bool:
+    """True when needle occurs in text without being immediately followed by suffix."""
+    start = 0
+    while True:
+        pos = text.find(needle, start)
+        if pos == -1:
+            return False
+        after = pos + len(needle)
+        if text[after:after + len(suffix)].lower() != suffix.lower():
+            return True
+        start = after
+
+
 def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
     """Return (challenge type, names of rules that fired). Pure: no I/O."""
     text = body if isinstance(body, str) else body.decode("utf-8", "replace")
@@ -515,7 +528,13 @@ def detect_challenge(status, headers, body) -> tuple[str, tuple[str, ...]]:
     body_names: list[str] = []
     for name, needle in _BODY_RULES:
         haystack = _decisive_title(text).lower() if name == "body_just_a_moment" else lowered
-        if needle in haystack:
+        if name == "body_cf_challenge_platform":
+            if _needle_not_followed(haystack, needle, "/scripts/jsd/"):
+                body_names.append(name)
+        elif name == "body_cf_challenges_host":
+            if _needle_not_followed(haystack, needle, "/turnstile/v0/api.js"):
+                body_names.append(name)
+        elif needle in haystack:
             body_names.append(name)
     if body_names:
         for name, needle in _SUPPORTING_BODY_RULES:
@@ -1010,29 +1029,25 @@ class PatchrightAdapter(PlaywrightAdapter):
     package = "patchright"
 
 
-_SCRAPLING_STALE_CF_HEADER_RULES = frozenset({
-    "body_cf_challenge_platform", "body_noindex_nofollow",
-})
-_SCRAPLING_CHALLENGE_STRINGS = frozenset({
-    "turnstile", "cf-chl", "cf_chl", "challenge-platform",
-    "challenges.cloudflare.com", "cf-challenge", "cf-captcha", "hcaptcha",
-    "recaptcha", "g-recaptcha", "h-captcha", "/cdn-cgi/challenge",
-})
-
-
-def _scrapling_only_jsd_platform_paths(body) -> bool:
-    """Allow only passive JSD paths after every challenge-platform marker."""
-    text = body if isinstance(body, str) else body.decode("utf-8", "replace")
-    suffixes = text.lower().split("/cdn-cgi/challenge-platform")[1:]
-    return all(suffix.startswith("/scripts/jsd/") for suffix in suffixes)
-
-
-def _scrapling_has_challenge_strings(body) -> bool:
-    """Check for challenge strings outside allowed passive JSD prefixes."""
-    text = body if isinstance(body, str) else body.decode("utf-8", "replace")
-    remainder = _drop_encoded_cf_tokens(text).lower()
-    remainder = remainder.replace("/cdn-cgi/challenge-platform/scripts/jsd/", "")
-    return any(marker in remainder for marker in _SCRAPLING_CHALLENGE_STRINGS)
+def _scrapling_has_clearance(response: Any, final_url: str) -> bool:
+    """True when response cookies carry cf_clearance applicable to final_url's host."""
+    cookies = getattr(response, "cookies", None)
+    if not cookies:
+        return False
+    host = urlparse(final_url).hostname or ""
+    if not host:
+        return False
+    for cookie in cookies:
+        if not isinstance(cookie, dict):
+            continue
+        if cookie.get("name") != "cf_clearance":
+            continue
+        domain = cookie.get("domain", "").lstrip(".").lower()
+        if not domain:
+            continue
+        if host == domain or host.endswith("." + domain):
+            return True
+    return False
 
 
 class ScraplingAdapter:
@@ -1063,26 +1078,43 @@ class ScraplingAdapter:
         fetch_kwargs: dict[str, Any] = {"solve_cloudflare": self.solve_cloudflare}
         if _DEADLINE is not None and _DEADLINE.end is not None:
             fetch_kwargs["timeout"] = _bound_timeout_ms(120_000)
+        recorded_docs: list[tuple[int | None, Any]] = []
+
+        def _page_setup(page: Any) -> None:
+            def _on_response(response: Any) -> None:
+                try:
+                    if (response.request.resource_type == "document"
+                            and response.frame is page.main_frame):
+                        recorded_docs.append(
+                            (response.status, response.all_headers()))
+                except Exception:
+                    pass
+            page.on("response", _on_response)
+
+        fetch_kwargs["page_setup"] = _page_setup
         response = self.session.fetch(url, **fetch_kwargs)
         body = getattr(response, "body", b"")
         if callable(body):
             body = body()
         if not isinstance(body, bytes):
             body = b"" if body is None else str(body).encode("utf-8")
-        headers = _normalize_headers(getattr(response, "headers", None))
+        scrapling_headers = getattr(response, "headers", None)
+        headers = _normalize_headers(scrapling_headers)
         history = getattr(response, "history", None) or ()
         status = getattr(response, "status", None)
-        if (status is not None and 200 <= status < 300
-                and headers is not None and "cf-mitigated" in headers
-                and (body_challenge := detect_challenge(status, None, body))[0] == "none"
-                and set(body_challenge[1]) <= _SCRAPLING_STALE_CF_HEADER_RULES
-                and ("body_cf_challenge_platform" not in body_challenge[1]
-                     or _scrapling_only_jsd_platform_paths(body))
-                and not _scrapling_has_challenge_strings(body)):
-            # Scrapling can retain challenge headers after its solver reaches
-            # the real page. Trust the body only for this successful response.
-            headers.pop("cf-mitigated")
         final_url = str(getattr(response, "url", url) or url)
+        # Primary path: last recorded main-frame document with matching status.
+        if recorded_docs:
+            last_status, last_resp_headers = recorded_docs[-1]
+            if last_status == status:
+                headers = _normalize_headers(last_resp_headers)
+        # Fallback: strip cf-mitigated when the body is clean and cf_clearance
+        # cookie covers the final host.
+        elif (headers is not None and "cf-mitigated" in headers
+              and status is not None and 200 <= status < 300
+              and detect_challenge(status, None, body)[0] == "none"
+              and _scrapling_has_clearance(response, final_url)):
+            headers = {k: v for k, v in headers.items() if k != "cf-mitigated"}
         result = _result(status, final_url, body, len(history), headers=headers)
         if _exporting_session():
             result["session"] = _browser_session(
@@ -1213,17 +1245,26 @@ def _playwright_body(page: Any, sentinel: str, timeout_ms: int = 5_000) -> str:
     timeout_ms = _bound_timeout_ms(timeout_ms)
     deadline = time.monotonic() + timeout_ms / 1000
     body = ""
+    main_frame = getattr(page, "main_frame", None)
     while True:
         parts = []
         for frame in page.frames:
             try:
+                if (main_frame is not None
+                        and frame is not main_frame
+                        and urlparse(getattr(frame, "url", "")).hostname
+                        == "challenges.cloudflare.com"):
+                    continue
                 parts.append(frame.content())
             except Exception:
                 continue
         body = "\n".join(parts)
         if not sentinel or sentinel in body or time.monotonic() >= deadline:
             return body
-        page.wait_for_timeout(50)
+        if hasattr(page, "wait_for_timeout"):
+            page.wait_for_timeout(50)
+        else:
+            return body
 
 
 def make_adapter(provider: str):

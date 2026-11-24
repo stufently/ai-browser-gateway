@@ -889,10 +889,10 @@ class ScraplingAdapterTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertTrue(result["sentinel"])
 
-    def _probe_response(self, status, body, headers):
+    def _probe_response(self, status, body, headers, cookies=None):
         page = types.SimpleNamespace(
             status=status, url="https://final.invalid/", body=body,
-            headers=headers, history=(),
+            headers=headers, history=(), cookies=cookies,
         )
 
         class Session:
@@ -918,30 +918,29 @@ class ScraplingAdapterTests(unittest.TestCase):
         body = (b"<html><title>Directory</title><body>Real content"
                 b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">'
                 b"</script></body></html>")
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".final.invalid"},)
         for status in (200, 204, 299):
             with self.subTest(status=status):
                 headers = {"CF-Mitigated": "challenge", "Content-Type": "text/html",
                            "X-Keep": "present"}
-                result = self._probe_response(status, body, headers)
+                result = self._probe_response(status, body, headers, cookies=clearance)
                 self.assertEqual(result["err"], "")
                 self.assertEqual(result["headers"],
                                  {"content-type": "text/html", "x-keep": "present"})
                 self.assertEqual(result["challenge"], "none")
-                self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+                self.assertEqual(result["challenge_markers"], [])
                 self.assertEqual(headers["CF-Mitigated"], "challenge")
 
     def test_scrapling_drops_stale_cf_header_with_platform_and_noindex(self):
         body = (b'<html><meta name="robots" content="noindex,nofollow">'
                 b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js">'
                 b'</script></html>')
-        headers = {"cf-mitigated": "challenge"}
-        result = self._probe_response(200, body, headers)
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".final.invalid"},)
+        result = self._probe_response(200, body, {"cf-mitigated": "challenge"}, cookies=clearance)
         self.assertEqual(result["err"], "")
         self.assertEqual(result["headers"], {})
         self.assertEqual(result["challenge"], "none")
-        self.assertEqual(result["challenge_markers"],
-                         ["body_cf_challenge_platform", "body_noindex_nofollow"])
-        self.assertEqual(headers, {"cf-mitigated": "challenge"})
+        self.assertEqual(result["challenge_markers"], [])
 
     def test_scrapling_drops_stale_cf_header_with_ad_referrer_token(self):
         # A solved page whose ad iframe carries the solver's redirect URL.
@@ -949,11 +948,12 @@ class ScraplingAdapterTests(unittest.TestCase):
                 b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
                 b'<iframe src="https://ads.invalid/x?ref=https%3A%2F%2Fsite.invalid%2F'
                 b'%3F__cf_chl_tk%3DP.abc-1.0"></iframe></body></html>')
-        result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".final.invalid"},)
+        result = self._probe_response(200, body, {"cf-mitigated": "challenge"}, cookies=clearance)
         self.assertEqual(result["err"], "")
         self.assertEqual(result["headers"], {})
         self.assertEqual(result["challenge"], "none")
-        self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+        self.assertEqual(result["challenge_markers"], [])
 
     def test_scrapling_preserves_cf_header_with_raw_cf_token(self):
         body = (b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
@@ -997,68 +997,59 @@ class ScraplingAdapterTests(unittest.TestCase):
     def test_scrapling_drops_stale_cf_header_with_only_jsd_paths(self):
         scripts = ('<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
                    '<script src="/CDN-CGI/CHALLENGE-PLATFORM/SCRIPTS/JSD/main.js"></script>')
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".final.invalid"},)
         for body in (scripts, b"\xff" + scripts.encode()):
             with self.subTest(body=body):
-                result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+                result = self._probe_response(200, body, {"cf-mitigated": "challenge"}, cookies=clearance)
                 self.assertEqual(result["err"], "")
                 self.assertEqual(result["headers"], {})
                 self.assertEqual(result["challenge"], "none")
-                self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+                self.assertEqual(result["challenge_markers"], [])
 
     def test_scrapling_drops_stale_cf_header_with_mixed_case_jsd_paths(self):
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".final.invalid"},)
         for suffix in ("/SCRIPTS/JSD/main.js", "/Scripts/Jsd/main.js"):
             html = f'<script src="/cdn-cgi/challenge-platform{suffix}"></script>'
             for body in (html, html.encode()):
                 with self.subTest(suffix=suffix, body_type=type(body).__name__):
-                    result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+                    result = self._probe_response(200, body, {"cf-mitigated": "challenge"}, cookies=clearance)
                     self.assertEqual(result["err"], "")
                     self.assertEqual(result["headers"], {})
                     self.assertEqual(result["challenge"], "none")
-                    self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+                    self.assertEqual(result["challenge_markers"], [])
 
-    def test_scrapling_preserves_cf_header_with_jsd_and_challenge_strings(self):
+    def test_scrapling_drops_stale_header_with_clearance_keeps_without(self):
+        # The old word veto is gone; the fallback rule needs cf_clearance.
         jsd = '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
-        widgets = (
-            ('turnstile', '<div class="cf-turnstile" data-sitekey="key"></div>'),
-            ('cf-chl', '<div class="cf-chl-container"></div>'),
-            ('cf_chl', '<script>window.cf_chl_state = {};</script>'),
-            ('challenge-platform', '<div class="challenge-platform"></div>'),
-            ('challenges.cloudflare.com',
-             '<script src="https://challenges.cloudflare.com/widget.js"></script>'),
-            ('cf-challenge', '<div class="cf-challenge"></div>'),
-            ('cf-captcha', '<div class="cf-captcha"></div>'),
-            ('hcaptcha', '<script src="https://js.hcaptcha.com/1/api.js"></script>'),
-            ('recaptcha', '<script src="https://www.google.com/recaptcha/api.js"></script>'),
-            ('g-recaptcha', '<div class="g-recaptcha" data-sitekey="key"></div>'),
-            ('h-captcha', '<div class="h-captcha" data-sitekey="key"></div>'),
-            ('/cdn-cgi/challenge', '<form action="/cdn-cgi/challenge" method="post"></form>'),
-            ('CF-TURNSTILE', '<DIV CLASS="CF-TURNSTILE" DATA-SITEKEY="key"></DIV>'),
-        )
-        for marker, widget in widgets:
-            # Unquoted HTML attributes also carry markers, even where the
-            # detector's existing quoted-attribute captcha rule does not match.
-            for markup in (widget, widget.replace('"', '')):
-                html = f'<html><p>Checking your browser</p>{jsd}{markup}</html>'
-                for body in (html, b"\xff" + html.encode()):
-                    with self.subTest(marker=marker, markup=markup,
-                                      body_type=type(body).__name__):
-                        headers = {"cf-mitigated": "challenge"}
-                        result = self._probe_response(200, body, headers)
-                        self.assertEqual(result["err"], "")
-                        self.assertEqual(result["headers"], {"cf-mitigated": "challenge"})
-                        self.assertEqual(result["challenge"], "suspected")
-                        self.assertIn("header_cf_mitigated", result["challenge_markers"])
-                        self.assertEqual(headers, {"cf-mitigated": "challenge"})
+        loader = '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>'
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".final.invalid"},)
+        for body_text in (jsd + loader, jsd, loader):
+            for body in (f'<html><p>Checking</p>{body_text}</html>',
+                         b"\xff" + f'<html><p>Checking</p>{body_text}</html>'.encode()):
+                with self.subTest(body_type=type(body).__name__):
+                    headers = {"cf-mitigated": "challenge"}
+                    # With cf_clearance the stale header is dropped.
+                    result = self._probe_response(200, body, headers, cookies=clearance)
+                    self.assertEqual(result["err"], "")
+                    self.assertEqual(result["headers"], {})
+                    self.assertEqual(result["challenge"], "none")
+                    # Without cf_clearance the header stays (reason: no cookie).
+                    headers2 = {"cf-mitigated": "challenge"}
+                    result2 = self._probe_response(200, body, headers2, cookies=None)
+                    self.assertEqual(result2["headers"], {"cf-mitigated": "challenge"})
+                    self.assertEqual(result2["challenge"], "suspected")
+                    self.assertIn("header_cf_mitigated", result2["challenge_markers"])
 
     def test_scrapling_drops_stale_cf_header_with_jsd_and_ordinary_words(self):
         body = (b'<html><p>A business challenge: cloudflare integration.</p>'
                 b'<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
                 b'</html>')
-        result = self._probe_response(200, body, {"cf-mitigated": "challenge"})
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".final.invalid"},)
+        result = self._probe_response(200, body, {"cf-mitigated": "challenge"}, cookies=clearance)
         self.assertEqual(result["err"], "")
         self.assertEqual(result["headers"], {})
         self.assertEqual(result["challenge"], "none")
-        self.assertEqual(result["challenge_markers"], ["body_cf_challenge_platform"])
+        self.assertEqual(result["challenge_markers"], [])
 
     def test_scrapling_preserves_cf_header_on_single_cf_body_marker(self):
         for marker, rule in (("cf_chl_opt", "body_cf_chl_opt"),
@@ -1109,9 +1100,11 @@ class ScraplingAdapterTests(unittest.TestCase):
                     self.assertEqual(headers, {"cf-mitigated": "challenge"})
 
     def test_scrapling_keeps_missing_and_empty_headers_distinct(self):
-        for headers, expected in ((None, None), ({}, {}), ({"cf-mitigated": "challenge"}, {})):
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".final.invalid"},)
+        for headers, expected, cookies in ((None, None, None), ({}, {}, None),
+                                           ({"cf-mitigated": "challenge"}, {}, clearance)):
             with self.subTest(headers=headers):
-                result = self._probe_response(200, b"<html>Real content</html>", headers)
+                result = self._probe_response(200, b"<html>Real content</html>", headers, cookies=cookies)
                 self.assertEqual(result["err"], "")
                 self.assertEqual(result["headers"], expected)
                 self.assertEqual(result["challenge"], "none")
@@ -1176,6 +1169,224 @@ class ScraplingAdapterTests(unittest.TestCase):
         except ValueError:
             pass
         self.assertIsInstance(adapter, self.probe.ScraplingAdapter)
+
+
+class M24ScraplingHeaderTests(unittest.TestCase):
+    """M24: scrapling header logic uses page_setup and cf_clearance fallback."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def _run_scrapling(self, *, status, first_headers, html, cookies, events, calls_setup=True):
+        seen = {}
+
+        class Session:
+            def __init__(self, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def fetch(self, url, **kwargs):
+                seen["kwargs"] = kwargs
+                main, child = object(), object()
+                handlers = []
+                page = types.SimpleNamespace(
+                    main_frame=main,
+                    on=lambda name, cb: handlers.append((name, cb)))
+                if calls_setup and callable(kwargs.get("page_setup")):
+                    kwargs["page_setup"](page)
+                    for code, headers, where, kind in events:
+                        frame_obj = main if where == "main" else child
+
+                        class Req:
+                            resource_type = kind
+
+                        class Resp:
+                            def __init__(self, s, h, f):
+                                self.status = s
+                                self.headers = dict(h)
+                                self.frame = f
+                                self.request = Req()
+
+                            def all_headers(self):
+                                return dict(self.headers)
+
+                        response = Resp(code, headers, frame_obj)
+                        for name, callback in handlers:
+                            if name == "response":
+                                callback(response)
+                return types.SimpleNamespace(
+                    status=status, url="https://site.invalid/",
+                    body=html.encode(), headers=dict(first_headers),
+                    history=(), cookies=cookies)
+
+        fetchers = types.ModuleType("scrapling.fetchers")
+        fetchers.StealthySession = Session
+        package = types.ModuleType("scrapling")
+        package.fetchers = fetchers
+        with patch.dict(sys.modules, {"scrapling": package, "scrapling.fetchers": fetchers}):
+            adapter = self.probe.ScraplingAdapter()
+            adapter.start()
+            try:
+                result = adapter.navigate("https://site.invalid/")
+            finally:
+                adapter.close()
+        return result, seen
+
+    def test_scrapling_primary_path_uses_last_document_headers(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        chain = [(307, {"location": "/x"}, "main", "document"),
+                 (403, {"cf-mitigated": "challenge", "server": "cloudflare"}, "main", "document"),
+                 (200, {"server": "cloudflare", "x-final": "1"}, "main", "document"),
+                 (200, {"x-frame": "1"}, "child", "document"),
+                 (200, {"x-asset": "1"}, "main", "script")]
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, seen = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=(({"name": "session", "value": "v", "domain": ".site.invalid"},),),
+            events=chain)
+        self.assertTrue(callable(seen["kwargs"].get("page_setup")))
+        self.assertEqual(result["headers"], {"server": "cloudflare", "x-final": "1"})
+
+    def test_scrapling_primary_path_status_mismatch_falls_back(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        mismatch = [(403, {"cf-mitigated": "challenge"}, "main", "document")]
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=(({"name": "session", "value": "v", "domain": ".site.invalid"},),),
+            events=mismatch)
+        self.assertEqual(result["headers"], stale)
+
+    def test_scrapling_fallback_drops_header_with_clearance(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".site.invalid"},)
+        for name in ("cf_passed_gitlab_signin_200.html",
+                     "cf_passed_scrapingcourse_200.html",
+                     "cf_jsd_turnstile_widget_200.html"):
+            html = (ROOT / "tests" / "fixtures" / name).read_text()
+            result, _ = self._run_scrapling(
+                status=200, first_headers=stale, html=html,
+                cookies=clearance, events=(), calls_setup=False)
+            with self.subTest(name=name):
+                self.assertEqual(result["headers"], {"server": "cloudflare"})
+
+    def test_scrapling_fallback_keeps_header_without_clearance(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        other = ({"name": "session", "value": "v", "domain": ".site.invalid"},)
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=other, events=(), calls_setup=False)
+        self.assertEqual(result["headers"], stale)
+
+    def test_scrapling_fallback_keeps_header_with_foreign_clearance(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        foreign = ({"name": "cf_clearance", "value": "v", "domain": ".other.invalid"},)
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=foreign, events=(), calls_setup=False)
+        self.assertEqual(result["headers"], stale)
+
+    def test_scrapling_fallback_keeps_header_with_bare_suffix_clearance(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        suffix = ({"name": "cf_clearance", "value": "v", "domain": "ite.invalid"},)
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=suffix, events=(), calls_setup=False)
+        self.assertEqual(result["headers"], stale)
+
+    def test_scrapling_fallback_drops_header_with_host_only_clearance(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        host_only = ({"name": "cf_clearance", "value": "v", "domain": "site.invalid"},)
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=host_only, events=(), calls_setup=False)
+        self.assertEqual(result["headers"], {"server": "cloudflare"})
+
+    def test_scrapling_fallback_keeps_header_when_cookies_missing(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        result, _ = self._run_scrapling(
+            status=200, first_headers=stale, html=gitlab,
+            cookies=None, events=(), calls_setup=False)
+        self.assertEqual(result["headers"], stale)
+
+    def test_scrapling_fallback_keeps_header_on_interstitial_body(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".site.invalid"},)
+        for name in ("cf_interstitial_200body_403.html", "cf_managed_interstitial_403.html"):
+            html = (ROOT / "tests" / "fixtures" / name).read_text()
+            result, _ = self._run_scrapling(
+                status=200, first_headers=stale, html=html,
+                cookies=clearance, events=(), calls_setup=False)
+            with self.subTest(name=name):
+                self.assertEqual(result["headers"], stale)
+
+    def test_scrapling_fallback_keeps_header_outside_2xx(self):
+        stale = {"cf-mitigated": "challenge", "server": "cloudflare"}
+        clearance = ({"name": "cf_clearance", "value": "v", "domain": ".site.invalid"},)
+        gitlab = (ROOT / "tests/fixtures/cf_passed_gitlab_signin_200.html").read_text()
+        for code in (403, 302, 500):
+            result, _ = self._run_scrapling(
+                status=code, first_headers=stale, html=gitlab,
+                cookies=clearance, events=(), calls_setup=False)
+            with self.subTest(code=code):
+                self.assertEqual(result["headers"], stale)
+
+
+class M24PatchrightBodyTests(unittest.TestCase):
+    """M24: patchright body skips the Turnstile widget iframe."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def test_patchright_body_skips_turnstile_iframe(self):
+        class MainFrame:
+            url = "https://site.invalid/"
+            def content(self):
+                return "<p>MAIN</p>"
+
+        class WidgetFrame:
+            url = "https://challenges.cloudflare.com/cdn-cgi/challenge-platform/h/b/turnstile/if/x"
+            def content(self):
+                return "<p>WIDGET cf_chl_opt</p>"
+
+        class OtherFrame:
+            url = "https://ads.invalid/frame"
+            def content(self):
+                return "<p>OTHER</p>"
+
+        main = MainFrame()
+        page = types.SimpleNamespace(
+            main_frame=main,
+            frames=[main, WidgetFrame(), OtherFrame()],
+            wait_for_timeout=lambda ms: None)
+        text = self.probe._playwright_body(page, "")
+        self.assertIn("MAIN", text)
+        self.assertIn("OTHER", text)
+        self.assertNotIn("WIDGET", text)
+
+    def test_patchright_body_reads_main_frame_on_challenge_host(self):
+        class CfMain:
+            url = "https://challenges.cloudflare.com/"
+            def content(self):
+                return "<p>CFMAIN</p>"
+
+        cf = CfMain()
+        page = types.SimpleNamespace(
+            main_frame=cf, frames=[cf], wait_for_timeout=lambda ms: None)
+        text = self.probe._playwright_body(page, "")
+        self.assertIn("CFMAIN", text)
 
 
 class ProxyWiringTests(unittest.TestCase):

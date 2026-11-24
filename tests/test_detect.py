@@ -396,7 +396,7 @@ class DetectChallengeTests(unittest.TestCase):
             200, {}, fixture("lowendtalk_200_grecaptcha.html")
         )
         self.assertEqual(verdict, "none")
-        self.assertEqual(markers, ("body_cf_challenge_platform", "body_captcha"))
+        self.assertEqual(markers, ("body_captcha",))
 
     def test_lowendtalk_grecaptcha_on_403_is_access_denied(self):
         verdict, markers = self.detect(
@@ -404,11 +404,13 @@ class DetectChallengeTests(unittest.TestCase):
         )
         self.assertEqual(verdict, "access_denied")
         self.assertEqual(
-            markers, ("body_cf_challenge_platform", "body_captcha", "status_403")
+            markers, ("body_captcha", "status_403")
         )
 
     def test_lowendtalk_grecaptcha_with_second_body_marker_is_suspected(self):
-        body = fixture("lowendtalk_200_grecaptcha.html") + "<div class=cf_chl_opt></div>"
+        body = (fixture("lowendtalk_200_grecaptcha.html")
+                + '<div class=cf_chl_opt></div>'
+                + '<script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script>')
         verdict, markers = self.detect(200, {}, body)
         self.assertEqual(verdict, "suspected")
         self.assertIn("body_cf_chl_opt", markers)
@@ -418,7 +420,7 @@ class DetectChallengeTests(unittest.TestCase):
     def test_interactive_widget_plus_one_cf_marker_is_captcha_and_named(self):
         body = (
             '<title>Offers</title>'
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<div class="g-recaptcha" data-sitekey="k"></div>'
         )
         verdict, markers = self.detect(200, {}, body)
@@ -472,7 +474,7 @@ class DetectChallengeTests(unittest.TestCase):
                 )
 
     def test_noninteractive_captcha_with_cf_never_becomes_captcha(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         bodies = (
             '<img id="captcha-history">',
             '<script src="https://www.google.com/recaptcha/api.js?render=KEY"></script>',
@@ -511,7 +513,7 @@ class DetectChallengeTests(unittest.TestCase):
         ))
 
     def test_explicit_render_with_cf_is_interactive(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for query in (
             "render=explicit", "onload=cb&render=explicit",
             "onload=cb&amp;render=explicit", "render=KEY&render=explicit",
@@ -526,7 +528,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_nonexplicit_render_with_cf_is_not_interactive(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for query in (
             "onload=cb&render=KEY", "render=KEY&render=OTHER",
             "render=explicitKEY", "render=KEY&onload=explicit", "render=",
@@ -540,7 +542,7 @@ class DetectChallengeTests(unittest.TestCase):
     def test_oversized_character_reference_does_not_raise(self):
         bad = "&#" + "9" * 5000 + ";"
         self.assertEqual(self.detect(200, {}, bad), ("none", ()))
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         widget = '<div data-sitekey="k"></div>'
         attr = '<div title="' + bad + '"></div>'
         for body in (cf + widget + bad, cf + bad + widget, cf + attr + widget):
@@ -550,7 +552,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_parser_error_preserves_recognized_widget(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         widget = '<div data-sitekey="k"></div>'
         # Attribute references are decoded even with convert_charrefs=False.
         for bad in ('<span title="&#' + "9" * 5000 + ';">', '<![invalid]>'):
@@ -573,7 +575,7 @@ class DetectChallengeTests(unittest.TestCase):
                 self.assertEqual(self.detect(status, headers, bad), expected)
 
     def test_widget_class_tokens_are_case_sensitive(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         body = cf + '<div class="G-reCAPTCHA"></div>'
         self.assertEqual(self.detect(200, {}, body), (
             "none", ("body_cf_challenge_platform", "body_captcha"),
@@ -581,7 +583,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_widget_parser_preserves_attribute_value_case(self):
         body = (
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<div class="G-reCAPTCHA"></div>'
             '<script src="https://www.google.com/recaptcha/api.js?render=EXPLICIT"></script>'
         )
@@ -591,7 +593,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_explicit_render_value_is_case_sensitive(self):
         body = (
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<script src="https://www.google.com/recaptcha/api.js?render=EXPLICIT"></script>'
         )
         self.assertEqual(self.detect(200, {}, body), (
@@ -607,7 +609,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_script_fragment_is_removed_before_render_query(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for suffix in ('#frag?render=explicit', '?render=explicit#frag'):
             with self.subTest(suffix=suffix):
                 body = cf + f'<script src="recaptcha/api.js{suffix}"></script>'
@@ -618,7 +620,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_render_key_inside_fragment_is_not_a_query_parameter(self):
         body = (
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<script src="recaptcha/api.js#frag?render=KEY"></script>'
         )
         self.assertEqual(self.detect(200, {}, body), (
@@ -628,7 +630,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_semicolon_does_not_split_render_query(self):
         body = (
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<script src="recaptcha/api.js?render=explicit;foo=1"></script>'
         )
         self.assertEqual(self.detect(200, {}, body), (
@@ -637,7 +639,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_render_parameter_name_is_case_sensitive(self):
         body = (
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<script src="recaptcha/api.js?RENDER=KEY"></script>'
         )
         self.assertEqual(self.detect(200, {}, body), (
@@ -646,7 +648,7 @@ class DetectChallengeTests(unittest.TestCase):
         ))
 
     def test_render_value_preserves_surrounding_spaces(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for value in (' explicit', 'explicit &foo=1', 'explicit #frag'):
             with self.subTest(value=value):
                 body = cf + f'<script src="recaptcha/api.js?render={value}"></script>'
@@ -660,7 +662,7 @@ class DetectChallengeTests(unittest.TestCase):
         ))
 
     def test_script_src_removes_tabs_and_newlines(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for src in ('recaptcha/api.js?render=explicit\n',
                     'recaptcha/api.js?render=exp\tlicit',
                     'recaptcha/\rapi.js?render=explicit',
@@ -673,7 +675,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_script_src_trims_c0_and_space_at_edges(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for codepoint in range(0x01, 0x21):
             char = chr(codepoint)
             for src in (f'{char}recaptcha/api.js?render=explicit',
@@ -686,7 +688,7 @@ class DetectChallengeTests(unittest.TestCase):
                     ))
 
     def test_script_src_replaces_nul_before_url_cleanup(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for src in ('recaptcha/api.js?render=explicit\x00',
                     '\x00recaptcha/api.js?render=explicit',
                     'recaptcha/api.js?render=explicit\x00 \t\n'):
@@ -697,7 +699,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_script_src_normalizes_backslashes(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for src in (r'recaptcha\api.js?render=explicit',
                     r'https:\\www.google.com\recaptcha\api.js?render=explicit'):
             with self.subTest(src=src):
@@ -709,7 +711,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_script_src_internal_spaces_parse_within_time_budget(self):
         body = (
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<script src="recaptcha/api.js?render=' + ' ' * 32000 + 'KEY"></script>'
         )
         started = time.perf_counter()
@@ -721,7 +723,7 @@ class DetectChallengeTests(unittest.TestCase):
         ))
 
     def test_script_src_preserves_non_url_whitespace(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for value in ('explicit\x7f', 'explicit\u00a0', 'explicit\u2003',
                       'exp\x00licit', 'exp\x0blicit', 'exp licit'):
             with self.subTest(value=value):
@@ -731,7 +733,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_non_special_script_src_preserves_backslashes(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for src in (
             r'data:text/javascript,//recaptcha\api.js?render=explicit',
             r'blob:https://e/recaptcha\api.js?render=explicit',
@@ -747,7 +749,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_special_and_relative_script_src_normalizes_backslashes(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         sources = [r'recaptcha\api.js?render=explicit']
         for scheme in ('http', 'https', 'ws', 'wss', 'ftp', 'file', 'HTTPS'):
             sources.append(scheme + r':\\www.google.com\recaptcha\api.js?render=explicit')
@@ -765,7 +767,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_duplicate_class_uses_first_attribute(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for attrs in ('class="foo" class="g-recaptcha"',
                       'CLASS="foo" class="g-recaptcha"',
                       'class class="g-recaptcha"',
@@ -781,7 +783,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_duplicate_class_keeps_first_widget(self):
         body = (
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<div class="g-recaptcha" class="foo"></div>'
         )
         self.assertEqual(self.detect(200, {}, body), (
@@ -790,7 +792,7 @@ class DetectChallengeTests(unittest.TestCase):
         ))
 
     def test_duplicate_src_uses_first_attribute(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for first in ('src="one.js"', 'SRC="one.js"', 'src'):
             with self.subTest(first=first):
                 body = cf + f'<script {first} src="recaptcha/api.js?render=explicit"></script>'
@@ -800,7 +802,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_duplicate_src_keeps_first_widget(self):
         body = (
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<script src="recaptcha/api.js?render=explicit" src="one.js"></script>'
         )
         self.assertEqual(self.detect(200, {}, body), (
@@ -809,7 +811,7 @@ class DetectChallengeTests(unittest.TestCase):
         ))
 
     def test_recaptcha_path_rejects_prefixed_names(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for path in ('xrecaptcha/api.js', 'not-recaptcha/api.js', 'grecaptcha/api.js'):
             with self.subTest(path=path):
                 body = cf + f'<script src="{path}?render=explicit"></script>'
@@ -819,7 +821,7 @@ class DetectChallengeTests(unittest.TestCase):
 
     def test_iframe_src_is_not_an_interactive_script(self):
         body = (
-            '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+            '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
             '<iframe src="recaptcha/api.js?render=explicit"></iframe>'
         )
         self.assertEqual(self.detect(200, {}, body), (
@@ -837,7 +839,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_widget_class_tokens_split_on_ascii_whitespace(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for whitespace in (' ', '\t', '\n', '\f', '\r'):
             with self.subTest(whitespace=whitespace):
                 body = cf + f'<div class="g-recaptcha{whitespace}foo"></div>'
@@ -867,7 +869,7 @@ class DetectChallengeTests(unittest.TestCase):
         ))
 
     def test_render_substring_is_not_a_render_parameter(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for query in ('onload=render', 'hl=render', 'rendering=KEY', 'foo=renderer'):
             with self.subTest(query=query):
                 body = cf + f'<script src="recaptcha/api.js?{query}"></script>'
@@ -877,7 +879,7 @@ class DetectChallengeTests(unittest.TestCase):
                 ))
 
     def test_template_widgets_with_cf_are_not_interactive(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for widget in (
             '<div data-sitekey="k"></div>', '<div class="g-recaptcha"></div>',
             '<div class="h-captcha"></div>', '<div class="cf-turnstile"></div>',
@@ -896,7 +898,7 @@ class DetectChallengeTests(unittest.TestCase):
                     self.assertNotIn("body_captcha_interactive", markers)
 
     def test_widget_after_closed_templates_is_interactive(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for template in (
             '<template><span></span></template>',
             '<template><template></template></template>',
@@ -925,6 +927,90 @@ class DetectChallengeTests(unittest.TestCase):
                     expected, ("header_cf_mitigated", "body_cf_challenges_host",
                                "body_cf_chl_opt", "body_captcha_interactive"),
                 ))
+
+
+class M24NewFixtureTests(unittest.TestCase):
+    """M24: passed CF pages are not rejected; JSD and widget loader are passive."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.probe = load_probe()
+
+    def detect(self, status, headers, body):
+        return self.probe.detect_challenge(status, headers, body)
+
+    def test_gitlab_signin_200_is_none(self):
+        for headers in (None, {}):
+            with self.subTest(headers=headers):
+                verdict, markers = self.detect(200, headers, fixture("cf_passed_gitlab_signin_200.html"))
+                self.assertEqual(verdict, "none")
+                self.assertEqual(markers, ())
+
+    def test_scrapingcourse_200_is_none(self):
+        for headers in (None, {}):
+            with self.subTest(headers=headers):
+                verdict, markers = self.detect(200, headers, fixture("cf_passed_scrapingcourse_200.html"))
+                self.assertEqual(verdict, "none")
+                self.assertEqual(markers, ())
+
+    def test_jsd_turnstile_widget_200_is_none_with_interactive_only(self):
+        for headers in (None, {}):
+            with self.subTest(headers=headers):
+                verdict, markers = self.detect(200, headers, fixture("cf_jsd_turnstile_widget_200.html"))
+                self.assertEqual(verdict, "none")
+                self.assertEqual(markers, ("body_captcha_interactive",))
+
+    def test_jsd_turnstile_widget_403_is_captcha(self):
+        verdict, markers = self.detect(403, {}, fixture("cf_jsd_turnstile_widget_200.html"))
+        self.assertEqual(verdict, "captcha")
+        self.assertIn("body_captcha_interactive", markers)
+
+    def test_managed_interstitial_200_is_suspected_with_named_rules(self):
+        verdict, markers = self.detect(200, {}, fixture("cf_managed_interstitial_403.html"))
+        self.assertEqual(verdict, "suspected")
+        for rule in ("body_just_a_moment", "body_cf_chl_opt",
+                     "body_cf_challenge_platform", "body_cf_challenges_host"):
+            self.assertIn(rule, markers)
+
+    def test_managed_interstitial_403_is_suspected_with_named_rules(self):
+        verdict, markers = self.detect(403, {}, fixture("cf_managed_interstitial_403.html"))
+        self.assertEqual(verdict, "suspected")
+        for rule in ("body_just_a_moment", "body_cf_chl_opt",
+                     "body_cf_challenge_platform", "body_cf_challenges_host"):
+            self.assertIn(rule, markers)
+
+    def test_jsd_alone_does_not_decide(self):
+        body = '<html><title>Shop</title><p>Real</p><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+        verdict, markers = self.detect(200, {}, body)
+        self.assertEqual(verdict, "none")
+        self.assertNotIn("body_cf_challenge_platform", markers)
+
+    def test_turnstile_loader_alone_does_not_decide(self):
+        body = '<html><title>Shop</title><p>Real</p><script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>'
+        verdict, markers = self.detect(200, {}, body)
+        self.assertEqual(verdict, "none")
+        self.assertNotIn("body_cf_challenges_host", markers)
+
+    def test_jsd_and_loader_together_do_not_decide(self):
+        body = ('<html><title>Shop</title><p>Real</p>'
+                '<script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script>'
+                '<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>')
+        verdict, markers = self.detect(200, {}, body)
+        self.assertEqual(verdict, "none")
+        self.assertEqual(markers, ())
+
+    def test_non_jsd_challenge_platform_still_decides(self):
+        body = '<html><title>Shop</title><script src="/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1"></script>'
+        verdict, markers = self.detect(200, {}, body)
+        self.assertEqual(verdict, "none")
+        self.assertIn("body_cf_challenge_platform", markers)
+
+    def test_bare_challenges_host_still_decides(self):
+        body = '<html><p>challenges.cloudflare.com</p><p>cf_chl_opt</p></html>'
+        verdict, markers = self.detect(200, {}, body)
+        self.assertEqual(verdict, "suspected")
+        self.assertIn("body_cf_challenges_host", markers)
+        self.assertIn("body_cf_chl_opt", markers)
 
 
 class CharacterReferenceTests(unittest.TestCase):
@@ -956,7 +1042,7 @@ class CharacterReferenceTests(unittest.TestCase):
         self.assertEqual(self.probe.html_to_text(body), "\ufffdX\ufffd")
 
     def test_widget_after_multiple_oversized_references_is_recognized(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         widget = '<div data-sitekey="k"></div>'
         references = "&#" + "9" * 5000 + ";X&#" + "9" * 5000 + ";"
         for fragment in (references, '<div title="' + references + '"></div>'):
@@ -967,7 +1053,7 @@ class CharacterReferenceTests(unittest.TestCase):
                 ))
 
     def test_widget_after_oversized_reference_is_recognized(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         widget = '<div data-sitekey="k"></div>'
         expected = ("captcha", ("body_cf_challenge_platform", "body_captcha_interactive"))
         for suffix in (";", ""):
@@ -1026,7 +1112,7 @@ class CharacterReferenceTests(unittest.TestCase):
                                  "L" + expected + "R")
 
     def test_zero_padded_references_preserve_their_value(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         widget = '<div data-sitekey="k"></div>'
         for suffix in (";", ""):
             for digits, expected in (("0" * 5000 + "65", "A"), ("0" * 5000, "\ufffd")):
@@ -1047,7 +1133,7 @@ class SelfClosingWidgetTests(unittest.TestCase):
         cls.probe = load_probe()
 
     def test_self_closing_template_keeps_widgets_inert(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         widget = '<div data-sitekey="k"></div>'
         for template in (
             '<template/>' + widget + '</template>',
@@ -1060,7 +1146,7 @@ class SelfClosingWidgetTests(unittest.TestCase):
                 ))
 
     def test_self_closing_widget_is_recognized_after_template(self):
-        cf = '<script src=/cdn-cgi/challenge-platform/scripts/jsd/main.js></script>'
+        cf = '<script src=/cdn-cgi/challenge-platform/h/g/orchestrate/chl_page/v1></script>'
         for prefix in ("", "<template/></template>"):
             with self.subTest(prefix=prefix):
                 body = cf + prefix + '<div data-sitekey="k"/>'
