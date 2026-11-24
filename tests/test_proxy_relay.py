@@ -650,21 +650,27 @@ class RelayHttpUpstreamTests(RelayCase):
         self.assertEqual(got, PLAIN_OK)
         self.assertEqual(len(up.log), 1)
 
-    def test_request_head_over_64kib_is_400_and_under_it_passes(self):
-        up, proxy = self.upstream(http_upstream)
-        relay, port = self.start_relay(proxy)
-        for padding, expected in ((b"x" * HEAD_LIMIT, BAD_REQUEST), (b"x" * 1024, PLAIN_OK[:12])):
-            with self.subTest(padding=len(padding)):
-                request = (b"GET http://b.example/" + padding
-                           + b" HTTP/1.1\r\nHost: b.example\r\n\r\n")
-                with socket.create_connection(("127.0.0.1", port), 5) as conn:
-                    conn.settimeout(5)
-                    try:
-                        conn.sendall(request)
-                    except OSError:
-                        pass  # релей отвечает и закрывает соединение, не дочитав вход
-                    self.assertEqual(read_eof(conn)[:12], expected)
-        self.assertEqual(len(up.log), 1)
+    def test_request_head_limit_is_chunking_independent(self):
+        """Заголовок ровно в лимит проходит, на байт длиннее — 400, при любом разбиении."""
+        prefix = b"GET http://b.example/"
+        suffix = b" HTTP/1.1\r\nHost: b.example"
+        for head_len, expected in ((HEAD_LIMIT, PLAIN_OK), (HEAD_LIMIT + 1, BAD_REQUEST)):
+            request = prefix + b"x" * (head_len - len(prefix) - len(suffix)) + suffix + b"\r\n\r\n"
+            self.assertEqual(len(request) - 4, head_len)
+            for chunk in (1024, 4 * HEAD_LIMIT):
+                with self.subTest(over=head_len - HEAD_LIMIT, chunk=chunk):
+                    up, proxy = self.upstream(http_upstream)
+                    # Размер чтения релея задан явно: порции детерминированы.
+                    with patch.object(self.probe, "_RELAY_CHUNK", chunk):
+                        relay, port = self.start_relay(proxy)
+                        with socket.create_connection(("127.0.0.1", port), 5) as conn:
+                            conn.settimeout(5)
+                            try:
+                                conn.sendall(request)
+                            except OSError:
+                                pass  # релей отвечает, не дочитав вход сверх лимита
+                            self.assertEqual(read_eof(conn)[:12], expected[:12])
+                    self.assertEqual(len(up.log), 1 if expected is PLAIN_OK else 0)
 
     def test_unparseable_connect_response_is_502_with_reason(self):
         """Ответ прокси без строки статуса — сбой прокси, а не отказ цели."""

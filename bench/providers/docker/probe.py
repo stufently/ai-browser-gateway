@@ -991,7 +991,8 @@ def _relay_read_head(sock: socket.socket) -> tuple[str, bytes]:
     buffer = b""
     try:
         while b"\r\n\r\n" not in buffer:
-            if len(buffer) >= _RELAY_HEAD_LIMIT:
+            # +4 — длина разделителя: граница не зависит от разбиения на порции.
+            if len(buffer) >= _RELAY_HEAD_LIMIT + 4:
                 return "", b""
             chunk = sock.recv(_RELAY_CHUNK)
             if not chunk:
