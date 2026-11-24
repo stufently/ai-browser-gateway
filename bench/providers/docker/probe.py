@@ -1014,7 +1014,10 @@ def _relay_read_block(sock: socket.socket, buffer: bytes = b"",
     """
     try:
         while b"\r\n\r\n" not in buffer:
-            if len(buffer) >= limit:
+            # +4 — длина самого разделителя: блок ровно в limit байт обязан
+            # пройти при любом разбиении на порции, а решение принимает только
+            # проверка длины блока ниже.
+            if len(buffer) >= limit + 4:
                 return None
             chunk = sock.recv(_RELAY_CHUNK)
             if not chunk:
@@ -1191,9 +1194,12 @@ class _ProxyRelay:
             self._fatal_reason(UPSTREAM_TLS_FAILED)
             return None
         with self._lock:
+            # Передача надзора атомарна, и наблюдателя закрывает тот же владелец,
+            # который снял его под блокировкой: в снимке close() не оказывается
+            # сокет, который здесь же закрывают.
             self._sockets.discard(watcher)
             self._sockets.add(wrapped)
-        _relay_close(watcher)
+            _relay_close(watcher)
         try:
             wrapped.do_handshake()
         except (OSError, ValueError):
@@ -1221,12 +1227,17 @@ class _ProxyRelay:
                 return None
             head, pending = block
             status = _relay_status(head.decode("latin-1"))
+            if status is None:
+                # Блок прочитан, но строки статуса HTTP в нём нет: прокси не
+                # ответил по протоколу, это его сбой, а не отказ цели.
+                self._fatal_reason(UPSTREAM_UNREACHABLE)
+                return None
             if status == 200:
                 return pending  # прелюдия — байты после финального блока
             if status == 407:
                 self._fatal_reason(UPSTREAM_REJECTED_HTTP)
                 return None
-            if status is not None and 100 <= status < 200:
+            if 100 <= status < 200:
                 continue  # промежуточный 1xx ответом на CONNECT не является
             # Прочие статусы — отказ цели, а не прокси: fatal остаётся нетронутым.
             return None
@@ -1384,12 +1395,18 @@ class _ProxyRelay:
                     break
                 response_head, pending = block
                 status = _relay_status(response_head.decode("latin-1"))
+                if status is None:
+                    # Блок есть, но строки статуса HTTP в нём нет: прокси не
+                    # ответил по протоколу, клиенту мусор отдавать нельзя.
+                    self._fatal_reason(UPSTREAM_UNREACHABLE)
+                    _relay_send(client, _RELAY_BAD_GATEWAY)
+                    break
                 if status == 407:
                     # Ответ прокси клиенту не достаётся: ни 407, ни его текст.
                     self._fatal_reason(UPSTREAM_REJECTED_HTTP)
                     _relay_send(client, _RELAY_BAD_GATEWAY)
                     break
-                if status is not None and 100 <= status < 200:
+                if 100 <= status < 200:
                     # Промежуточный 1xx уходит как есть, финальный статус впереди.
                     _relay_send(client, response_head)
                     continue

@@ -46,6 +46,11 @@ INTERIM_100 = b"HTTP/1.1 100 Continue\r\n\r\n"
 INTERIM_103 = b"HTTP/1.1 103 Early Hints\r\nLink: </style.css>; rel=preload\r\n\r\n"
 PLAIN_REQUEST = b"GET http://b.example/x HTTP/1.1\r\nHost: b.example\r\n\r\n"
 PLAIN_OK = b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi"
+# Границы заданы литералами, а не ссылкой на константу пробы: иначе удвоение
+# лимита молча масштабировало бы и тесты. Значение констант зафиксировано
+# отдельным тестом ModuleShapeTests.
+HEAD_LIMIT = 64 * 1024
+RESPONSE_LIMIT = 256 * 1024
 REJECTED_HTTP = "upstream proxy rejected credentials (HTTP 407)"
 REJECTED_SOCKS = "upstream proxy rejected credentials (SOCKS5)"
 UNREACHABLE = "upstream proxy unreachable"
@@ -176,9 +181,32 @@ def reset_upstream():
     return Upstream(handler)
 
 
-def oversized_head(limit):
-    """Блок заголовков ответа длиннее лимита: разделитель стоит за пределом."""
-    return b"HTTP/1.1 503 Server Error\r\nX-Pad: " + b"a" * limit + b"\r\n\r\n"
+class CannedUpstream:
+    """Подмена сокета внешнего прокси: recv отдаёт заранее нарезанные порции.
+
+    Нужна там, где исход иначе зависел бы от склейки сегментов TCP: порядок и
+    состав порций заданы тестом, а не ядром.
+    """
+
+    def __init__(self, chunks):
+        self.chunks = list(chunks)
+        self.sent = b""
+        self.closed = False
+
+    def sendall(self, data):
+        self.sent += data
+
+    def recv(self, size):
+        return self.chunks.pop(0) if self.chunks else b""
+
+    def settimeout(self, value):
+        pass
+
+    def shutdown(self, how):
+        pass
+
+    def close(self):
+        self.closed = True
 
 
 def make_certificates(directory, san="IP:127.0.0.1", cn="127.0.0.1", leaf="leaf"):
@@ -501,32 +529,6 @@ class RelayHttpUpstreamTests(RelayCase):
         self.assertNotIn(b"Proxy-Authenticate", got)
         self.assertEqual(relay.fatal, REJECTED_HTTP)
 
-    def test_oversized_response_block_refused_whatever_the_chunking(self):
-        """Лимит блока не должен зависеть от того, какими порциями он пришёл."""
-        limit = self.probe._RELAY_RESPONSE_LIMIT
-        head = oversized_head(limit)
-        self.assertGreater(len(head) - 4, limit)
-        for mode in ("one-shot", "split"):
-            with self.subTest(mode=mode):
-                def handler(conn, log, mode=mode, head=head):
-                    read_head_rest(conn)
-                    log.append(mode)
-                    if mode == "one-shot":
-                        conn.sendall(head + b"tail")
-                    else:
-                        # Первая порция короче лимита: предварительная проверка
-                        # предела не срабатывает, решает только длина блока.
-                        conn.sendall(head[:limit - 10])
-                        time.sleep(0.05)
-                        conn.sendall(head[limit - 10:] + b"tail")
-
-                up = Upstream(handler)
-                self.addCleanup(up.close)
-                relay, port = self.start_relay(self.proxy_url(port=up.port))
-                got = self.talk_eof(port, PLAIN_REQUEST)
-                self.assertEqual(got, GATEWAY_RESPONSE)
-                self.assertEqual(relay.fatal, UNREACHABLE)
-
     def test_proxy_prelude_after_connect_reaches_client_first(self):
         """Байты, пришедшие вместе с 200 на CONNECT, клиент получает первыми."""
         for interim in (None, INTERIM_100):
@@ -545,12 +547,11 @@ class RelayHttpUpstreamTests(RelayCase):
 
     def test_response_block_over_limit_is_refused_promptly(self):
         """Граница лимита — сам лимит: без разделителя релей не читает вдвое больше."""
-        limit = self.probe._RELAY_RESPONSE_LIMIT
         held = threading.Event()
 
         def overflow(conn, log):
             read_head_rest(conn)
-            conn.sendall(b"X" * (limit + 100))  # блок без разделителя и без конца
+            conn.sendall(b"X" * (RESPONSE_LIMIT + 100))  # блок без разделителя и без конца
             log.append("sent")
             held.wait(30)
 
@@ -565,21 +566,31 @@ class RelayHttpUpstreamTests(RelayCase):
         self.assertEqual(relay.fatal, UNREACHABLE)
         self.assertEqual(up.log, ["sent"])
 
-    def test_response_block_just_under_limit_passes(self):
-        limit = self.probe._RELAY_RESPONSE_LIMIT
-        head = b"HTTP/1.1 503 Server Error\r\nX-Pad: " + b"a" * (limit - 100) + b"\r\n\r\n"
-        self.assertLessEqual(len(head) - 4, limit)
+    def test_response_block_limit_is_chunking_independent(self):
+        """Блок ровно в лимит проходит, на байт длиннее — нет, при любом разбиении."""
+        prefix = b"HTTP/1.1 503 Server Error\r\nX-Pad: "
+        for head_len, accepted in ((RESPONSE_LIMIT, True), (RESPONSE_LIMIT + 1, False)):
+            head = prefix + b"a" * (head_len - len(prefix)) + b"\r\n\r\n"
+            self.assertEqual(len(head) - 4, head_len)
+            for chunk in (1024, 4 * RESPONSE_LIMIT):
+                with self.subTest(over=head_len - RESPONSE_LIMIT, chunk=chunk):
+                    def handler(conn, log, head=head):
+                        read_head_rest(conn)
+                        conn.sendall(head + b"tail")
 
-        def handler(conn, log):
-            read_head_rest(conn)
-            conn.sendall(head + b"tail")
-
-        up = Upstream(handler)
-        self.addCleanup(up.close)
-        relay, port = self.start_relay(self.proxy_url(port=up.port))
-        got = self.talk_eof(port, PLAIN_REQUEST)
-        self.assertEqual(got, head + b"tail")
-        self.assertIsNone(relay.fatal)
+                    up = Upstream(handler)
+                    self.addCleanup(up.close)
+                    # Размер чтения релея задан явно: порции детерминированы и
+                    # не зависят от того, как TCP склеил отправленное прокси.
+                    with patch.object(self.probe, "_RELAY_CHUNK", chunk):
+                        relay, port = self.start_relay(self.proxy_url(port=up.port))
+                        got = self.talk_eof(port, PLAIN_REQUEST)
+                    if accepted:
+                        self.assertEqual(got, head + b"tail")
+                        self.assertIsNone(relay.fatal)
+                    else:
+                        self.assertEqual(got, GATEWAY_RESPONSE)
+                        self.assertEqual(relay.fatal, UNREACHABLE)
 
     def test_silent_upstream_is_502_with_reason(self):
         """Прокси принял TCP и закрыл соединение: клиенту 502, а не голый обрыв."""
@@ -642,7 +653,7 @@ class RelayHttpUpstreamTests(RelayCase):
     def test_request_head_over_64kib_is_400_and_under_it_passes(self):
         up, proxy = self.upstream(http_upstream)
         relay, port = self.start_relay(proxy)
-        for padding, expected in ((b"x" * (64 * 1024), BAD_REQUEST), (b"x" * 1024, PLAIN_OK[:12])):
+        for padding, expected in ((b"x" * HEAD_LIMIT, BAD_REQUEST), (b"x" * 1024, PLAIN_OK[:12])):
             with self.subTest(padding=len(padding)):
                 request = (b"GET http://b.example/" + padding
                            + b" HTTP/1.1\r\nHost: b.example\r\n\r\n")
@@ -654,6 +665,51 @@ class RelayHttpUpstreamTests(RelayCase):
                         pass  # релей отвечает и закрывает соединение, не дочитав вход
                     self.assertEqual(read_eof(conn)[:12], expected)
         self.assertEqual(len(up.log), 1)
+
+    def test_unparseable_connect_response_is_502_with_reason(self):
+        """Ответ прокси без строки статуса — сбой прокси, а не отказ цели."""
+        def handler(conn, log):
+            read_head_rest(conn)
+            log.append("garbage")
+            conn.sendall(b"NOT-HTTP AT ALL\r\n\r\n")
+
+        up = Upstream(handler)
+        self.addCleanup(up.close)
+        relay, port = self.start_relay(self.proxy_url(port=up.port))
+        self.assertEqual(self.talk_eof(port, CONNECT), GATEWAY_RESPONSE)
+        self.assertEqual(relay.fatal, UNREACHABLE)
+        self.assertEqual(up.log, ["garbage"])
+
+    def test_unparseable_plain_response_is_502_and_not_forwarded(self):
+        def handler(conn, log):
+            read_head_rest(conn)
+            log.append("garbage")
+            conn.sendall(b"NOT-HTTP AT ALL\r\n\r\nsecret-body")
+
+        up = Upstream(handler)
+        self.addCleanup(up.close)
+        relay, port = self.start_relay(self.proxy_url(port=up.port))
+        got = self.talk_eof(port, PLAIN_REQUEST)
+        self.assertEqual(got, GATEWAY_RESPONSE)
+        self.assertNotIn(b"NOT-HTTP", got)
+        self.assertNotIn(b"secret-body", got)
+        self.assertEqual(relay.fatal, UNREACHABLE)
+
+    def test_connect_prelude_read_with_the_head_is_not_dropped(self):
+        """Прелюдия после 200 на CONNECT обязана уйти первой: recv детерминирован."""
+        for chunks in ([ESTABLISHED + b"EARLY"],
+                       [INTERIM_100 + ESTABLISHED + b"EARLY"],
+                       [INTERIM_100, ESTABLISHED + b"EARLY"]):
+            with self.subTest(chunks=len(chunks)):
+                relay = self.probe._ProxyRelay(self.proxy_url(port=dead_port()))
+                port = int(RELAY_SERVER.match(relay.start()).group(1))
+                self.addCleanup(relay.close)
+                canned = CannedUpstream(chunks)
+                with patch.object(relay, "_open_upstream", return_value=canned):
+                    got = self.talk_eof(port, CONNECT + b"ping")
+                self.assertEqual(got, ESTABLISHED + b"EARLY")
+                self.assertEqual(canned.sent.split(b"\r\n\r\n", 1)[1], b"ping")
+                self.assertIsNone(relay.fatal)
 
 
 class RelaySocksUpstreamTests(RelayCase):
@@ -903,20 +959,21 @@ class RelayCloseTests(RelayCase):
                 client.sendall(CONNECT)
                 upstream, _ = listener.accept()
                 read_eof(client)
+                # Прокси молчит и держит соединение до конца проверок: разбудить
+                # рукопожатие способен только shutdown дубликата из close().
+                self.assertEqual(watched, [True])
+                deadline = time.monotonic() + 10
+                while (any(t.name == "proxy-relay-connection" for t in threading.enumerate())
+                       and time.monotonic() < deadline):
+                    time.sleep(0.05)
+                self.assertEqual([t.name for t in threading.enumerate()
+                                  if t.name == "proxy-relay-connection"], [],
+                                 "поток соединения не завершился: рукопожатие не разбужено")
+                self.assertEqual(relay.fatal, TLS_FAILED)
         finally:
             for sock in (client, upstream):
                 if sock is not None:
                     sock.close()
-        self.assertEqual(watched, [True])
-        # Без надзора рукопожатие висело бы весь таймаут сокета (30 с).
-        deadline = time.monotonic() + 10
-        while (any(t.name == "proxy-relay-connection" for t in threading.enumerate())
-               and time.monotonic() < deadline):
-            time.sleep(0.05)
-        self.assertEqual([t.name for t in threading.enumerate()
-                          if t.name == "proxy-relay-connection"], [],
-                         "поток соединения не завершился: рукопожатие не разбужено")
-        self.assertEqual(relay.fatal, TLS_FAILED)
 
 
 class BrowserWiringTests(RelayCase):
@@ -1249,6 +1306,32 @@ class RelayTlsUpstreamTests(RelayCase):
         self.assertEqual(relay.fatal, TLS_FAILED)
         self.assertEqual(up.log, [])
 
+    def test_supervision_handover_drops_the_duplicate(self):
+        """После рукопожатия в реестре только обёртка: закрытый дубликат не остаётся."""
+        held = threading.Event()
+        self.addCleanup(held.set)
+
+        def handler(conn, log):
+            log.append(read_head_rest(conn)[0])
+            conn.sendall(ESTABLISHED)
+            held.wait(30)  # туннель жив, пока тест смотрит реестр сокетов
+
+        up, relay, port = self.tls_proxy(handler)
+        with socket.create_connection(("127.0.0.1", port), 5) as client:
+            client.settimeout(5)
+            client.sendall(CONNECT)
+            self.assertEqual(recv_exact(client, len(ESTABLISHED)), ESTABLISHED)
+            with relay._lock:
+                tracked = list(relay._sockets)
+            self.assertEqual([item for item in tracked if item.fileno() == -1], [],
+                             "в реестре остался закрытый сокет (дубликат-наблюдатель)")
+            self.assertEqual(len([item for item in tracked
+                                  if isinstance(item, ssl.SSLSocket)]), 1)
+            # слушатель + соединение клиента + обёртка прокси, и ничего лишнего
+            self.assertEqual(len(tracked), 3)
+            self.assertIn(BASIC_LINE, up.log[0].split("\r\n"))
+            self.assertIsNone(relay.fatal)
+
 
 class ModuleShapeTests(RelayCase):
     """Защита от молчаливого снятия класса с прогона (находка ревью M27)."""
@@ -1271,6 +1354,13 @@ class ModuleShapeTests(RelayCase):
                 self.assertEqual(collected, len(own_tests), f"{name}: собрано {collected}")
         self.assertIn("RunProbeRelayReasonTests", classes)
         self.assertGreater(len(classes), 5)
+
+    def test_relay_limits_match_the_literals_used_in_tests(self):
+        """Границы в тестах — литералы, поэтому значение констант закреплено здесь:
+        удвоение лимита роняет этот тест, а не молча масштабирует остальные."""
+        self.assertEqual(self.probe._RELAY_HEAD_LIMIT, HEAD_LIMIT)
+        self.assertEqual(self.probe._RELAY_RESPONSE_LIMIT, RESPONSE_LIMIT)
+        self.assertEqual(self.probe._RELAY_BIND_HOST, "127.0.0.1")
 
 
 if __name__ == "__main__":
