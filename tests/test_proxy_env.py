@@ -69,6 +69,15 @@ class ProxyEnvironmentTests(unittest.TestCase):
         with patch.dict(os.environ, {"ABG_PROXY": ""}):
             self.run_main(run_probe)
 
+    def test_main_captures_missing_proxy_as_unconfigured(self):
+        def run_probe(*args, **kwargs):
+            os.environ["ABG_PROXY"] = PROXY
+            self.assertEqual(self.probe._proxy_url(), "")
+            return {}
+
+        with patch.dict(os.environ, clear=True):
+            self.run_main(run_probe)
+
     def test_urlopen_uses_the_same_proxy_before_and_after_main(self):
         def run_probe(*args, **kwargs):
             os.environ["ABG_PROXY"] = "http://other.invalid:8080"
@@ -114,6 +123,18 @@ class ProxyEnvironmentTests(unittest.TestCase):
             run.call_args.kwargs["env"],
             {"No_Proxy": "other.invalid", "PATH": "/bin"},
         )
+
+    def test_curl_escapes_line_breaks_in_proxy_config(self):
+        proxy = "http://user1:part1\rpart2\npart3@proxy.invalid:8080"
+        with patch.dict(os.environ, {"ABG_PROXY": proxy}), patch.object(
+            self.probe.subprocess, "run", return_value=CURL_RESPONSE
+        ) as run:
+            self.probe.CurlAdapter().navigate(TARGET)
+
+        config = run.call_args.kwargs.get("input")
+        expected = br'proxy = "http://user1:part1\rpart2\npart3@proxy.invalid:8080"' + b"\n"
+        self.assertEqual(config, expected)
+        self.assertEqual(config.count(b"\n"), 1)
 
     def test_curl_without_proxy_keeps_bypass_without_stdin_config(self):
         env = {"ABG_PROXY": "", "https_proxy": PROXY, "NO_PROXY": "target.invalid"}
