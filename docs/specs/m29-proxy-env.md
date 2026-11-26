@@ -4,7 +4,7 @@
 
 Репозиторий ai-browser-gateway, 26.11.2026.
 
-BASE_SHA: (вписывается следующим коммитом после коммита спеки и стенда)
+BASE_SHA: 9f0cd322939d96c54c63429b9be1e4058dbaddc3 (коммит спеки и стенда; следующий коммит только вписывает эту строку и BASE в AC-007)
 
 Клон делается от вершины `main` не раньше BASE_SHA; в базе есть выпуск
 0.1.8 (M27 — локальный релей прокси, M28 — проверка образов провайдеров),
@@ -165,7 +165,7 @@ stdin (`curl --config -`, строка `proxy = "<url>"`), как докумен
 - **AC-006.** Стенд M26 без изменений: curl_cffi через прокси с паролем, SOCKS без кредов, совместимость с ABG_EGRESS_PROXY:
   `bash -c 'for s in http socks compat; do test "$(bash docs/specs/checks/m26_stand.sh $s)" = ok || exit 1; done'`
 - **AC-007.** Изменения только в разрешённых путях, есть новый тест, дерево чистое:
-  `bash -c 'git merge-base --is-ancestor BASE_FULL HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)tests/test_probe.py" ":(exclude)tests/test_proxy_env.py" && test -n "$(git diff --name-only "$b" HEAD -- bench/providers/docker/probe.py)" && test -n "$(git diff --name-only "$b" HEAD -- tests/test_proxy_env.py)" && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
+  `bash -c 'git merge-base --is-ancestor 9f0cd322939d96c54c63429b9be1e4058dbaddc3 HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD -- . ":(exclude)bench/providers/docker/probe.py" ":(exclude)tests/test_probe.py" ":(exclude)tests/test_proxy_env.py" && test -n "$(git diff --name-only "$b" HEAD -- bench/providers/docker/probe.py)" && test -n "$(git diff --name-only "$b" HEAD -- tests/test_proxy_env.py)" && test -z "$(git status --porcelain -- . ":(exclude)report.json" ":(exclude)report-blocked.md")"'`
 
 Стенд `m29_stand.sh` (смотри сам файл): прокси gost с паролем в
 изолированных сетях, проба напрямую (`xvfb-run python3 probe.py`) с кодом
@@ -182,7 +182,7 @@ stdin (`curl --config -`, строка `proxy = "<url>"`), как докумен
 ## Порядок работы
 
 До первой правки — первая половина AC-007 на свежем клоне:
-`git merge-base --is-ancestor BASE_FULL HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD`
+`git merge-base --is-ancestor 9f0cd322939d96c54c63429b9be1e4058dbaddc3 HEAD && b=$(git merge-base HEAD origin/main) && git diff --quiet "$b" HEAD`
 (rc 0 обязателен, иначе blocker) и AC-003 (на BASE обязан печатать
 `FAIL: пароль прокси в окружении процессов браузера: …`; другой FAIL —
 blocker с выводом). Затем пункты 1–3, тесты п. 4 (каждый новый — красный
