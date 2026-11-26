@@ -135,16 +135,21 @@ def html_to_text(body: str) -> str:
     return parser.text()
 
 
+_captured_proxy: str | None = None
+
+
 def urlopen(url, timeout=120):
     timeout = _bound_timeout_s(timeout)
-    proxy = os.environ.get("ABG_PROXY") or ""
+    proxy = _proxy_url()
     if proxy:
         return build_opener(ProxyHandler({"http": proxy, "https": proxy})).open(url, timeout=timeout)
     return _stdlib_urlopen(url, timeout=timeout)
 
 
 def _proxy_url() -> str:
-    return os.environ.get("ABG_PROXY") or ""
+    if _captured_proxy is None:
+        return os.environ.get("ABG_PROXY", "")
+    return _captured_proxy
 
 
 # A solved challenge travels as the browser's cookies and User-Agent: curl_cffi
@@ -244,7 +249,7 @@ def redact(text: str) -> str:
     иначе пароль вроде «%2F» испортил бы «://» и регулярка пропустила бы URL.
     """
     try:
-        parts = urlparse(os.environ.get("ABG_PROXY", ""))
+        parts = urlparse(_proxy_url())
         password = parts.password
         userinfo = parts.netloc.rpartition("@")[0]
     except ValueError:
@@ -782,13 +787,17 @@ class RssAdapter:
         pass
 
 
+def _curl_env() -> dict[str, str]:
+    return {key: value for key, value in os.environ.items() if not key.lower().endswith("_proxy")}
+
+
 class CurlAdapter:
     version = "unknown"
 
     def start(self) -> None:
         completed = subprocess.run(
             ["curl", "--version"], text=True, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, check=False,
+            stderr=subprocess.DEVNULL, check=False, env=_curl_env(),
         )
         if completed.stdout:
             self.version = completed.stdout.split()[1]
@@ -802,13 +811,14 @@ class CurlAdapter:
         ]
         if _DEADLINE is not None and _DEADLINE.end is not None:
             command.extend(["--max-time", str(_DEADLINE.remaining_s())])
-        command.append(url)
-        run_kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+        run_kwargs = dict(stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False, env=_curl_env())
         proxy = _proxy_url()
         if proxy:
-            env = os.environ.copy()
-            env["ALL_PROXY"] = proxy
-            run_kwargs["env"] = env
+            escaped = proxy.replace("\\", "\\\\").replace('"', '\\"')
+            escaped = escaped.replace("\r", "\\r").replace("\n", "\\n")
+            command.extend(["--config", "-"])
+            run_kwargs["input"] = f'proxy = "{escaped}"\n'.encode()
+        command.append(url)
         completed = subprocess.run(command, **run_kwargs)
         raw_body, separator, raw_meta = completed.stdout.rpartition(marker.encode())
         if completed.returncode or not separator:
@@ -2243,6 +2253,8 @@ def _positive_budget(value: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    global _captured_proxy
+    _captured_proxy = os.environ.pop("ABG_PROXY", "")
     parser = argparse.ArgumentParser()
     parser.add_argument("url")
     parser.add_argument("sentinel", nargs="?")
