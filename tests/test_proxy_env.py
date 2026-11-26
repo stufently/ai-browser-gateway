@@ -91,7 +91,8 @@ class ProxyEnvironmentTests(unittest.TestCase):
         proxy = f"http://user1:{password}@proxy.invalid:8080"
         env = {
             "ABG_PROXY": proxy, "ALL_PROXY": proxy, "https_proxy": proxy, "Http_Proxy": proxy,
-            "fTp_PrOxY": proxy, "Abg_Egress_Proxy": proxy, "No_Proxy": "other.invalid",
+            "fTp_PrOxY": proxy, "ftps_proxy": proxy, "ws_proxy": proxy,
+            "Abg_Egress_Proxy": proxy, "No_Proxy": "other.invalid",
             "FEATURE_PROXY": "enabled", "PATH": "/bin",
         }
         with patch.dict(os.environ, env, clear=True), patch.object(
@@ -111,7 +112,7 @@ class ProxyEnvironmentTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["input"], expected)
         self.assertEqual(
             run.call_args.kwargs["env"],
-            {"No_Proxy": "other.invalid", "FEATURE_PROXY": "enabled", "PATH": "/bin"},
+            {"No_Proxy": "other.invalid", "PATH": "/bin"},
         )
 
     def test_curl_without_proxy_keeps_bypass_without_stdin_config(self):

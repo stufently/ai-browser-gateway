@@ -788,8 +788,12 @@ class RssAdapter:
 
 
 def _curl_env() -> dict[str, str]:
-    proxy_variables = {"ABG_PROXY", "ABG_EGRESS_PROXY", "ALL_PROXY", "HTTPS_PROXY", "HTTP_PROXY", "FTP_PROXY"}
-    return {key: value for key, value in os.environ.items() if key.upper() not in proxy_variables}
+    env = {}
+    for key, value in os.environ.items():
+        name = key.upper()
+        if name == "NO_PROXY" or not name.endswith("_PROXY"):
+            env[key] = value
+    return env
 
 
 class CurlAdapter:
