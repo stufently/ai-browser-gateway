@@ -302,8 +302,7 @@ class AdapterContractTests(unittest.TestCase):
                 command = run.call_args.args[0]
             self.assertNotIn("--proxy", command)
             self.assertFalse(any("pass@" in part for part in command))
-            env = run.call_args.kwargs.get("env") or {}
-            self.assertEqual(env.get("ALL_PROXY"), proxy)
+            self.assertNotIn("ALL_PROXY", run.call_args.kwargs["env"])
 
             captured = {}
 
