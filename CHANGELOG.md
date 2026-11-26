@@ -1,6 +1,21 @@
 # CHANGELOG
 
-## 2026-11-26 (не выпущено)
+## 2026-11-26 (0.1.9)
+
+### Выпуск
+
+- Образ `ghcr.io/stufently/ai-browser-gateway-oneshot` — теги `0.1.9`,
+  `sha-cc1adbc`, `latest` (`sha256:1b371cfb…`). На него переведены
+  check-sites (джоба `verify_challenged`, до этого 0.1.8) и `abg-fetch` в
+  ансибле. Скил выложен для обоих пользователей рабочего хоста, смоук
+  `fetch.sh … meta` на lowendtalk у обоих — rc 0. Стенды `m29_stand.sh`
+  (patchright, scrapling) и `m27_stand.sh` (relay, socks, auth, tls) прошли
+  на самом образе, без монтирования кода ветки. Серия перед выпуском —
+  копия `fetch.sh` с локальным тегом, без кэша сессий, по 6 прогонов:
+  gitlab sign-in, scrapingcourse, steamdb — 6/6 за 9–11 с (один прогон
+  steamdb 31 с), lowendtalk — 6/6 за 1–2 с; nowsecure — 0/6: сайт отдаёт
+  522 от своего сервера (curl_cffi — таймаут, patchright — 522,
+  `retry_later`), на 0.1.8 то же самое, это не регресс.
 
 ### Изменено
 
