@@ -91,7 +91,8 @@ class ProxyEnvironmentTests(unittest.TestCase):
         proxy = f"http://user1:{password}@proxy.invalid:8080"
         env = {
             "ABG_PROXY": proxy, "ALL_PROXY": proxy, "https_proxy": proxy, "Http_Proxy": proxy,
-            "No_Proxy": "target.invalid", "PATH": "/bin",
+            "fTp_PrOxY": proxy, "Abg_Egress_Proxy": proxy, "No_Proxy": "other.invalid",
+            "FEATURE_PROXY": "enabled", "PATH": "/bin",
         }
         with patch.dict(os.environ, env, clear=True), patch.object(
             self.probe.subprocess, "run", return_value=CURL_RESPONSE
@@ -108,22 +109,28 @@ class ProxyEnvironmentTests(unittest.TestCase):
             self.assertNotIn(password, arg)
         expected = br'proxy = "http://user1:s3\"cr\\t@proxy.invalid:8080"' + b"\n"
         self.assertEqual(run.call_args.kwargs["input"], expected)
-        self.assertEqual(run.call_args.kwargs["env"], {"PATH": "/bin"})
+        self.assertEqual(
+            run.call_args.kwargs["env"],
+            {"No_Proxy": "other.invalid", "FEATURE_PROXY": "enabled", "PATH": "/bin"},
+        )
 
-    def test_curl_without_proxy_has_no_stdin_config_or_proxy_variables(self):
-        with patch.dict(os.environ, {"ABG_PROXY": "", "https_proxy": PROXY}, clear=True), patch.object(
+    def test_curl_without_proxy_keeps_bypass_without_stdin_config(self):
+        env = {"ABG_PROXY": "", "https_proxy": PROXY, "NO_PROXY": "target.invalid"}
+        with patch.dict(os.environ, env, clear=True), patch.object(
             self.probe.subprocess, "run", return_value=CURL_RESPONSE
         ) as run:
             self.probe.CurlAdapter().navigate(TARGET)
             self.assertNotIn("--config", run.call_args.args[0])
             self.assertNotIn("input", run.call_args.kwargs)
-            self.assertEqual(run.call_args.kwargs.get("env", os.environ), {})
+            self.assertEqual(run.call_args.kwargs.get("env", os.environ), {"NO_PROXY": "target.invalid"})
 
-    def test_curl_version_child_also_has_no_proxy_variables(self):
-        env = {"ABG_PROXY": PROXY, "hTtPs_PrOxY": PROXY, "PATH": "/bin"}
+    def test_curl_version_child_keeps_bypass_and_filters_proxy_environment(self):
+        env = {"ABG_PROXY": PROXY, "hTtPs_PrOxY": PROXY, "no_proxy": "target.invalid", "PATH": "/bin"}
         completed = subprocess.CompletedProcess([], 0, stdout="curl 7.88.1\n")
         with patch.dict(os.environ, env, clear=True), patch.object(
             self.probe.subprocess, "run", return_value=completed
         ) as run:
             self.probe.CurlAdapter().start()
-            self.assertEqual(run.call_args.kwargs.get("env", os.environ), {"PATH": "/bin"})
+            self.assertEqual(
+                run.call_args.kwargs.get("env", os.environ), {"no_proxy": "target.invalid", "PATH": "/bin"}
+            )
